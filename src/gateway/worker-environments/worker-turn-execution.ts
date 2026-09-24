@@ -32,7 +32,10 @@ import {
 } from "./admission.js";
 import { sameWorkerSessionTurnClaim } from "./placement-record.js";
 import { prepareWorkerDesktopLaunchPlan } from "./worker-desktop-launch-plan.js";
-import { prepareWorkerGitHubBinding } from "./worker-github-binding.js";
+import {
+  prepareWorkerGitHubBindingGrant,
+  type WorkerGitHubBindingGrant,
+} from "./worker-github-binding.js";
 import { registerWorkerSkillAuthoring } from "./worker-skill-authoring.js";
 import { waitForTurnOperation } from "./worker-turn-admission.js";
 import {
@@ -90,13 +93,6 @@ export async function executeWorkerTurn(
     );
   }
   await recoverWorkspaceBeforeTurn(params);
-  const github = await prepareWorkerGitHubBinding({
-    sessionId: placement.sessionId,
-    sessionKey: placement.sessionKey,
-    agentId: placement.agentId,
-    assertCurrent: () => params.placements.validateTurnClaim(params.turnClaim),
-  });
-
   const startedAt = Date.now();
   await turn.onExecutionStarted?.({ lifecycleGeneration: turn.lifecycleGeneration });
   params.assertRunCurrent?.();
@@ -252,6 +248,7 @@ export async function executeWorkerTurn(
     }
   });
   let revokeSkillAuthoring: (() => void) | undefined;
+  let githubGrant: WorkerGitHubBindingGrant | undefined;
   try {
     const isAuthorized = () => {
       try {
@@ -268,6 +265,13 @@ export async function executeWorkerTurn(
         return false;
       }
     };
+    githubGrant = await prepareWorkerGitHubBindingGrant({
+      sessionId: placement.sessionId,
+      sessionKey: placement.sessionKey,
+      agentId: placement.agentId,
+      assertCurrent: isAuthorized,
+    });
+    const github = githubGrant?.binding;
     if (turn.skillLibraryAuthoring && toolAuthority.allowedToolNames.includes("skill_workshop")) {
       if (!bootstrapReceipt.protocolFeatures.includes(WORKER_SKILL_WORKSHOP_FEATURE)) {
         throw new StaleWorkerBuildError();
@@ -621,6 +625,7 @@ export async function executeWorkerTurn(
       workspaceConflictSummary: workspaceConflict?.summary,
     });
   } finally {
+    await githubGrant?.revoke();
     revokeSkillAuthoring?.();
     stopWatchingClaim();
     stopWatchingRun();
