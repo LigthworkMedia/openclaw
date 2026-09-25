@@ -12,6 +12,7 @@ import {
   streamSegmentUsesAccumulatedText,
   type ChatStreamSegment,
 } from "../../lib/chat/chat-types.ts";
+import { extractTextCached } from "../../lib/chat/message-extract.ts";
 import {
   streamCausalInterval,
   resolveCumulativeAssistantTail,
@@ -31,6 +32,38 @@ import {
 type AssistantMessageVisibility = (message: unknown) => boolean;
 type StreamVisibility = (stream: string) => boolean;
 
+function matchCommentaryOccurrence(source: string, text: string): RegExpExecArray | null {
+  const pattern = text.split(/\s+/u).map(escapeRegExp).join("\\s+");
+  const matcher = new RegExp(pattern, "gu");
+  for (const match of source.matchAll(matcher)) {
+    const before = source.slice(0, match.index);
+    const after = source.slice(match.index + match[0].length);
+    const startsItem = !before.trim() || /(?:\r?\n){2}[ \t]*$/u.test(before);
+    const endsItem = !after.trim() || /^(?:[ \t]*\r?\n){2}/u.test(after);
+    if (startsItem && endsItem) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function matchTrailingCommentaryOccurrence(source: string, text: string): RegExpExecArray | null {
+  const pattern = text.split(/\s+/u).map(escapeRegExp).join("\\s+");
+  const matcher = new RegExp(pattern, "gu");
+  for (const match of source.matchAll(matcher)) {
+    const before = source.slice(0, match.index);
+    const after = source.slice(match.index + match[0].length);
+    if ((!before.trim() || /(?:\r?\n){2}[ \t]*$/u.test(before)) && !after.trim()) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function commentaryProjection(text: string): string {
+  return stripInlineDirectiveTagsForDelivery(text).text.replace(/\s+/gu, " ").trim();
+}
+
 function pruneAccumulatedStreamSegments(
   segments: readonly ChatStreamSegment[],
   activeRunId: string | null | undefined,
@@ -45,15 +78,43 @@ function pruneAccumulatedStreamSegments(
     // A segment owned by a different run than the active one has no future
     // deltas to trim, so retaining it would leak sibling-run state.
     const foreignRun = Boolean(segment.runId && activeRunId && segment.runId !== activeRunId);
-    return !foreignRun && streamSegmentUsesAccumulatedText(segment)
-      ? [{ ...segment, persisted: true as const, ...(retiredItemId ? { retiredItemId } : {}) }]
-      : [];
+    if (foreignRun || !streamSegmentUsesAccumulatedText(segment)) {
+      return [];
+    }
+    if (retiredItemId && segment.cumulative && segment.itemStartOffset === undefined) {
+      return [segment];
+    }
+    const retained = {
+      ...segment,
+      persisted: true as const,
+      ...(retiredItemId ? { retiredItemId } : {}),
+    };
+    const itemPrefix =
+      retiredItemId && segment.itemStartOffset
+        ? segment.text.slice(0, segment.itemStartOffset)
+        : "";
+    const accumulatedBefore = accumulatedStreamText(segments.slice(0, index));
+    const preservesNewPrefix =
+      Boolean(itemPrefix) &&
+      advanceAccumulatedStreamText(accumulatedBefore, itemPrefix) !== accumulatedBefore;
+    return preservesNewPrefix
+      ? [
+          {
+            text: itemPrefix,
+            ts: segment.ts,
+            runId: segment.runId,
+            pendingCommentaryPrefixFor: retiredItemId,
+          },
+          retained,
+        ]
+      : [retained];
   });
 }
 
 export function discardStreamSegmentIndexes(
   state: StreamCausalBoundaryState,
   discardedIndexes: readonly number[],
+  retiredItemId?: string,
 ): void {
   if (!state.chatStreamSegments || discardedIndexes.length === 0) {
     return;
@@ -63,16 +124,69 @@ export function discardStreamSegmentIndexes(
     state.chatStreamSegments,
     state.chatRunId,
     (_segment, index) => discarded.has(index),
+    retiredItemId,
   );
 }
 
-export function reconcilePersistedAssistantStream(state: ToolStreamReconciliationState): void {
+export function reconcilePersistedAssistantStream(
+  state: ToolStreamReconciliationState,
+  replayedCommentaryItemId?: string,
+): void {
   const runId = state.chatRunId;
   if (!runId) {
     return;
   }
   for (const segment of state.chatStreamSegments ?? []) {
     if (segment.runId !== runId || !segment.retiredItemId || !segment.pendingCommentary) {
+      continue;
+    }
+    if (segment.pendingCommentary.requiresReplayItemId && !replayedCommentaryItemId) {
+      continue;
+    }
+    if (
+      segment.pendingCommentary.replayItemId &&
+      replayedCommentaryItemId &&
+      segment.pendingCommentary.replayItemId !== replayedCommentaryItemId
+    ) {
+      const source = state.chatStreamItemPrefix;
+      if (source === undefined) {
+        continue;
+      }
+      const settledPrefix = accumulatedStreamText(
+        (state.chatStreamSegments ?? []).filter(
+          (owner) => owner.retiredItemId && owner.pendingCommentary === undefined,
+        ),
+      );
+      const searchStart = Math.max(
+        segment.pendingCommentary.prefixLength,
+        settledPrefix && source.startsWith(settledPrefix) ? settledPrefix.length : 0,
+      );
+      const tail = source.slice(searchStart);
+      const match = matchCommentaryOccurrence(tail, segment.pendingCommentary.text);
+      const matchEnd = match ? match.index + match[0].length : 0;
+      if (!match) {
+        continue;
+      }
+      const visiblePrefix = tail.slice(0, match.index);
+      const accumulated = accumulatedStreamText(state.chatStreamSegments ?? []);
+      if (
+        visiblePrefix &&
+        advanceAccumulatedStreamText(accumulated, visiblePrefix) !== accumulated
+      ) {
+        state.chatStreamSegments = [
+          ...(state.chatStreamSegments ?? []),
+          {
+            text: visiblePrefix,
+            ts: state.chatStreamStartedAt ?? segment.ts,
+            runId,
+            pendingCommentaryPrefixFor: segment.retiredItemId,
+          },
+        ];
+      }
+      const retiredPrefix = source.slice(0, searchStart + matchEnd);
+      state.chatStreamSegments = state.chatStreamSegments?.map((owner) =>
+        owner === segment ? { ...owner, text: retiredPrefix, pendingCommentary: undefined } : owner,
+      );
       continue;
     }
     const handoff = retireCommentaryStream(state, {
@@ -87,6 +201,9 @@ export function reconcilePersistedAssistantStream(state: ToolStreamReconciliatio
           ? { ...owner, text: handoff.text }
           : owner,
       );
+      if (state.chatStreamItemId === segment.retiredItemId && state.chatStream !== null) {
+        state.chatStreamItemPrefix = state.chatStream;
+      }
     }
   }
   const stream = state.chatStream ?? accumulatedStreamText(state.chatStreamSegments ?? []);
@@ -131,6 +248,9 @@ function retireCumulativePrefix(
   if (segments.some(shouldPrune)) {
     segments = pruneAccumulatedStreamSegments(segments, runId, shouldPrune, retirement?.itemId);
     state.chatStreamSegments = segments;
+  }
+  if (retirement?.itemId === state.chatStreamItemId) {
+    state.chatStreamItemPrefix = prefix;
   }
   if (advanceAccumulatedStreamText(accumulated, prefix) === accumulated) {
     return;
@@ -200,6 +320,9 @@ function completePendingCommentary(
     if (segment === retired) {
       return { ...segment, text: prefix, pendingCommentary };
     }
+    if (segment.pendingCommentaryPrefixFor === retired.retiredItemId) {
+      return segment;
+    }
     // A tool may have rolled the observed partial into another segment before
     // completion. It is the same cumulative occurrence, not new visible text.
     return segment.runId === retired.runId &&
@@ -255,7 +378,12 @@ export function retireCommentaryStream(
     includeCurrent: true,
     isHiddenStreamText: () => false,
   }).at(-1);
-  if (!part || part.itemId || part.runId !== commentary.runId || part.boundaryRunId) {
+  if (
+    !part ||
+    (part.itemId && part.itemId !== commentary.itemId) ||
+    part.runId !== commentary.runId ||
+    part.boundaryRunId
+  ) {
     return null;
   }
   const preceding = (state.chatStreamSegments ?? []).slice(0, part.segmentIndex);
@@ -300,13 +428,14 @@ export function retireCommentaryStream(
 /** A durable commentary row immediately replaces its keyed live projection.
  * Waiting for terminal cleanup renders both copies throughout the active run. */
 export function prunePersistedAssistantStreamSegments(
-  state: StreamCausalBoundaryState,
+  state: ToolStreamReconciliationState,
   message: unknown,
 ): void {
   const identity = readAssistantStreamSegmentIdentity(message);
   if (!identity || !state.chatStreamSegments) {
     return;
   }
+  const text = extractTextCached(message);
   const replacedIndexes = state.chatStreamSegments.flatMap((segment, index) => {
     const runId = normalizeOptionalString(segment.runId);
     // Client-materialized commentary can be untagged; known run ownership
@@ -314,7 +443,199 @@ export function prunePersistedAssistantStreamSegments(
     const sameRun = !identity.runId || !runId || identity.runId === runId;
     return normalizeOptionalString(segment.itemId) === identity.itemId && sameRun ? [index] : [];
   });
-  discardStreamSegmentIndexes(state, replacedIndexes);
+  if (replacedIndexes.length === 0) {
+    const runId = identity.runId ?? state.chatRunId;
+    if (
+      runId &&
+      runId === state.chatRunId &&
+      text &&
+      !state.chatStreamSegments.some(
+        (segment) => segment.runId === runId && segment.retiredItemId === identity.itemId,
+      )
+    ) {
+      if (!state.chatStreamItemId || state.chatStreamItemId === identity.itemId) {
+        const stream = state.chatStream ?? "";
+        const pattern = text.split(/\s+/u).map(escapeRegExp).join("\\s+");
+        const match = new RegExp(`${pattern}\\s*$`, "u").exec(stream);
+        const prefix = state.chatStreamItemPrefix || (match ? stream.slice(0, match.index) : "");
+        const accumulated = accumulatedStreamText(state.chatStreamSegments);
+        if (prefix && advanceAccumulatedStreamText(accumulated, prefix) !== accumulated) {
+          state.chatStreamSegments = [
+            ...state.chatStreamSegments,
+            {
+              text: prefix,
+              ts: state.chatStreamStartedAt ?? Date.now(),
+              runId,
+              pendingCommentaryPrefixFor: identity.itemId,
+            },
+          ];
+        }
+        const handoff = retireCommentaryStream(state, {
+          runId,
+          itemId: identity.itemId,
+          text,
+          timestamp: Date.now(),
+        });
+        if (handoff) {
+          return;
+        }
+      }
+      if (state.chatStreamItemId && state.chatStreamItemId !== identity.itemId) {
+        const source = state.chatStreamItemPrefix;
+        if (source === undefined) {
+          return;
+        }
+        const accumulated = accumulatedStreamText(state.chatStreamSegments);
+        const retiredPrefix = accumulatedStreamText(
+          state.chatStreamSegments.filter((segment) => Boolean(segment.retiredItemId)),
+        );
+        const searchStart =
+          retiredPrefix && source.startsWith(retiredPrefix) ? retiredPrefix.length : 0;
+        const match = matchCommentaryOccurrence(source.slice(searchStart), text);
+        const matchStart = match ? searchStart + match.index : 0;
+        const matchEnd = match ? matchStart + match[0].length : 0;
+        if (match) {
+          const retirementSegmentIndex = state.chatStreamSegments.findLastIndex(
+            (segment) =>
+              segment.runId === runId &&
+              streamSegmentUsesAccumulatedText(segment) &&
+              segment.text.length >= matchEnd &&
+              source.startsWith(segment.text),
+          );
+          const visiblePrefix = source.slice(0, matchStart);
+          if (
+            visiblePrefix &&
+            (retirementSegmentIndex >= 0 ||
+              advanceAccumulatedStreamText(accumulated, visiblePrefix) !== accumulated)
+          ) {
+            state.chatStreamSegments = [
+              ...state.chatStreamSegments,
+              {
+                text: visiblePrefix,
+                ts: state.chatStreamStartedAt ?? Date.now(),
+                runId,
+                pendingCommentaryPrefixFor: identity.itemId,
+              },
+            ];
+          }
+          retireCumulativePrefix(state, runId, source.slice(0, matchEnd), Date.now(), {
+            itemId: identity.itemId,
+            ...(retirementSegmentIndex >= 0 ? { segmentIndex: retirementSegmentIndex } : {}),
+          });
+        }
+        return;
+      }
+      const accumulated = accumulatedStreamText(state.chatStreamSegments);
+      const baseline = state.chatStream ?? accumulated ?? "";
+      const segments =
+        baseline && advanceAccumulatedStreamText(accumulated, baseline) !== accumulated
+          ? [
+              ...state.chatStreamSegments,
+              {
+                text: baseline,
+                ts: state.chatStreamStartedAt ?? Date.now(),
+                runId,
+                pendingCommentaryPrefixFor: identity.itemId,
+              },
+            ]
+          : state.chatStreamSegments;
+      // Persistence arrived before this commentary occurrence reached the
+      // cumulative chat stream. Roll the observed prefix into its own visible
+      // segment, then keep a one-occurrence receipt anchored after that prefix.
+      state.chatStreamSegments = [
+        ...segments,
+        {
+          text: baseline,
+          ts: Date.now(),
+          runId,
+          persisted: true,
+          retiredItemId: identity.itemId,
+          pendingCommentary: {
+            text,
+            prefixLength: baseline.length,
+            replayItemId: identity.itemId,
+          },
+        },
+      ];
+    }
+    return;
+  }
+  const currentItemText =
+    state.chatStreamItemId === identity.itemId && state.chatStream
+      ? state.chatStream.slice(state.chatStreamItemPrefix?.length ?? 0)
+      : undefined;
+  const currentItemSnapshot =
+    state.chatStream &&
+    currentItemText &&
+    text &&
+    commentaryProjection(currentItemText) === commentaryProjection(text)
+      ? state.chatStream
+      : undefined;
+  const laterItemPrefix =
+    state.chatStreamItemId && state.chatStreamItemId !== identity.itemId
+      ? state.chatStreamItemPrefix
+      : undefined;
+  const replaced = new Set(replacedIndexes);
+  state.chatStreamSegments = state.chatStreamSegments.map((segment, index) => {
+    if (!replaced.has(index) || !segment.cumulative) {
+      return segment;
+    }
+    let nextSegment = segment;
+    if (laterItemPrefix && text) {
+      const searchStart = segment.itemStartOffset ?? 0;
+      const match = matchCommentaryOccurrence(laterItemPrefix.slice(searchStart), text);
+      const matchEnd = match ? searchStart + match.index + match[0].length : 0;
+      const durablePrefix = matchEnd > 0 ? laterItemPrefix.slice(0, matchEnd) : "";
+      if (durablePrefix.startsWith(segment.text)) {
+        nextSegment = { ...segment, text: durablePrefix };
+      }
+    }
+    if (
+      currentItemSnapshot &&
+      commentaryProjection(currentItemSnapshot).startsWith(commentaryProjection(nextSegment.text))
+    ) {
+      nextSegment = { ...nextSegment, text: currentItemSnapshot };
+    }
+    if (nextSegment.itemStartOffset !== undefined) {
+      return nextSegment;
+    }
+    const trailing = text ? matchTrailingCommentaryOccurrence(nextSegment.text, text) : null;
+    if (trailing) {
+      return { ...nextSegment, itemStartOffset: trailing.index };
+    }
+    return currentItemSnapshot ? { ...nextSegment, itemStartOffset: 0 } : nextSegment;
+  });
+  discardStreamSegmentIndexes(state, replacedIndexes, identity.itemId);
+  const runId = identity.runId ?? state.chatRunId;
+  if (
+    !currentItemSnapshot &&
+    runId &&
+    text &&
+    !state.chatStreamSegments.some(
+      (segment) => segment.runId === runId && segment.retiredItemId === identity.itemId,
+    )
+  ) {
+    const baseline = accumulatedStreamText(state.chatStreamSegments) ?? "";
+    state.chatStreamSegments = [
+      ...state.chatStreamSegments,
+      {
+        text: baseline,
+        ts: Date.now(),
+        runId,
+        persisted: true,
+        retiredItemId: identity.itemId,
+        pendingCommentary: {
+          text,
+          prefixLength: baseline.length,
+          replayItemId: identity.itemId,
+          requiresReplayItemId: true,
+        },
+      },
+    ];
+  }
+  if (currentItemSnapshot) {
+    state.chatStreamItemPrefix = currentItemSnapshot;
+  }
 }
 
 export function pruneHistoryReplacedStreamSegments(

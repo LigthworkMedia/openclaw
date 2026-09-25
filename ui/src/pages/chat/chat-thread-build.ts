@@ -7,7 +7,9 @@ import {
   type ChatItem,
   type MessageGroup,
   accumulatedStreamText,
+  accumulatedStreamTextForItem,
   advanceAccumulatedStreamText,
+  resolveCurrentStreamPrefix,
   streamSegmentHasItemId,
   streamSegmentUsesAccumulatedText,
   trimAccumulatedStreamPrefix,
@@ -89,6 +91,8 @@ export type BuildChatItemsProps = ChatInputPlacementProps & {
   guardianNotices?: ChatGuardianNotice[];
   streamSegments: ChatStreamSegment[];
   stream: string | null;
+  streamItemId?: string;
+  streamItemPrefix?: string;
   streamStartedAt: number | null;
   showToolCalls: boolean;
   persistCommentary?: boolean;
@@ -407,10 +411,10 @@ export function buildChatItems(
     }
     latestBoundaryRunId = normalizeOptionalString(segment.boundaryRunId) ?? latestBoundaryRunId;
   }
-  const keyedSegments = segments.filter(streamSegmentHasItemId);
-  const indexedSegments = segments.filter(
-    (segment) => !streamSegmentHasItemId(segment) && segment.boundaryMarker !== true,
+  const keyedSegments = segments.filter(
+    (segment) => streamSegmentHasItemId(segment) && !streamSegmentUsesAccumulatedText(segment),
   );
+  const indexedSegments = segments.filter(streamSegmentUsesAccumulatedText);
   const toolLookup = createToolCallLookup<ChatProjection>();
   for (const tool of toolItems) {
     toolLookup.add(tool.runId, tool.callId, tool.projection);
@@ -598,7 +602,12 @@ export function buildChatItems(
   };
   if (props.stream !== null) {
     const text = sanitizeStreamText(props.stream);
-    const prefix = accumulatedStreamText(segments, sanitizeStreamText);
+    const prefix = resolveCurrentStreamPrefix(
+      accumulatedStreamText(segments, sanitizeStreamText),
+      props.streamItemId,
+      props.streamItemPrefix,
+      accumulatedStreamTextForItem(segments, props.streamItemId, sanitizeStreamText),
+    );
     const visibleText = trimAccumulatedStreamPrefix(text, prefix);
     if (visibleText.length > 0 && !stripHeartbeatTokenForDisplay(visibleText).shouldSkip) {
       const liveProgress = resolveProgress();

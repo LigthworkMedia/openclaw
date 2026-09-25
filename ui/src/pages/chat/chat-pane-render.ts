@@ -448,6 +448,8 @@ export class ChatPane extends ChatPaneLayoutRender {
       guardianNotices: catalogKey ? this.emptyTranscriptItems : state.guardianNotices,
       streamSegments: catalogKey ? this.emptyTranscriptItems : state.chatStreamSegments,
       stream: catalogKey ? null : state.chatStream,
+      streamItemId: catalogKey ? undefined : state.chatStreamItemId,
+      streamItemPrefix: catalogKey ? undefined : state.chatStreamItemPrefix,
       streamStartedAt: catalogKey ? null : state.chatStreamStartedAt,
       runId: catalogKey ? null : projectionRunId,
       runUsageById: catalogKey ? undefined : state.chatRunUsageById,

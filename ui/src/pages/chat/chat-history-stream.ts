@@ -310,6 +310,10 @@ export function applyHistoryRun(params: {
       )
     : activeStreamBeforeReset;
   state.chatStream = mergeInFlightAssistantText(resolveInFlightAssistantText(run.text), liveText);
+  if (!retainsLiveStream) {
+    state.chatStreamItemId = undefined;
+    state.chatStreamItemPrefix = undefined;
+  }
   state.chatStreamStartedAt = snapshotStartedAt ?? state.chatStreamStartedAt ?? Date.now();
   // A retained pane gets its boundary from session.message. Only fresh adoption
   // reconstructs it from history, with the persisted prefix as cumulative evidence.

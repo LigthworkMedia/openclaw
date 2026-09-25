@@ -126,6 +126,8 @@ export type ChatThreadProps = ChatSendStatusActions & {
   guardianNotices?: ChatGuardianNotice[];
   streamSegments: ChatStreamSegment[];
   stream: string | null;
+  streamItemId?: string;
+  streamItemPrefix?: string;
   streamStartedAt: number | null;
   /** Browser-local active run identity, retained across transient disconnects. */
   runId?: string | null;

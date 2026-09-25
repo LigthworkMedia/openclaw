@@ -11,7 +11,9 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import {
   accumulatedStreamText,
+  accumulatedStreamTextForItem,
   advanceAccumulatedStreamText,
+  resolveCurrentStreamPrefix,
   streamSegmentHasItemId,
   streamSegmentUsesAccumulatedText,
   trimAccumulatedStreamPrefix,
@@ -282,8 +284,14 @@ export function visibleAssistantStreamParts(
     }
   }
   if (opts.includeCurrent !== false && typeof state.chatStream === "string") {
+    const currentPrefix = resolveCurrentStreamPrefix(
+      previousText,
+      state.chatStreamItemId,
+      state.chatStreamItemPrefix,
+      accumulatedStreamTextForItem(segments, state.chatStreamItemId),
+    );
     const visible = visibleAssistantStreamText(
-      trimAccumulatedStreamPrefix(state.chatStream, previousText),
+      trimAccumulatedStreamPrefix(state.chatStream, currentPrefix),
       opts.isHiddenStreamText,
     );
     if (visible) {
@@ -292,6 +300,7 @@ export function visibleAssistantStreamParts(
         replacementText: state.chatStream,
         source: "current",
         timestamp: state.chatStreamStartedAt ?? Date.now(),
+        ...(state.chatStreamItemId ? { itemId: state.chatStreamItemId } : {}),
         ...(state.chatRunId ? { runId: state.chatRunId } : {}),
         ...(latestBoundaryRunId ? { afterBoundaryRunId: latestBoundaryRunId } : {}),
       });
@@ -308,7 +317,12 @@ export function visibleCurrentAssistantStreamTail(
     return null;
   }
   const segments = Array.isArray(state.chatStreamSegments) ? state.chatStreamSegments : [];
-  const previousText = accumulatedStreamText(segments);
+  const previousText = resolveCurrentStreamPrefix(
+    accumulatedStreamText(segments),
+    state.chatStreamItemId,
+    state.chatStreamItemPrefix,
+    accumulatedStreamTextForItem(segments, state.chatStreamItemId),
+  );
   return visibleAssistantStreamText(
     trimAccumulatedStreamPrefix(state.chatStream, previousText),
     isHiddenStreamText,

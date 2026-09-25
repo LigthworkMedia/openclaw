@@ -27,6 +27,15 @@ function projectAssistantWireDelta(value: unknown): AgentEventPayload {
   return { ...payload, data };
 }
 
+export function chatLiveTextKey(
+  agentId: string | undefined,
+  itemId: string | undefined,
+  sessionKey: string,
+  visible: boolean,
+): string {
+  return JSON.stringify(["chat", sessionKey, [agentId, itemId], visible]);
+}
+
 export function liveTextDelivery(
   state: ChatRunState,
   runId: string,

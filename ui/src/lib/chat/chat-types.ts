@@ -233,12 +233,23 @@ export type ChatStreamSegment = {
   boundaryRunId?: string;
   /** Ordering-only boundary with no renderable assistant text. */
   boundaryMarker?: true;
+  /** Keyed item captured from the producer's cumulative chat projection. */
+  cumulative?: true;
+  /** UTF-16 offset where this keyed item starts in cumulative text. */
+  itemStartOffset?: number;
   /** Hidden durable replacement; cumulative text still owns the prefix baseline. */
   persisted?: true;
   /** Keyed item that consumed this cumulative occurrence; late updates cannot consume another. */
   retiredItemId?: string;
   /** In-flight handoff owned by the retired cumulative prefix, not its live display. */
-  pendingCommentary?: { text: string; prefixLength: number };
+  pendingCommentary?: {
+    text: string;
+    prefixLength: number;
+    replayItemId?: string;
+    requiresReplayItemId?: boolean;
+  };
+  /** Earlier visible cumulative prefix preserved while a later commentary occurrence hands off. */
+  pendingCommentaryPrefixFor?: string;
   toolCallId?: string;
   itemId?: string;
 };
@@ -250,8 +261,12 @@ export function streamSegmentHasItemId(segment: { itemId?: unknown }): boolean {
 export function streamSegmentUsesAccumulatedText(segment: {
   itemId?: unknown;
   boundaryMarker?: unknown;
+  cumulative?: unknown;
 }): boolean {
-  return segment.boundaryMarker !== true && !streamSegmentHasItemId(segment);
+  return (
+    segment.boundaryMarker !== true &&
+    (segment.cumulative === true || !streamSegmentHasItemId(segment))
+  );
 }
 
 /** Advance the accumulated-text tracker only when the segment genuinely
@@ -287,6 +302,38 @@ export function accumulatedStreamText(
     }
   }
   return accumulated;
+}
+
+export function accumulatedStreamTextForItem(
+  segments: readonly ChatStreamSegment[],
+  itemId: string | undefined,
+  normalize: (text: string) => string = (text) => text,
+): string | null {
+  if (!itemId) {
+    return null;
+  }
+  let accumulated: string | null = null;
+  for (const segment of segments) {
+    if (segment.itemId === itemId && streamSegmentUsesAccumulatedText(segment)) {
+      accumulated = advanceAccumulatedStreamText(accumulated, normalize(segment.text));
+    }
+  }
+  return accumulated;
+}
+
+export function resolveCurrentStreamPrefix(
+  accumulated: string | null,
+  itemId: string | undefined,
+  itemPrefix: string | undefined,
+  sameItemText: string | null = null,
+): string | null {
+  if (!itemId) {
+    return accumulated;
+  }
+  if (sameItemText) {
+    return itemPrefix && itemPrefix.startsWith(sameItemText) ? itemPrefix : sameItemText;
+  }
+  return itemPrefix ? accumulated : null;
 }
 
 /** A group of consecutive messages from the same role (Slack-style layout) */

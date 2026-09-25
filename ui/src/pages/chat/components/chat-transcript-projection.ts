@@ -153,6 +153,8 @@ export function projectChatTranscript(
     guardianNotices: props.guardianNotices,
     streamSegments: props.streamSegments,
     stream: props.stream ?? null,
+    streamItemId: props.streamItemId,
+    streamItemPrefix: props.streamItemPrefix,
     streamStartedAt: props.streamStartedAt,
     queue: props.queue,
     initialTurnId: props.initialTurnId,

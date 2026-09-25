@@ -65,7 +65,13 @@ function connect(
 ) {
   const frames: Array<{
     event: string;
-    payload: { message?: unknown; data?: { text?: string; delta?: string }; state?: string };
+    payload: {
+      message?: unknown;
+      data?: { text?: string; delta?: string };
+      state?: string;
+      itemId?: string;
+      itemStartOffset?: number;
+    };
   }> = [];
   const socket = Object.assign(new EventEmitter(), {
     readyState: 1,
@@ -127,7 +133,12 @@ it("sends append-only wire text while retaining snapshots for observers and late
     const late = connect(clients, "late");
     emit(2, undefined, " world");
     expect(frames.filter((frame) => frame.event === "chat").map((frame) => frame.payload)).toEqual([
-      expect.objectContaining({ message: expect.any(Object), deltaText: "Hello" }),
+      expect.objectContaining({
+        message: expect.any(Object),
+        deltaText: "Hello",
+        itemId: "answer",
+        itemStartOffset: 0,
+      }),
       expect.not.objectContaining({ message: expect.anything() }),
     ]);
     expect(frames.findLast((frame) => frame.event === "agent")?.payload.data).toEqual({
@@ -152,6 +163,10 @@ it("sends append-only wire text while retaining snapshots for observers and late
     emit(5, "Reset!", "!");
     expect(frames.findLast((frame) => frame.event === "agent")?.payload.data?.text).toBe("Reset!");
     emit(6, "Other", "Other", undefined, "other");
+    expect(frames.findLast((frame) => frame.event === "chat")?.payload).toMatchObject({
+      itemId: "other",
+      itemStartOffset: "Reset!\n\n".length,
+    });
     emit(7, "Reset! again", " again");
     expect(frames.findLast((frame) => frame.event === "agent")?.payload.data?.text).toBe(
       "Reset! again",

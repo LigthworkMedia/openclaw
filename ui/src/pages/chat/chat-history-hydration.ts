@@ -338,6 +338,8 @@ export async function hydrateChatHistory(
         }
         if (!state.chatRunId) {
           state.chatStream = null;
+          state.chatStreamItemId = undefined;
+          state.chatStreamItemPrefix = undefined;
           state.chatStreamStartedAt = null;
         }
         recordTiming("stream-reset", {
@@ -351,6 +353,8 @@ export async function hydrateChatHistory(
         );
         maybeResetToolStream(state);
         state.chatStream = null;
+        state.chatStreamItemId = undefined;
+        state.chatStreamItemPrefix = undefined;
         state.chatStreamStartedAt = null;
       } else if (historyReplacedSomeToolStream) {
         publishChatSessionProjectionMessages(

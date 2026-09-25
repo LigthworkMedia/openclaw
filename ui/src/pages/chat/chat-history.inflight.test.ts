@@ -53,6 +53,8 @@ function renderedText(state: TestState) {
     toolMessages: state.chatToolMessages,
     streamSegments: state.chatStreamSegments,
     stream: state.chatStream,
+    streamItemId: state.chatStreamItemId,
+    streamItemPrefix: state.chatStreamItemPrefix,
     streamStartedAt: state.chatStreamStartedAt,
     showToolCalls: true,
   }).flatMap((item) =>
@@ -315,6 +317,51 @@ describe("chat history in-flight assistant recovery", () => {
     expect(state.chatStream).toBe("The response survived the reconnect.");
     expect(state.chatStreamStartedAt).toEqual(expect.any(Number));
     expect(state.chatRunStartup).toEqual({ state: "activity", runId: "run-reconnected" });
+  });
+
+  it("continues a keyed item after restoring its active snapshot", async () => {
+    const history = activeHistory("run-reconnected");
+    history.messages = [{ role: "user", content: "Continue working." }];
+    const restored = "The response survived the reconnect.";
+    const continued = `${restored} Still streaming.`;
+    history.inFlightRun!.text = restored;
+    const state = createState(history);
+
+    await loadChatHistory(state);
+    handleChatGatewayEvent(state, {
+      runId: "run-reconnected",
+      sessionKey: state.sessionKey,
+      seq: 2,
+      state: "delta",
+      itemId: "commentary-1",
+      itemStartOffset: 0,
+      message: { role: "assistant", content: continued },
+    });
+
+    expect(renderedText(state)).toEqual(["Continue working.", continued]);
+  });
+
+  it("continues a later keyed item inside a restored cumulative snapshot", async () => {
+    const history = activeHistory("run-reconnected");
+    history.messages = [{ role: "user", content: "Continue working." }];
+    const prefix = "An earlier item.\n\n";
+    const restored = `${prefix}The current item.`;
+    const continued = `${restored} Still streaming.`;
+    history.inFlightRun!.text = restored;
+    const state = createState(history);
+
+    await loadChatHistory(state);
+    handleChatGatewayEvent(state, {
+      runId: "run-reconnected",
+      sessionKey: state.sessionKey,
+      seq: 2,
+      state: "delta",
+      itemId: "commentary-2",
+      itemStartOffset: prefix.length,
+      message: { role: "assistant", content: continued },
+    });
+
+    expect(renderedText(state)).toEqual(["Continue working.", restored, "Still streaming."]);
   });
 
   it("restores the authoritative run start even before assistant text exists", async () => {

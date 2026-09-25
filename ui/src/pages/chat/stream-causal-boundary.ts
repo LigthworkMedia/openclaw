@@ -5,6 +5,7 @@ import {
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
+  accumulatedStreamText,
   advanceAccumulatedStreamText,
   streamSegmentUsesAccumulatedText,
   type ChatStreamSegment,
@@ -15,6 +16,8 @@ import { userTurnRunId } from "./chat-thread-items.ts";
 export type StreamCausalBoundaryState = {
   chatMessages?: unknown[];
   chatRunId?: string | null;
+  chatStreamItemId?: string;
+  chatStreamItemPrefix?: string;
   chatStreamSegments?: ChatStreamSegment[];
 };
 
@@ -22,6 +25,8 @@ type StreamRolloverState = {
   chatMessages?: unknown[];
   chatRunId: string | null;
   chatStream: string | null;
+  chatStreamItemId?: string;
+  chatStreamItemPrefix?: string;
   chatStreamStartedAt: number | null;
   chatStreamSegments?: ChatStreamSegment[];
 };
@@ -542,6 +547,21 @@ export function rolloverChatStream(
         : { ...segment, boundaryRunId: streamBoundaryRunId },
     );
   }
+  const accumulated = accumulatedStreamText(segments);
+  if (
+    hasStreamText &&
+    host.chatStreamItemPrefix &&
+    advanceAccumulatedStreamText(accumulated, host.chatStreamItemPrefix) !== accumulated
+  ) {
+    segments = [
+      ...segments,
+      {
+        text: host.chatStreamItemPrefix,
+        ts: host.chatStreamStartedAt ?? options.timestamp ?? Date.now(),
+        runId: options.runId,
+      },
+    ];
+  }
   if (hasStreamText) {
     segments = [
       ...segments,
@@ -549,6 +569,15 @@ export function rolloverChatStream(
         text: host.chatStream ?? "",
         ts: host.chatStreamStartedAt ?? options.timestamp ?? Date.now(),
         runId: options.runId,
+        ...(host.chatStreamItemId
+          ? {
+              itemId: host.chatStreamItemId,
+              cumulative: true as const,
+              ...(host.chatStreamItemPrefix === undefined
+                ? {}
+                : { itemStartOffset: host.chatStreamItemPrefix.length }),
+            }
+          : {}),
         ...(previousBoundaryRunId ? { afterBoundaryRunId: previousBoundaryRunId } : {}),
         ...(streamBoundaryRunId ? { boundaryRunId: streamBoundaryRunId } : {}),
         ...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
@@ -579,6 +608,8 @@ export function rolloverChatStream(
     return;
   }
   host.chatStream = null;
+  host.chatStreamItemId = undefined;
+  host.chatStreamItemPrefix = undefined;
   // The closed segment owns elapsed time; a later cumulative tail must not restart the run clock.
   host.chatStreamStartedAt = null;
 }

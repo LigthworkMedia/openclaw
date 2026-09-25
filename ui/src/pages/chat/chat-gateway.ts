@@ -35,6 +35,7 @@ import { appendChatMessageToCache } from "./session-message-cache.ts";
 import {
   latestStreamBoundaryRunId,
   reconcileTerminalStreamBoundary,
+  rolloverChatStream,
 } from "./stream-causal-boundary.ts";
 import {
   appendTerminalAssistantMessage,
@@ -364,8 +365,40 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
       !isSilentReplyStream(next) &&
       !isAssistantHeartbeatAckForDisplay(payload.message)
     ) {
+      const itemChanged = state.chatStreamItemId !== payload.itemId;
+      const producerItemStart =
+        Number.isInteger(payload.itemStartOffset) &&
+        (payload.itemStartOffset ?? -1) >= 0 &&
+        (payload.itemStartOffset ?? Number.POSITIVE_INFINITY) <= next.length
+          ? payload.itemStartOffset
+          : undefined;
+      const continuesUnkeyedStream =
+        state.chatStream !== null &&
+        next.startsWith(state.chatStream) &&
+        (producerItemStart === 0 || producerItemStart === undefined);
+      const firstKeyedItemAfterUnkeyedStream =
+        itemChanged &&
+        payload.itemId &&
+        !state.chatStreamItemId &&
+        state.chatStream !== null &&
+        !continuesUnkeyedStream;
+      if (
+        itemChanged &&
+        state.chatRunId &&
+        (state.chatStreamItemId || firstKeyedItemAfterUnkeyedStream)
+      ) {
+        rolloverChatStream(state, { runId: state.chatRunId });
+      }
+      if (itemChanged) {
+        state.chatStreamItemPrefix = payload.itemId
+          ? producerItemStart === undefined
+            ? undefined
+            : next.slice(0, producerItemStart)
+          : undefined;
+      }
       state.chatStream = next;
-      reconcilePersistedAssistantStream(state);
+      state.chatStreamItemId = payload.itemId;
+      reconcilePersistedAssistantStream(state, payload.itemId);
     }
   } else if (payload.state === "final") {
     const finalMessage = normalizedFinalMessage;
