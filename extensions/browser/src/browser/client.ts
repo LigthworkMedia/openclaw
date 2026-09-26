@@ -32,13 +32,8 @@ export type {
   SystemProfileInfo,
 } from "./system-profiles.js";
 
-export type {
-  BrowserStatus,
-  BrowserTab,
-  BrowserTabsResult,
-  BrowserTransport,
-} from "./client.types.js";
-export type { BrowserDoctorCheck, BrowserDoctorReport } from "./doctor.js";
+export type { BrowserStatus, BrowserTab, BrowserTabsResult } from "./client.types.js";
+export type { BrowserDoctorReport } from "./doctor.js";
 
 const BROWSER_STATUS_REQUEST_TIMEOUT_MS = 7_500;
 const BROWSER_DOCTOR_REQUEST_TIMEOUT_MS = 7_500;
@@ -244,18 +239,6 @@ export async function browserStop(
   await sendProfilePost(baseUrl, "/stop", opts, 15000);
 }
 
-/** Reset the selected managed browser profile directory. */
-export async function browserResetProfile(
-  baseUrl?: BrowserClientTarget,
-  opts?: { profile?: string },
-): Promise<BrowserResetProfileResult> {
-  return await requestBrowserJson<BrowserResetProfileResult>(baseUrl, "/reset-profile", {
-    profile: opts?.profile,
-    method: "POST",
-    timeoutMs: 20000,
-  });
-}
-
 /** Result returned after creating a browser profile. */
 export type BrowserCreateProfileResult = {
   ok: true;
@@ -268,52 +251,12 @@ export type BrowserCreateProfileResult = {
   isRemote: boolean;
 };
 
-/** Create and persist a browser profile. */
-export async function browserCreateProfile(
-  baseUrl: BrowserClientTarget,
-  opts: {
-    name: string;
-    color?: string;
-    cdpUrl?: string;
-    userDataDir?: string;
-    driver?: "openclaw" | "existing-session";
-  },
-): Promise<BrowserCreateProfileResult> {
-  return await postBrowserJson(
-    baseUrl,
-    "/profiles/create",
-    {
-      name: opts.name,
-      color: opts.color,
-      cdpUrl: opts.cdpUrl,
-      userDataDir: opts.userDataDir,
-      driver: opts.driver,
-    },
-    10000,
-  );
-}
-
 /** Result returned after deleting a browser profile. */
 export type BrowserDeleteProfileResult = {
   ok: true;
   profile: string;
   deleted: boolean;
 };
-
-/** Delete a configured browser profile. */
-export async function browserDeleteProfile(
-  baseUrl: BrowserClientTarget,
-  profile: string,
-): Promise<BrowserDeleteProfileResult> {
-  return await requestBrowserJson<BrowserDeleteProfileResult>(
-    baseUrl,
-    `/profiles/${encodeURIComponent(profile)}`,
-    {
-      method: "DELETE",
-      timeoutMs: 20000,
-    },
-  );
-}
 
 function normalizeBrowserTabsResult(value: unknown): BrowserTabsResult {
   const result = asNullableRecord(value);
@@ -396,24 +339,6 @@ export async function browserCloseTabByRawTargetId(
 ): Promise<void> {
   const path = `/tabs/${encodeURIComponent(targetId)}?targetIdMode=raw`;
   await sendTabCloseRequest(baseUrl, path, opts);
-}
-
-/** Execute legacy index-based tab actions. */
-export async function browserTabAction(
-  baseUrl: BrowserClientTarget,
-  opts: {
-    action: "list" | "new" | "close" | "select";
-    index?: number;
-    profile?: string;
-  },
-): Promise<unknown> {
-  return await postBrowserJson(
-    baseUrl,
-    "/tabs/action",
-    { action: opts.action, index: opts.index },
-    10_000,
-    { profile: opts.profile },
-  );
 }
 
 /** Capture an ARIA or AI snapshot for the selected tab. */
