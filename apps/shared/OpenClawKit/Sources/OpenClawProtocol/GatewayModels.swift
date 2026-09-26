@@ -8809,6 +8809,7 @@ public struct MessageActionParams: Codable, Sendable {
     public let agentid: String?
     public let toolcontext: [String: AnyCodable]?
     public let conversationreadorigin: String?
+    public let allownativechannelnamespace: Bool?
     public let idempotencykey: String
 
     public init(
@@ -8826,6 +8827,7 @@ public struct MessageActionParams: Codable, Sendable {
         agentid: String? = nil,
         toolcontext: [String: AnyCodable]? = nil,
         conversationreadorigin: String? = nil,
+        allownativechannelnamespace: Bool? = nil,
         idempotencykey: String)
     {
         self.channel = channel
@@ -8842,6 +8844,7 @@ public struct MessageActionParams: Codable, Sendable {
         self.agentid = agentid
         self.toolcontext = toolcontext
         self.conversationreadorigin = conversationreadorigin
+        self.allownativechannelnamespace = allownativechannelnamespace
         self.idempotencykey = idempotencykey
     }
 
@@ -8860,6 +8863,7 @@ public struct MessageActionParams: Codable, Sendable {
         case agentid = "agentId"
         case toolcontext = "toolContext"
         case conversationreadorigin = "conversationReadOrigin"
+        case allownativechannelnamespace = "allowNativeChannelNamespace"
         case idempotencykey = "idempotencyKey"
     }
 }
