@@ -130,6 +130,14 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     }
     cameraState = toggleState(currentCamera(), "camera") || (!currentCamera() ? "off" : undefined);
   }
+  // Slack can switch the selected input during awaited work; routing decisions use a fresh read.
+  const refreshAudioInput = () => {
+    if (identityVerified && allowMicrophone) {
+      audioInputDeviceLabel = selectedMicrophoneLabel();
+      audioInputRouted = Boolean(audioInputDeviceLabel);
+    }
+  };
+  refreshAudioInput();
   if (canMutateSession && identityVerified && inCall && allowMicrophone && !audioInputRouted && !manualAction) {
     await setMicrophone("off");
     const audioSettings = first(selectors.deviceSettings);
@@ -147,6 +155,7 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   }
   if (canMutateSession && identityVerified && !manualAction && (inCall || (autoJoin && join && /^join huddle$/i.test(text(join))))) {
     // Join muted until Slack reports the virtual input; the host's physical microphone must never go live.
+    refreshAudioInput();
     const desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
     await setMicrophone(desiredMicrophoneState);
     if (microphoneState !== desiredMicrophoneState && !authorityLost) {
