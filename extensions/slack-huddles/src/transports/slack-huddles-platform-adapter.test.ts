@@ -889,6 +889,25 @@ it("does not join with a live microphone once Slack's selected input is no longe
   expect(result).toMatchObject({ manualAction: { reason: "slack-microphone-required" } });
 });
 
+it("does not join with video when the camera turns on while the microphone settles", async () => {
+  const { document, join, mic } = preview("Join Huddle", true);
+  const camera = new PageNode("button", {
+    role: "switch",
+    "aria-label": "Camera",
+    "aria-checked": "false",
+  });
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    camera.setAttribute("aria-checked", "true");
+  };
+  document.body.append(camera);
+  const result = await fixture({ document }).status({ mode: "agent" });
+  expect(mic.clicks).toBe(1);
+  expect(join.clicks).toBe(0);
+  expect(result).toMatchObject({ manualAction: { reason: "slack-camera-required" } });
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(

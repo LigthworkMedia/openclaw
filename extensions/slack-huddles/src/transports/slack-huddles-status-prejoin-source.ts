@@ -163,16 +163,19 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   let clickedJoin = false;
   if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction && !authorityLost &&
       !unavailable(join) && /^join huddle$/i.test(text(join))) {
-    if (authorityHolds() && readMicrophone() === "on" && !selectedMicrophoneLabel()) {
+    // Last-moment gate: earlier camera and microphone reads predate awaited work.
+    if (!authorityHolds()) {
+      authorityLost = true;
+    } else if (toggleState(currentCamera(), "camera") === "on") {
+      manualAction = manualActionFor("slack-camera-required", "Turn off the Slack huddle camera, then retry.");
+    } else if (readMicrophone() === "on" && !selectedMicrophoneLabel()) {
       manualAction = manualActionFor("slack-microphone-required", "Mute the Slack huddle microphone until the OpenClaw virtual microphone is selected, then retry.");
-    } else if (authorityHolds()) {
+    } else {
       window.__openclawSlackHuddle.joinRequested = true;
       window.__openclawSlackHuddle.joinRequestedAt = Date.now();
       join.click();
       clickedJoin = true;
       notes.push("Clicked Join Huddle for an active Slack huddle.");
-    } else {
-      authorityLost = true;
     }
   }
   // Everything reported after this point (captions, audio, metadata) reflects the huddle at return time.
