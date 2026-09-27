@@ -17,6 +17,7 @@ import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller
 import { createLibrarySkillWorkshopTool } from "../../agents/tools/skill-workshop-tool-library.js";
 import { buildProactiveSubagentOrchestrationSection } from "../../agents/ultra-orchestration.js";
 import { resolveProviderThinkingLevel } from "../../auto-reply/thinking.js";
+import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import {
   buildActiveNodeContextText,
   prepareActiveNodeContext,
@@ -111,13 +112,23 @@ export async function executeWorkerTurn(
   ) {
     throw new Error("Worker inference requires a matching capable paired-node worker build");
   }
-  await recoverWorkspaceBeforeTurn(params);
-  const github = await prepareWorkerGitHubBinding({
-    sessionId: placement.sessionId,
-    sessionKey: placement.sessionKey,
-    agentId: placement.agentId,
-    assertCurrent: () => params.placements.validateTurnClaim(params.turnClaim),
-  });
+  await recoverWorkspaceBeforeTurn({ ...params, signal: turn.abortSignal });
+  params.assertRunCurrent?.();
+  turn.abortSignal?.throwIfAborted();
+  // Shared account refresh and repository lookup own their own lifetime. A
+  // cancelled turn may stop waiting, but cannot consume a late binding.
+  const github = await racePromiseWithAbortSignal(
+    prepareWorkerGitHubBinding({
+      sessionId: placement.sessionId,
+      sessionKey: placement.sessionKey,
+      agentId: placement.agentId,
+      assertCurrent: () =>
+        !turn.abortSignal?.aborted && params.placements.validateTurnClaim(params.turnClaim),
+    }),
+    turn.abortSignal,
+  );
+  params.assertRunCurrent?.();
+  turn.abortSignal?.throwIfAborted();
 
   const startedAt = Date.now();
   await turn.onExecutionStarted?.({ lifecycleGeneration: turn.lifecycleGeneration });
@@ -498,7 +509,11 @@ export async function executeWorkerTurn(
         return;
       }
       dispatchReady = true;
-      params.onHandoff();
+      params.onHandoff(
+        environment.nodeDeviceId && environment.sshEndpoint === null
+          ? { requiresTerminalReceipt: true }
+          : undefined,
+      );
       turn.onExecutionPhase?.({ phase: "process_spawned", backend: "cloud-worker" });
       handoffPending = (async () => {
         try {
