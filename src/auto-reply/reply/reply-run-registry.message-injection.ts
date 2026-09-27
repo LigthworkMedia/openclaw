@@ -217,6 +217,9 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
   const activeFingerprint = normalizeOptionalString(
     backend.toolAuthorityFingerprint ?? params.toolAuthorityFingerprint,
   );
+  const toolAuthorityMatched =
+    activeFingerprint !== undefined &&
+    normalizeOptionalString(params.options?.toolAuthorityFingerprint) === activeFingerprint;
   const pendingInputAuthorityProven =
     activeFingerprint !== undefined &&
     normalizeOptionalString(params.options?.pendingInputAuthorityFingerprint) === activeFingerprint;
@@ -227,8 +230,7 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
     params.options?.isInboundUserMessage === true &&
     backend.messageInjectionV2?.version === 2 &&
     activeFingerprint !== undefined &&
-    (pendingInputAuthorityProven ||
-      normalizeOptionalString(params.options.toolAuthorityFingerprint) === activeFingerprint);
+    (pendingInputAuthorityProven || toolAuthorityMatched);
   if (
     ((mismatch === "tool_authority_mismatch" && pendingInputAuthorityProven) ||
       hiddenPendingInputAuthorized) &&
@@ -238,6 +240,7 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
   ) {
     return {
       backend,
+      toolAuthorityMatched,
       injection: {
         isAvailable: () => true,
         queueMessage: async (text, options) => {
@@ -257,7 +260,7 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
             ? injection.cancelPendingUserInput
             : undefined,
       }
-    : { backend, injection };
+    : { backend, injection, toolAuthorityMatched };
 }
 
 function resolveReplyMessageInjectionFailure(
@@ -399,6 +402,18 @@ export function beginReplyMessageInjectionTarget(
   // admission check, matching Codex's active-turn lock boundary.
   const acceptance = createDeferredCore<boolean>();
   let acceptanceSettled = false;
+  let participantRecorded = false;
+  const recordParticipant = () => {
+    if (
+      !participantRecorded &&
+      queueOptions?.isInboundUserMessage &&
+      toolAuthorityOverlay &&
+      resolved.toolAuthorityMatched
+    ) {
+      participantRecorded = true;
+      owner.acceptParticipant?.(toolAuthorityOverlay);
+    }
+  };
   const settleAcceptance = (accepted: boolean) => {
     if (acceptanceSettled) {
       return;
@@ -416,6 +431,7 @@ export function beginReplyMessageInjectionTarget(
       // Rejection is provisional until the outcome rules out an uncertain question
       // dispatch. Forwarding false early would release the parked input for replay.
       if (accepted) {
+        recordParticipant();
         settleAcceptance(true);
       }
     },
@@ -439,6 +455,7 @@ export function beginReplyMessageInjectionTarget(
     };
   }
   const outcome = queued.then(async (result): Promise<ReplyMessageInjectionOutcome> => {
+    recordParticipant();
     settleAcceptance(true);
     if (
       targetRunId &&

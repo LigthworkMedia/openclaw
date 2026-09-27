@@ -9,6 +9,10 @@ import {
   createThemePaletteFixture,
 } from "../../../test/helpers/theme-fixture.js";
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import {
+  createPersonalThemeToolCaller,
+  withPersonalToolTurn,
+} from "../../auto-reply/reply/personal-tool-turn.test-support.js";
 import * as workerAdmission from "../../infra/sqlite-worker-operation-admission.js";
 import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db-cache.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
@@ -87,7 +91,7 @@ function runtimeIdentity(profileId?: string): AgentRuntimeIdentity {
 }
 
 async function invoke(
-  method: "themes.list" | "themes.get" | "themes.set" | "themes.import",
+  method: string,
   params: Record<string, unknown> = {},
   options: Partial<Omit<GatewayRequestHandlerOptions, "context">> & {
     context?: Partial<GatewayRequestContext>;
@@ -95,7 +99,10 @@ async function invoke(
 ) {
   const { context, ...requestOptions } = options;
   let result: { ok: boolean; payload?: unknown; error?: ErrorShape } | undefined;
-  await themeHandlers[method]!({
+  await expectDefined(
+    themeHandlers[method],
+    "theme handler",
+  )({
     req: { type: "req", id: "theme-request", method, params },
     params,
     client: client(requesterProfileId),
@@ -835,6 +842,104 @@ describe("theme RPC", () => {
       expect(getUserPreferences(otherProfileId)).toEqual({});
     },
   );
+
+  it("keeps every personal theme action scoped to the selected accepted turn participant", async () => {
+    const owner = { profileId: requesterProfileId, senderId: "alice-sender", name: "Alice" };
+    const steerer = { profileId: otherProfileId, senderId: "bob-sender", name: "Bob" };
+    const synthetic = client();
+    synthetic.internal = {
+      syntheticClient: true,
+      agentRuntimeIdentity: runtimeIdentity(requesterProfileId),
+    };
+    const execute = await createPersonalThemeToolCaller((method, params) =>
+      invoke(method, params, { client: synthetic }),
+    );
+    const actions = [
+      { action: "list" },
+      { action: "get" },
+      { action: "set", mode: "dark" },
+      { action: "import", id: "personal", definition: createThemeDefinitionFixture(), apply: true },
+    ];
+
+    await withPersonalToolTurn({ owner }, async (turn) => {
+      for (const params of [
+        { action: "set", mode: "dark" },
+        { action: "get", user: owner.senderId },
+      ]) {
+        expect(await execute(params)).toMatchObject({ current: { mode: "dark" } });
+      }
+      for (const action of actions) {
+        await expect(execute(action, steerer.senderId)).rejects.toThrow();
+      }
+      expect(getUserPreferences(otherProfileId)).toEqual({});
+
+      const readPreferences = userPreferences.getCanonicalUserPreferences;
+      vi.spyOn(userPreferences, "getCanonicalUserPreferences").mockImplementationOnce(
+        async (...args) => {
+          const snapshot = await readPreferences(...args);
+          expect(await turn.steer(steerer)).toMatchObject({ status: "accepted" });
+          return snapshot;
+        },
+      );
+      await expect(execute({ action: "set", id: "tide" })).rejects.toThrow(
+        "Alice (user: alice-sender)",
+      );
+      for (const action of actions) {
+        await expect(execute(action)).rejects.toThrow(
+          /Alice \(user: alice-sender\)[\s\S]*Bob \(user: bob-sender\)/,
+        );
+        await expect(execute(action, "nonparticipant")).rejects.toThrow();
+      }
+      expect(getUserPreferences(requesterProfileId)).toEqual({ "ui.themeMode": "dark" });
+      expect(getUserPreferences(otherProfileId)).toEqual({});
+
+      for (const { person, id, mode } of [
+        { person: steerer, id: "tide", mode: "light" },
+        { person: owner, id: "rose", mode: "dark" },
+      ]) {
+        for (const action of ["set", "list", "get"]) {
+          expect(
+            await execute({ action, ...(action === "set" ? { id, mode } : {}) }, person.senderId),
+          ).toMatchObject({ current: { id, mode } });
+        }
+        expect(getUserPreferences(person.profileId)).toEqual({
+          "ui.theme": id,
+          "ui.themeMode": mode,
+        });
+      }
+      const imported = expectDefined(actions[3], "import action");
+      expect(await execute(imported, steerer.senderId)).toMatchObject({
+        current: { id: "user/personal" },
+      });
+      expect(getUserPreferences(requesterProfileId)).not.toHaveProperty(
+        "ui.themeDefinition.personal",
+      );
+      expect(getUserPreferences(otherProfileId)).toMatchObject({
+        "ui.themeDefinition.personal": imported.definition,
+        "ui.theme": "user/personal",
+      });
+
+      const saved = getUserPreferences(otherProfileId);
+      const revokeBeforeCommit = vi.fn(() => turn.revoke(steerer.profileId));
+      beforeWorkerCommit(revokeBeforeCommit);
+      await expect(execute({ action: "set", id: "claw" }, steerer.senderId)).rejects.toThrow(
+        "Bob's access changed; ask them again",
+      );
+      expect(revokeBeforeCommit).toHaveBeenCalled();
+      expect(getUserPreferences(otherProfileId)).toEqual(saved);
+      for (const action of actions) {
+        await expect(execute(action, steerer.senderId)).rejects.toThrow(
+          "Bob's access changed; ask them again",
+        );
+      }
+      expect(await execute({ action: "get" }, owner.senderId)).toMatchObject({
+        current: { id: "rose" },
+      });
+      turn.complete();
+      expect(turn.releaseCounts.get(steerer.profileId)).toBe(1);
+      await expect(execute({ action: "get" }, owner.senderId)).rejects.toThrow();
+    });
+  });
 
   it.each([false, true])(
     "does not use a synthetic client's incidental profile when requester identity is absent (runtime=%s)",

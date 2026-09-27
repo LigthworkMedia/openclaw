@@ -1,6 +1,7 @@
 // Ambient trusted caller context for model-mediated Gateway tool calls.
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExecutionIdentityAdmissionToken } from "../../audit/execution-identity-admission.js";
+import type { ReplyTurnParticipants } from "../../auto-reply/reply/reply-run-registry.contracts.js";
 import type { CronCreatorAuthorityGrant } from "../../gateway/cron-creator-authority-grant.types.js";
 import type {
   GatewayContextResolver,
@@ -33,6 +34,8 @@ import {
 import type { AnyAgentTool } from "./common.js";
 
 type GatewayToolCallerIdentity = {
+  personalToolParticipants?: ReplyTurnParticipants;
+  personalToolUser?: string;
   agentId: string;
   sessionKey: string;
   gatewayUiCommandTarget?: GatewayUiCommandTarget;
@@ -206,6 +209,32 @@ export function getGatewayToolCallerIdentity(): GatewayToolCallerIdentity | unde
   return gatewayToolCallerStorage.getStore();
 }
 
+/** Selection is model input; only the turn's host-owned participants grant a target. */
+export async function withGatewayPersonalToolUser<T>(
+  user: string | undefined,
+  run: () => Promise<T> | T,
+): Promise<T> {
+  const caller = getGatewayToolCallerIdentity();
+  if (!caller) {
+    if (user !== undefined) {
+      throw new Error("Selecting user requires an active personal-tool turn.");
+    }
+    return await run();
+  }
+  return await gatewayToolCallerStorage.run({ ...caller, personalToolUser: user }, run);
+}
+
+export function resolveGatewayPersonalToolParticipant() {
+  const caller = getGatewayToolCallerIdentity();
+  if (caller?.personalToolParticipants) {
+    return caller.personalToolParticipants.resolve(caller.personalToolUser);
+  }
+  if (caller?.personalToolUser !== undefined) {
+    throw new Error("Selecting user requires an active personal-tool turn.");
+  }
+  return undefined;
+}
+
 /** Capture the admitted run and worker owner, independently of optional audit collection. */
 export function captureGatewayToolCallerAssertion(): ((method?: string) => void) | undefined {
   const caller = getGatewayToolCallerIdentity();
@@ -336,6 +365,9 @@ export async function withGatewayToolCallerIdentity<T>(
     {
       agentId: inheritedOwner?.agentId ?? identity.agentId.trim(),
       sessionKey: inheritedOwner?.sessionKey ?? identity.sessionKey.trim(),
+      personalToolParticipants:
+        inheritedOwner?.personalToolParticipants ?? identity.personalToolParticipants,
+      personalToolUser: inheritedOwner?.personalToolUser ?? identity.personalToolUser,
       ...(fullPermission !== undefined ? { fullPermission } : {}),
       ...(operationalRunInstance ? { operationalRunInstance } : {}),
       ...(embeddedRunToolAuthorityBinding ? { embeddedRunToolAuthorityBinding } : {}),

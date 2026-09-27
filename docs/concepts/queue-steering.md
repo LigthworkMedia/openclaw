@@ -80,11 +80,13 @@ queued for a followup turn that can provide the required answer.
 
 Different signed-in people with the same permissions can steer each other's
 active turn, including from different browsers or after reconnecting. The turn
-keeps its original owner's authority, browser, screen/theme target, tool bindings,
-and approval destination. A steer can therefore drive that owner's pane layout
-or personal theme within the turn. Different permissions (role scopes, model
-access, access grant, or tool policy) queue the message as a followup; changes to
-execution policy, workspace, or bound tools can also require a followup.
+keeps its original owner's authority, tool bindings, and approval destination.
+Personal tools (`screen` and `theme`) act for one named person. When several
+people have steered the turn, the agent must pass that person's sender id as
+`user` to choose whose view or appearance to change, and ask if it is unclear.
+Different permissions (role scopes, model access, access grant, or tool policy)
+queue the message as a followup; changes to execution policy, workspace, or
+bound tools can also require a followup.
 
 Automatic credential rotation and model fallback also retain the active turn.
 New input can steer that turn while the selected model remains unchanged, fallback

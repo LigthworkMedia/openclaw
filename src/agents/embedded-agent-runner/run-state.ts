@@ -9,6 +9,7 @@ import type {
 import type {
   ReplyBackendQueueMessageOptions,
   ReplyToolAuthorityOverlay,
+  ReplyTurnParticipants,
   ReplyBackendQueueMessageResult,
   ReplyBackendMessageInjection,
   ReplyBackendMessageInjectionV2,
@@ -121,6 +122,7 @@ export type EmbeddedRunToolAuthorityBinding = (registration: {
   sourceTurnId?: string;
   project: (overlay: ReplyToolAuthorityOverlay) => string | undefined;
   assertActive: () => void;
+  personalToolParticipants?: ReplyTurnParticipants;
 };
 
 export type EmbeddedRunRegistration = {

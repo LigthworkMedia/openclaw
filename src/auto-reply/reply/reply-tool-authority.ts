@@ -415,6 +415,12 @@ export function prepareReplyToolAuthority(
 ): ReplyToolAuthoritySnapshot {
   const snapshot = snapshotFollowupRunToolAuthority(run);
   return {
+    personalToolOwner: {
+      operatorAuthority: snapshot.operatorAuthority,
+      senderId: snapshot.run.senderId,
+      senderName: snapshot.run.senderName,
+      gatewayUiCommandTarget: snapshot.run.gatewayUiCommandTarget,
+    },
     requestedRoute: Object.freeze({ provider: snapshot.run.provider, model: snapshot.run.model }),
     fingerprint: (route) => resolveReplyToolAuthorityInputFingerprint(snapshot, route),
     project: (overlay, route) => {
