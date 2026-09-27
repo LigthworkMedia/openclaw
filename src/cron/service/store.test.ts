@@ -10,8 +10,8 @@ import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-c
 import { setupCronServiceSuite } from "../service.test-harness.js";
 import * as cronStoreModule from "../store.js";
 import { loadCronStore, saveCronStore } from "../store.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
-  claimCronRunReceiptInDatabase,
   CronRunReceiptConflictError,
   finishCronRunReceipt,
   prepareCronRunReceiptClaim,
@@ -19,7 +19,10 @@ import {
 import type { CronJob } from "../types.js";
 import { findJobOrThrow } from "./jobs-scheduling.js";
 import { cronNotificationJob, type CronNotificationIntent } from "./notification-intents.js";
-import { cronRunReceiptMutationHooks } from "./run-receipts.js";
+import {
+  cronRunReceiptMutationHooks,
+  prepareCronRunReceiptOwnerMutationHooks,
+} from "./run-receipts.js";
 import { createCronServiceState } from "./state.js";
 import { ensureLoaded, persist, persistOrRestore, snapshotStoreForRollback } from "./store.js";
 
@@ -757,19 +760,25 @@ describe("cron service store seam coverage", () => {
     const state = createStoreTestState(storePath);
     await ensureLoaded(state);
     const prepared = prepareCronRunReceiptClaim({
+      observed: undefined,
       storePath,
       job,
       agentId: "alpha",
       startedAtMs: STORE_TEST_NOW,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptInDatabase({
+      claimCronRunReceiptForTest({
         database: db,
         prepared,
         resolveAgentId: (current) => current.agentId!,
       }),
     );
     const snapshot = snapshotStoreForRollback(state);
+    const ownerHooks = await prepareCronRunReceiptOwnerMutationHooks({
+      state,
+      previousJob: job,
+      nextJob: { ...job, agentId: "beta" },
+    });
     findJobOrThrow(state, job.id).agentId = "beta";
     state.pendingQuarantineConfigJobs = [
       { sourceIndex: 0, reason: "invalid-schedule", job: { id: "quarantined-job" } },
@@ -781,7 +790,7 @@ describe("cron service store seam coverage", () => {
           transactionHooks: cronRunReceiptMutationHooks({
             state,
             jobId: job.id,
-            ownerChanged: true,
+            ownerHooks,
             triggerStateChanged: false,
           }),
         }),

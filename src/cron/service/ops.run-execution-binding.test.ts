@@ -24,11 +24,9 @@ import {
 } from "../../tasks/task-runtime.test-helpers.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { saveCronStore } from "../store.js";
-import {
-  claimCronRunReceiptInDatabase,
-  finishCronRunReceipt,
-  prepareCronRunReceiptClaim,
-} from "../store/run-receipt-store.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
+import { finishCronRunReceipt, prepareCronRunReceiptClaim } from "../store/run-receipt-store.js";
+import { inspectActiveCronRunReceipt } from "../store/run-receipt-store.test-support.js";
 import { run } from "./ops-run.js";
 import {
   createCronOwnerExecutionIdentityAdmission,
@@ -180,13 +178,14 @@ describe("cron run execution binding", () => {
           runIsolatedAgentJob: vi.fn(),
         });
         const prepared = prepareCronRunReceiptClaim({
+          observed: undefined,
           storePath: store.storePath,
           job,
           agentId: job.agentId!,
           startedAtMs: dueAt,
         });
         const initial = runOpenClawStateWriteTransaction(({ db }) =>
-          claimCronRunReceiptInDatabase({
+          claimCronRunReceiptForTest({
             database: db,
             prepared,
             resolveAgentId: (current) => current.agentId!,
@@ -225,13 +224,14 @@ describe("cron run execution binding", () => {
           initial.receiptId,
         );
         const replacementPrepared = prepareCronRunReceiptClaim({
+          observed: inspectActiveCronRunReceipt({ storePath: store.storePath, jobId: job.id }),
           storePath: store.storePath,
           job,
           agentId: job.agentId!,
           startedAtMs: dueAt + 1,
         });
         const replacement = runOpenClawStateWriteTransaction(({ db: transactionDb }) =>
-          claimCronRunReceiptInDatabase({
+          claimCronRunReceiptForTest({
             database: transactionDb,
             prepared: replacementPrepared,
             resolveAgentId: (current) => current.agentId!,

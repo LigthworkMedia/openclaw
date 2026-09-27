@@ -17,9 +17,9 @@ import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
 import { CronService } from "../service.js";
 import { loadCronJobsStoreWithConfigJobs, loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
   assertCronRunReceiptCurrent,
-  claimCronRunReceiptInDatabase,
   CronRunReceiptRevisionError,
   finishCronRunReceipt,
   prepareCronRunReceiptClaim,
@@ -184,6 +184,7 @@ describe("cron runtime row publication", () => {
     await saveCronStore(storePath, { version: 1, jobs });
     const job = jobs[64]!;
     const prepared = prepareCronRunReceiptClaim({
+      observed: undefined,
       storePath,
       job,
       agentId: "main",
@@ -191,7 +192,7 @@ describe("cron runtime row publication", () => {
     });
     const reads = trackCronRowReads();
     const handle = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptInDatabase({
+      claimCronRunReceiptForTest({
         database: db,
         prepared,
         resolveAgentId: (current) => current.agentId ?? "main",

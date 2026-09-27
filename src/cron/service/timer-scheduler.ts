@@ -293,6 +293,7 @@ async function onAdmittedTimer(state: CronServiceState) {
           reservedAtMs: now,
           reservationIdentity: reserveQueuedCronRun(state, job.id, now, {
             runReceipt,
+            lifecycleGeneration: generation,
           }),
           releaseAdmission: admissionReleases[index]!,
         }));

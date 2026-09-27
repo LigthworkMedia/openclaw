@@ -25,11 +25,8 @@ import { observeCronTimerAdmissions } from "./service/run-recovery.test-support.
 import { onTimer } from "./service/timer.test-support.js";
 import { loadCronStore, saveCronStore } from "./store.js";
 import { cronStoreKey } from "./store/key.js";
-import {
-  claimCronRunReceiptInDatabase,
-  finishCronRunReceipt,
-  prepareCronRunReceiptClaim,
-} from "./store/run-receipt-store.js";
+import { claimCronRunReceiptForTest } from "./store/run-receipt-claim.test-support.js";
+import { finishCronRunReceipt, prepareCronRunReceiptClaim } from "./store/run-receipt-store.js";
 import { inspectActiveCronRunReceipt } from "./store/run-receipt-store.test-support.js";
 import type { CronRunReceiptHandle } from "./store/run-receipt.types.js";
 import type { CronJob } from "./types.js";
@@ -332,13 +329,14 @@ describe("cron service cross-tick bounded admission", () => {
     });
     await saveCronStore(store.storePath, { version: 1, jobs: [conflicted, pending] });
     const prepared = prepareCronRunReceiptClaim({
+      observed: undefined,
       storePath: store.storePath,
       job: conflicted,
       agentId: conflicted.agentId ?? "main",
       startedAtMs: t0,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptInDatabase({
+      claimCronRunReceiptForTest({
         database: db,
         prepared,
         resolveAgentId: (job) => job.agentId ?? "main",
@@ -412,6 +410,7 @@ describe("cron service cross-tick bounded admission", () => {
 
     const foreignStartedAtMs = t0 + 1;
     const preparedForeignReceipt = prepareCronRunReceiptClaim({
+      observed: undefined,
       storePath: store.storePath,
       job: conflicted,
       agentId: conflicted.agentId ?? "main",
@@ -432,7 +431,7 @@ describe("cron service cross-tick bounded admission", () => {
         // the durable owner race at that boundary.
         if (nowCalls === 3) {
           foreignReceipt = runOpenClawStateWriteTransaction(({ db }) => {
-            const receipt = claimCronRunReceiptInDatabase({
+            const receipt = claimCronRunReceiptForTest({
               database: db,
               prepared: preparedForeignReceipt,
               resolveAgentId: (job) => job.agentId ?? "main",

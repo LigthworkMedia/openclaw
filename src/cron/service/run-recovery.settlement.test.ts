@@ -10,8 +10,8 @@ import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
 import { setupCronServiceSuite, writeCronStoreSnapshot } from "../service.test-harness.js";
 import { loadCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
-  claimCronRunReceiptInDatabase,
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
@@ -60,9 +60,15 @@ it("publishes a committed repair once after reply loss and leaves the remaining 
   await writeCronStoreSnapshot({ storePath, jobs });
   for (const job of jobs) {
     const startedAtMs = job.state.runningAtMs!;
-    const prepared = prepareCronRunReceiptClaim({ storePath, job, agentId: "alpha", startedAtMs });
+    const prepared = prepareCronRunReceiptClaim({
+      observed: undefined,
+      storePath,
+      job,
+      agentId: "alpha",
+      startedAtMs,
+    });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptInDatabase({ database: db, prepared, resolveAgentId: () => "alpha" }),
+      claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
     );
     job.state.runningReceiptId = receipt.receiptId;
     expect(

@@ -43,11 +43,11 @@ import { createCronServiceState, type CronServiceDeps } from "../service/state.j
 import { loadCronStore, saveCronStore } from "../store.js";
 import type { CronJob, CronJobPatch, CronStoredJob, CronToolsAllowProvenance } from "../types.js";
 import { cronStoreKey } from "./key.js";
+import { claimCronRunReceiptForTest } from "./run-receipt-claim.test-support.js";
 import { bindCronRunReceiptExecution } from "./run-receipt-execution-binding.js";
 import {
   assertCronRunReceiptCurrent,
   activateCronRunReceiptInDatabase,
-  claimCronRunReceiptInDatabase,
   CronRunReceiptConflictError,
   CronRunReceiptRevisionError,
   findActiveCronRunReceiptInDatabase,
@@ -56,6 +56,7 @@ import {
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "./run-receipt-store.js";
+import { inspectActiveCronRunReceipt } from "./run-receipt-store.test-support.js";
 import {
   isCronRunTriggerStateRetiredInDatabase,
   retireCronRunTriggerStateInDatabase,
@@ -139,9 +140,10 @@ function claim(storePath: string, job: CronJob, startedAtMs: number) {
     job,
     agentId: job.agentId!,
     startedAtMs,
+    observed: inspectActiveCronRunReceipt({ storePath, jobId: job.id }),
   });
   return runOpenClawStateWriteTransaction(({ db }) =>
-    claimCronRunReceiptInDatabase({
+    claimCronRunReceiptForTest({
       database: db,
       prepared,
       resolveAgentId: (current) => current.agentId!,
@@ -549,6 +551,23 @@ describe("cron run receipt store", () => {
     },
   );
 
+  it("refuses a current receipt guard without recreating missing receipt storage", async () => {
+    const { storePath, job } = await storeJob(makeJob("missing-guard-storage"));
+    const handle = claim(storePath, job, Date.now());
+    const database = openOpenClawStateDatabase().db;
+    database.exec("DROP TABLE cron_run_receipts");
+    try {
+      expect(() =>
+        assertCronRunReceiptCurrent({ handle, resolveAgentId: () => job.agentId! }),
+      ).toThrow(CronRunReceiptRevisionError);
+      expect(
+        database.prepare("SELECT name FROM sqlite_schema WHERE name = 'cron_run_receipts'").get(),
+      ).toBeUndefined();
+    } finally {
+      releaseLocalCronRunReceiptOwnership(handle);
+    }
+  });
+
   it.each(["present", "absent"] as const)(
     "keeps trigger-state retirement atomic with %s storage",
     async (storage) => {
@@ -773,6 +792,7 @@ describe("cron run receipt store", () => {
       job,
       agentId: job.agentId!,
       startedAtMs: Date.now(),
+      observed: inspectActiveCronRunReceipt({ storePath, jobId: job.id }),
     });
     const running = runOpenClawStateWriteTransaction(({ db }) =>
       activateCronRunReceiptInDatabase({
@@ -785,7 +805,7 @@ describe("cron run receipt store", () => {
 
     expect(() =>
       runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptInDatabase({
+        claimCronRunReceiptForTest({
           database: db,
           prepared,
           resolveAgentId: () => job.agentId!,

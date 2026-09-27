@@ -25,6 +25,7 @@ let maintenance: typeof import("./runtime-maintenance.worker.js") | undefined;
 export function prepareCronStateWorkerCommand(type: PropertyKey): Promise<void> | undefined {
   if (
     [
+      "cron.reserveRuns",
       "cron.activateRun",
       "cron.releaseReservations",
       "cron.finishReceipt",
@@ -57,6 +58,7 @@ export function isCronStateWorkerCommand(command: {
   input: unknown;
 }): command is SqliteWorkerCommand<CronStateWorkerOperations> {
   switch (command.type) {
+    case "cron.reserveRuns":
     case "cron.activateRun":
     case "cron.releaseReservations":
     case "cron.finishReceipt":
@@ -80,6 +82,7 @@ export function executeCronStateCommand(
   database: OpenClawStateDatabase,
 ): CronStateWorkerOperations[keyof CronStateWorkerOperations]["output"] {
   switch (command.type) {
+    case "cron.reserveRuns":
     case "cron.activateRun":
     case "cron.releaseReservations":
     case "cron.finishReceipt":
@@ -88,6 +91,8 @@ export function executeCronStateCommand(
         throw new Error("Cron admission worker is not prepared");
       }
       switch (command.type) {
+        case "cron.reserveRuns":
+          return admission.reserveCronRunsInWorker(database, command.input);
         case "cron.activateRun":
           return admission.activateCronRunInWorker(database, command.input);
         case "cron.releaseReservations":

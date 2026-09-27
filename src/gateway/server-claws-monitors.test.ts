@@ -16,8 +16,8 @@ import {
 } from "../cron/service/active-run-cancellation.js";
 import * as sessionReaper from "../cron/session-reaper.js";
 import { upsertCronJobRow } from "../cron/store/row-codec.js";
+import { claimCronRunReceiptForTest } from "../cron/store/run-receipt-claim.test-support.js";
 import {
-  claimCronRunReceiptInDatabase,
   findActiveCronRunReceiptInDatabase,
   isCronRunReceiptOwnerStale,
   prepareCronRunReceiptClaim,
@@ -245,13 +245,14 @@ describe("Claw serving monitor cleanup", () => {
         (job) => job.agentId === "worker" && job.payload.kind === "agentTurn",
       )!;
       const prepared = prepareCronRunReceiptClaim({
+        observed: undefined,
         storePath: current.state.statePath("cron", "jobs.json"),
         job: monitor,
         agentId: "worker",
         startedAtMs: Date.now(),
       });
       const handle = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptInDatabase({
+        claimCronRunReceiptForTest({
           database: db,
           prepared,
           resolveAgentId: () => "worker",

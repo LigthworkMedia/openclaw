@@ -18,8 +18,8 @@ import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
 import { setupCronServiceSuite, writeCronStoreSnapshot } from "../service.test-harness.js";
 import { loadCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
-  claimCronRunReceiptInDatabase,
   finishCronRunReceipt,
   finishCronRunReceiptInDatabase,
   prepareCronRunReceiptClaim,
@@ -183,13 +183,14 @@ describe("one-shot recovery", () => {
             }),
           );
           const prepared = prepareCronRunReceiptClaim({
+            observed: undefined,
             storePath,
             job,
             agentId: "alpha",
             startedAtMs: nowMs,
           });
           successor = runOpenClawStateWriteTransaction(({ db }) =>
-            claimCronRunReceiptInDatabase({
+            claimCronRunReceiptForTest({
               database: db,
               prepared,
               resolveAgentId: () => "alpha",

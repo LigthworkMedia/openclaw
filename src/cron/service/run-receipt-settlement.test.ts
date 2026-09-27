@@ -19,8 +19,8 @@ import { setupCronServiceSuite } from "../service.test-harness.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
 import { loadedCronStoreFromRows, loadCronRows } from "../store/row-codec.js";
+import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
-  claimCronRunReceiptInDatabase,
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
@@ -218,13 +218,14 @@ describe("cron run receipt settlement", () => {
       };
       await saveCronStore(storePath, { version: 1, jobs: [job] });
       const prepared = prepareCronRunReceiptClaim({
+        observed: undefined,
         storePath,
         job,
         agentId: "alpha",
         startedAtMs,
       });
       const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptInDatabase({ database: db, prepared, resolveAgentId: () => "alpha" }),
+        claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
       );
       job.state.runningReceiptId = receipt.receiptId;
       await saveCronStore(storePath, { version: 1, jobs: [job] });
@@ -298,13 +299,14 @@ describe("cron run receipt settlement", () => {
     };
     await saveCronStore(storePath, { version: 1, jobs: [job] });
     const prepared = prepareCronRunReceiptClaim({
+      observed: undefined,
       storePath,
       job,
       agentId: "alpha",
       startedAtMs,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptInDatabase({ database: db, prepared, resolveAgentId: () => "alpha" }),
+      claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
     );
     // Process exit drops the local liveness claim but leaves the durable receipt.
     releaseLocalCronRunReceiptOwnership(receipt);
