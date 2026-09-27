@@ -156,8 +156,15 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   if (canMutateSession && identityVerified && !manualAction && (inCall || (autoJoin && join && /^join huddle$/i.test(text(join))))) {
     // Join muted until Slack reports the virtual input; the host's physical microphone must never go live.
     refreshAudioInput();
-    const desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
+    let desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
     await setMicrophone(desiredMicrophoneState);
+    // Muting is safe whatever the input, so one post-check ends the race: if Slack left the virtual
+    // input during that await, mute rather than leave a physical microphone live.
+    refreshAudioInput();
+    if (desiredMicrophoneState === "on" && !audioInputRouted) {
+      desiredMicrophoneState = "off";
+      await setMicrophone("off");
+    }
     if (microphoneState !== desiredMicrophoneState && !authorityLost) {
       manualAction = manualActionFor("slack-microphone-required", !allowMicrophone
         ? "Turn off the Slack huddle microphone for observe-only mode, then retry."

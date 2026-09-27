@@ -928,6 +928,22 @@ it("mutes a live microphone when Slack switches away from the virtual input duri
   expect(mic.getAttribute("aria-checked")).toBe("false");
 });
 
+it("re-mutes when Slack leaves the virtual input right after the microphone unmutes", async () => {
+  const { document, mic } = inCall(undefined, false);
+  const selected = new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch");
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    if (mic.getAttribute("aria-checked") === "true") {
+      selected.textContent = "Built-in Microphone";
+    }
+  };
+  document.body.append(selected);
+  await fixture({ document, joined: true }).status({ mode: "agent" });
+  expect(mic.clicks).toBe(2);
+  expect(mic.getAttribute("aria-checked")).toBe("false");
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(
