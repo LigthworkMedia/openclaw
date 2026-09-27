@@ -101,7 +101,7 @@ export function resolveCheckoutChip(params: {
 }): CheckoutChipState | null {
   const worktreeName = params.worktreeName.trim();
   if (params.worktree && !params.repository && worktreeName) {
-    return { label: `openclaw/${worktreeName}` };
+    return { label: t("newSession.checkoutWorktreeNamed", { name: worktreeName }) };
   }
   if (params.destination === "cloud") {
     return {

@@ -499,12 +499,14 @@ suite.define(() => {
       await afterPointerHide;
       await expect.poll(() => checkoutSelect.getAttribute("open")).toBeNull();
       await pollLocatorText(checkoutTrigger.locator(".new-session-page__trigger-label")).toBe(
-        "openclaw/release-proof",
+        "Worktree · release-proof",
       );
       expect(await checkoutTrigger.getAttribute("aria-label")).toBe(
-        "Checkout: openclaw/release-proof",
+        "Checkout: Worktree · release-proof",
       );
-      expect(await checkoutTrigger.getAttribute("title")).toBe("Checkout: openclaw/release-proof");
+      expect(await checkoutTrigger.getAttribute("title")).toBe(
+        "Checkout: Worktree · release-proof",
+      );
       await checkoutTrigger.click();
       expect(await checkoutSelect.getByLabel("Name", { exact: true }).inputValue()).toBe(
         "release-proof",
