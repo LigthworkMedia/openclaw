@@ -128,7 +128,7 @@ export class PageNode {
   }
 
   querySelectorAll(selector: string): PageNode[] {
-    const candidates = this.children.flatMap((child) => [child, ...child.descendants()]);
+    const candidates = this.descendants();
     return candidates.filter((candidate) =>
       selector.split(",").some((part) => {
         const descendant = part.trim().match(/^(.*?)\s+(?=[a-z.#])([^ ]+)$/);
