@@ -833,6 +833,24 @@ it("reports the call as unverified when membership is lost during status work", 
   expect(result.meetingTitle).toBeUndefined();
 });
 
+it("never re-enables a microphone someone muted while the status script awaited", async () => {
+  const { document, mic } = inCall(undefined, true);
+  const camera = new PageNode("button", {
+    role: "switch",
+    "aria-label": "Camera",
+    "aria-checked": "true",
+  });
+  camera.onClick = () => {
+    camera.setAttribute("aria-checked", "false");
+    mic.setAttribute("aria-checked", "false");
+  };
+  document.body.append(camera);
+  await fixture({ document, joined: true }).status({ mode: "agent" });
+  expect(camera.clicks).toBe(1);
+  expect(mic.clicks).toBe(0);
+  expect(mic.getAttribute("aria-checked")).toBe("false");
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(

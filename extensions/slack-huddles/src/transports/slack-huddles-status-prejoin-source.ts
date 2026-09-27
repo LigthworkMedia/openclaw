@@ -64,9 +64,9 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   } else if (canMutateSession && priorMeeting && !currentIdentity && !lobbyWaiting) {
     delete window.__openclawSlackHuddle;
   }
-  const microphone = preview ? first(selectors.previewMicrophone) : first(selectors.microphone);
+  const currentMicrophone = () => preview ? first(selectors.previewMicrophone) : first(selectors.microphone);
   const readMicrophone = () => {
-    const current = preview ? first(selectors.previewMicrophone) : first(selectors.microphone);
+    const current = currentMicrophone();
     return toggleState(current, "microphone") || (!preview && (
       firstWithin(current, selectors.mutedIcon) ? "off" :
       firstWithin(current, selectors.unmutedIcon) ? "on" : undefined
@@ -109,20 +109,27 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     (!inCall && /allow (?:slack (?:to )?)?(?:access to |use (?:your )?)?(?:the |your )?microphone|microphone permission/i.test(huddleText))) {
     manualAction = manualActionFor("slack-permission-required", "Allow Slack microphone permission in the OpenClaw Chrome profile, then retry.");
   }
-  const ownsCameraScope = inCall || Boolean(preview);
-  if (canMutateSession && identityVerified && ownsCameraScope && !manualAction && cameraState === "on" && !unavailable(camera)) {
-    if (act(camera)) {
+  // Toggle state can change during awaits (a person may mute or unmute), so each toggle re-reads the
+  // live control right before clicking and only clicks when the live state differs from the target.
+  const currentCamera = () => document.querySelector('button[role="switch"][aria-label="Camera"]');
+  const setMicrophone = async (desired) => {
+    const control = currentMicrophone();
+    const live = readMicrophone();
+    if (live && live !== desired && !unavailable(control) && act(control)) {
       await waitForUi();
-      cameraState = toggleState(document.querySelector('button[role="switch"][aria-label="Camera"]'), "camera");
     }
+    microphoneState = readMicrophone();
+  };
+  const ownsCameraScope = inCall || Boolean(preview);
+  if (canMutateSession && identityVerified && ownsCameraScope && !manualAction) {
+    const control = currentCamera();
+    if (toggleState(control, "camera") === "on" && !unavailable(control) && act(control)) {
+      await waitForUi();
+    }
+    cameraState = toggleState(currentCamera(), "camera") || (!currentCamera() ? "off" : undefined);
   }
   if (canMutateSession && identityVerified && inCall && allowMicrophone && !audioInputRouted && !manualAction) {
-    if (microphoneState === "on" && !unavailable(microphone)) {
-      if (act(microphone)) {
-        await waitForUi();
-        microphoneState = readMicrophone();
-      }
-    }
+    await setMicrophone("off");
     const audioSettings = first(selectors.deviceSettings);
     if (!unavailable(audioSettings) && act(audioSettings)) {
       await waitForUi();
@@ -139,12 +146,7 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   if (canMutateSession && identityVerified && !manualAction && (inCall || (autoJoin && join && /^join huddle$/i.test(text(join))))) {
     // Join muted until Slack reports the virtual input; the host's physical microphone must never go live.
     const desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
-    if (microphoneState !== desiredMicrophoneState && microphoneState && !unavailable(microphone)) {
-      if (act(microphone)) {
-        await waitForUi();
-        microphoneState = readMicrophone();
-      }
-    }
+    await setMicrophone(desiredMicrophoneState);
     if (microphoneState !== desiredMicrophoneState && !authorityLost) {
       manualAction = manualActionFor("slack-microphone-required", !allowMicrophone
         ? "Turn off the Slack huddle microphone for observe-only mode, then retry."
