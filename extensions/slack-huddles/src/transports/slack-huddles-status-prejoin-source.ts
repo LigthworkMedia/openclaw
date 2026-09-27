@@ -37,7 +37,8 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
   // Status work awaits permission queries and UI settling, so authority is rechecked right before each
   // click: the in-call membership header, or the same preview with no other call live.
-  const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity && (inCall
+  const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity &&
+    !firstRaw(selectors.confirmation) && !firstRaw(selectors.multiDevice) && (inCall
     ? Boolean(firstRaw(selectors.channelHeaderInHuddle))
     : Boolean(preview && firstRaw(selectors.preview) === preview && !firstRaw(selectors.inCall)));
   let authorityLost = false;
@@ -157,15 +158,25 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   }
   let clickedJoin = false;
   if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction && !authorityLost &&
-      !unavailable(join) && /^join huddle$/i.test(text(join)) && authorityHolds()) {
-    window.__openclawSlackHuddle.joinRequested = true;
-    window.__openclawSlackHuddle.joinRequestedAt = Date.now();
-    join.click();
-    clickedJoin = true;
-    notes.push("Clicked Join Huddle for an active Slack huddle.");
+      !unavailable(join) && /^join huddle$/i.test(text(join))) {
+    if (authorityHolds()) {
+      window.__openclawSlackHuddle.joinRequested = true;
+      window.__openclawSlackHuddle.joinRequestedAt = Date.now();
+      join.click();
+      clickedJoin = true;
+      notes.push("Clicked Join Huddle for an active Slack huddle.");
+    } else {
+      authorityLost = true;
+    }
   }
   if (authorityLost) {
     notes.push("Slack huddle state changed during status; later controls were left untouched.");
+    const promptNow = firstRaw(selectors.multiDevice) || firstRaw(selectors.confirmation);
+    if (!manualAction && promptNow) {
+      manualAction = firstRaw(selectors.multiDevice)
+        ? manualActionFor("slack-session-conflict", "This Slack account is already in a huddle on another device. Resolve the Slack device prompt, then retry.")
+        : manualActionFor("slack-confirmation-required", "Complete the Slack confirmation, then retry: " + text(promptNow));
+    }
   }`,
     manualActionSource: "",
     platform: {

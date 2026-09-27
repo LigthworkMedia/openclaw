@@ -779,6 +779,41 @@ it("does not click Join when another call appears while the preview microphone s
   expect(result.clickedJoin).not.toBe(true);
 });
 
+it("stops before Join and reports a switch prompt that appears while the preview settles", async () => {
+  const { document, join, mic } = preview("Join Huddle", true);
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    document.body.append(qaNode("huddle_join_modal", "Switch huddles?", "div"));
+  };
+  const result = await fixture({ document }).status({ mode: "agent" });
+  expect(join.clicks).toBe(0);
+  expect(result).toMatchObject({ manualAction: { reason: "slack-confirmation-required" } });
+});
+
+it("omits another huddle's title and participants while membership is unverified", async () => {
+  const { document } = inCall(undefined, false, false);
+  document.body.append(
+    qaNode("huddle_window_titlebar_title", "Other team huddle"),
+    qaNode("huddle_avatar_stack__member", ""),
+  );
+  const result = await fixture({
+    document,
+    currentUrl: CLIENT_URL,
+    window: {
+      __openclawSlackHuddle: {
+        identity: "slack-huddle:C0123ABCD",
+        sessionId: "session-1",
+        joinRequested: true,
+        joinRequestedAt: Date.now(),
+      },
+    },
+  }).status({ readOnly: true });
+  expect(result.inCall).toBe(false);
+  expect(result.meetingTitle).toBeUndefined();
+  expect(result.participantCount).toBeUndefined();
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(
