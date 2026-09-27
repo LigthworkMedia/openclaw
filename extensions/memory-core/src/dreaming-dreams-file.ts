@@ -329,7 +329,7 @@ function stripBackfillDiaryBlocks(existing: string): { updated: string; removed:
   };
 }
 
-function formatBackfillDiaryDate(isoDay: string, _timezone?: string): string {
+function formatBackfillDiaryDate(isoDay: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDay);
   if (!match) {
     return isoDay;
@@ -350,9 +350,8 @@ function buildBackfillDiaryEntry(params: {
   isoDay: string;
   bodyLines: string[];
   sourcePath?: string;
-  timezone?: string;
 }): string {
-  const dateStr = formatBackfillDiaryDate(params.isoDay, params.timezone);
+  const dateStr = formatBackfillDiaryDate(params.isoDay);
   const marker = `<!-- ${BACKFILL_ENTRY_MARKER} day=${params.isoDay}${params.sourcePath ? ` source=${params.sourcePath}` : ""} -->`;
   const body = params.bodyLines
     .map((line) => line.trimEnd())
@@ -383,7 +382,6 @@ export async function writeBackfillDiaryEntries(params: {
           isoDay: entry.isoDay,
           bodyLines: entry.bodyLines,
           sourcePath: entry.sourcePath,
-          timezone: params.timezone,
         }),
       );
       const existingFingerprints = new Set(

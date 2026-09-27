@@ -1057,8 +1057,6 @@ class AgentsPage
             cron: this.cron,
             agentFiles: this,
             agentFilesListError: this.context.agents.files(selectedAgentId).error,
-            agentIdentityLoading: this.agentIdentityLoading,
-            agentIdentityError: this.agentIdentityError,
             agentIdentityById: this.agentIdentityById(),
             identityDraft: this.identityDraft,
             identityAvatarLoader: this.identityAvatarLoader,

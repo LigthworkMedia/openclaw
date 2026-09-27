@@ -7,7 +7,6 @@ import {
 } from "../agents/embedded-agent-runner/terminal-tool-failure.js";
 import { isToolAllowedByPolicyName } from "../agents/tool-policy-match.js";
 import { normalizeToolPolicyName as normalizePolicyToolName } from "../agents/tool-policy.js";
-import { getReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
 import { redactSensitiveText } from "../logging/redact.js";
 import {
   formatUnknownError,
@@ -221,13 +220,10 @@ function createCronRunDiagnosticsFromToolPayload(
   });
   const isError = record.isError === true;
   const text = typeof record.text === "string" ? record.text : undefined;
-  const isNonTerminalToolWarning =
-    opts?.finalStatus === "ok" &&
-    getReplyPayloadMetadata(record)?.nonTerminalToolErrorWarning === true;
   const textDiagnostics =
     isError && text
       ? createCronRunDiagnosticsFromError("tool", text, {
-          severity: isNonTerminalToolWarning || opts?.finalStatus === "ok" ? "warn" : "error",
+          severity: opts?.finalStatus === "ok" ? "warn" : "error",
           nowMs: opts?.nowMs,
           toolName,
         })

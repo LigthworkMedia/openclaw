@@ -107,12 +107,7 @@ export type ResolvedCronDeliveryTarget = Awaited<
   ReturnType<CronDeliveryRuntime["resolveDeliveryTarget"]>
 >;
 
-function normalizeCronTraceTarget(
-  target: CronDeliveryTraceTarget | undefined,
-): CronDeliveryTraceTarget | undefined {
-  if (!target) {
-    return undefined;
-  }
+function normalizeCronTraceTarget(target: CronDeliveryTraceTarget): CronDeliveryTraceTarget {
   return {
     ...(target.channel ? { channel: target.channel } : {}),
     ...(target.to !== undefined ? { to: target.to } : {}),
@@ -197,7 +192,7 @@ export function buildCronDeliveryTrace(params: {
     .map((delivery) => normalizeMessagingToolTarget(delivery, params.resolvedDelivery))
     .filter((target): target is CronDeliveryTraceMessageTarget => Boolean(target));
   return {
-    ...(intended ? { intended } : {}),
+    intended,
     ...(resolved ? { resolved } : {}),
     ...(messageToolSentTo.length > 0 ? { messageToolSentTo } : {}),
     fallbackUsed: params.fallbackUsed,
@@ -422,10 +417,3 @@ export function finalizeCronPromptForResolvedTools(params: {
     ? `${promptWithDeliveryGuidance}\n\n${appended.join("\n\n")}`.trim()
     : promptWithDeliveryGuidance;
 }
-
-// Static per job class on purpose: the free-form job name must not be promoted
-// into the trusted suffix past the external-content fence, and byte-identical
-// suffixes keep prompt caching effective. External-hook runs get only the
-// common core: deferring to "the job's instructions" or advertising job
-// removal would hand fenced webhook content an override lever or a
-// destructive action inside the trusted suffix.

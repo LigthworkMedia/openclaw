@@ -60,8 +60,6 @@ function resolveSkippedInboundAuditReason(
       return "duplicate";
     case "reply-operation-active":
       return "reply_operation_active";
-    case "reply_operation_aborted":
-      return "reply_operation_aborted";
     default:
       return undefined;
   }

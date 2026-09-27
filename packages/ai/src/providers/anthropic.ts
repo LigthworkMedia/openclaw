@@ -341,12 +341,7 @@ export const streamSimpleAnthropic: StreamFunction<
       thinkingEnabled: false,
     } satisfies AnthropicCompactionOptions);
   }
-  const reasoning =
-    options?.reasoning === "off"
-      ? mandatoryAdaptiveThinking
-        ? "low"
-        : "high"
-      : options?.reasoning;
+  const reasoning = options?.reasoning === "off" ? "low" : options?.reasoning;
   if (resolveClaudeOpus5ModelIdentity(model) || resolveClaudeSonnet5ModelIdentity(model)) {
     return streamAnthropic(model, context, {
       ...base,

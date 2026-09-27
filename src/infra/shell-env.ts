@@ -216,9 +216,6 @@ function parseShellEnv(stdout: Buffer): Map<string, string> {
     }
     const key = part.slice(0, eq);
     const value = part.slice(eq + 1);
-    if (!key) {
-      continue;
-    }
     shellEnv.set(key, value);
   }
   return shellEnv;

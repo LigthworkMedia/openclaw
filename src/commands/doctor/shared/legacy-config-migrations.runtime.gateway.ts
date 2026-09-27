@@ -226,13 +226,8 @@ export const LEGACY_CONFIG_MIGRATIONS_RUNTIME_GATEWAY: LegacyConfigMigrationSpec
         return;
       }
 
-      const normalized = normalizeOptionalLowercaseString(bindRaw);
-      if (!normalized) {
-        return;
-      }
       const mapped = normalizeLegacyGatewayBindHostAlias(bindRaw);
-
-      if (!mapped || normalized === mapped) {
+      if (!mapped) {
         return;
       }
 

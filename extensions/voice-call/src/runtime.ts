@@ -546,9 +546,6 @@ export async function createVoiceCallRuntime(params: {
 
     log.info("[voice-call] Runtime initialized");
     log.info(`[voice-call] Webhook URL: ${webhookUrl}`);
-    if (publicUrl && publicUrl !== webhookUrl) {
-      log.info(`[voice-call] Public URL: ${publicUrl}`);
-    }
 
     return {
       config,

@@ -533,9 +533,6 @@ body {
   white-space: pre-wrap;
 }
 
-.tool-images {
-}
-
 .tool-image {
   max-width: 100%;
   max-height: 500px;
@@ -1099,8 +1096,7 @@ body {
 }
 
 @media print {
-  #sidebar,
-  #sidebar-toggle {
+  #sidebar {
     display: none !important;
   }
   body {

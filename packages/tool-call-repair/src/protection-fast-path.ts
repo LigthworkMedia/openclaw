@@ -226,9 +226,6 @@ export function resolveProtectionFastPath(
     state.partialLine = "";
     index = newline + 1;
     lineStart = index;
-    if (index > incoming.length) {
-      break;
-    }
   }
   // Callers only ever query at successive candidate offsets from a single left-to-right
   // scan (findPotentialCallStart), so offsets seen here are non-decreasing. A cursor that

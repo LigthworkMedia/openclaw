@@ -92,10 +92,7 @@ function normalizeEnvelopeOptions(options?: EnvelopeFormatOptions): NormalizedEn
 }
 
 function resolveEnvelopeTimezone(options: NormalizedEnvelopeOptions): ResolvedEnvelopeTimezone {
-  const trimmed = options.timezone?.trim();
-  if (!trimmed) {
-    return { mode: "local" };
-  }
+  const trimmed = options.timezone.trim();
   const lowered = normalizeLowercaseStringOrEmpty(trimmed);
   if (lowered === "utc" || lowered === "gmt") {
     return { mode: "utc" };

@@ -395,9 +395,6 @@ async function deliverWebReplyInActivityScope(
       const warning = "⚠️ Media failed.";
       const fallbackTextParts = [caption ?? "", warning].filter(Boolean);
       const fallbackText = fallbackTextParts.join("\n");
-      if (!fallbackText) {
-        return;
-      }
       whatsappOutboundLog.warn(`Media skipped; sent text-only to ${conversationId}`);
       rememberSendResult(
         await sendWithRetry(

@@ -33,7 +33,6 @@ type ResolveResult = {
   resolved: boolean;
   id?: string;
   name?: string;
-  error?: string;
   note?: string;
 };
 
@@ -235,9 +234,7 @@ export async function channelsResolveCommand(opts: ChannelsResolveOptions, runti
       runtime.log(formatResolveResult(result));
     } else {
       runtime.error(
-        danger(
-          `${result.input} -> unresolved${result.error ? ` (${result.error})` : result.note ? ` (${result.note})` : ""}`,
-        ),
+        danger(`${result.input} -> unresolved${result.note ? ` (${result.note})` : ""}`),
       );
     }
   }

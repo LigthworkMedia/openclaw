@@ -206,7 +206,7 @@ export function resolveModelDirectiveSelection(params: {
   const resolveFuzzy = (paramsLocal: {
     provider?: string;
     fragment: string;
-  }): { selection?: ModelDirectiveSelection; error?: string } => {
+  }): { selection?: ModelDirectiveSelection } => {
     const fragment = normalizeLowercaseStringOrEmpty(paramsLocal.fragment);
     if (!fragment) {
       return {};
@@ -303,7 +303,7 @@ export function resolveModelDirectiveSelection(params: {
 
   if (!resolved) {
     const fuzzy = resolveFuzzy({ fragment: rawTrimmed });
-    if (fuzzy.selection || fuzzy.error) {
+    if (fuzzy.selection) {
       return fuzzy;
     }
     return {
@@ -347,14 +347,14 @@ export function resolveModelDirectiveSelection(params: {
     const provider = normalizeProviderId(rawTrimmed.slice(0, slash).trim());
     const fragment = rawTrimmed.slice(slash + 1).trim();
     const fuzzy = resolveFuzzy({ provider, fragment });
-    if (fuzzy.selection || fuzzy.error) {
+    if (fuzzy.selection) {
       return fuzzy;
     }
   }
 
   // Otherwise, try fuzzy matching across allowlisted models.
   const fuzzy = resolveFuzzy({ fragment: rawTrimmed });
-  if (fuzzy.selection || fuzzy.error) {
+  if (fuzzy.selection) {
     return fuzzy;
   }
 

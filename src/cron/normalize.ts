@@ -73,8 +73,6 @@ function coerceSchedule(schedule: UnknownRecord) {
   const parsedAtIso = parsedAtMs !== null ? timestampMsToIsoString(parsedAtMs) : undefined;
   if (atString) {
     next.at = parsedAtIso ?? atString;
-  } else if (parsedAtIso !== undefined) {
-    next.at = parsedAtIso;
   }
 
   if (exprRaw) {

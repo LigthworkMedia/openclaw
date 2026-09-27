@@ -150,9 +150,6 @@ function extractBindingsSpecificUnionIssue(
         branchBestPathLen = issuePathLen;
       }
     }
-    if (!branchBestIssue) {
-      continue;
-    }
     if (matchingBranchIssue) {
       return null;
     }

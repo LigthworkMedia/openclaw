@@ -392,7 +392,7 @@ export async function executeFollowupTurn(params: {
           getActiveSessionEntry: turn.session.current,
           activeSessionStore: turn.sessionStore,
           storePath: turn.session.kind === "session" ? turn.session.storePath : undefined,
-          resolvedVerboseLevel: currentVerboseLevel() ?? "off",
+          resolvedVerboseLevel: currentVerboseLevel(),
           toolProgressDetail: defaults.toolProgressDetail,
           onCompactionNoticePayload: async (payload) => {
             await enqueueProgressResult(async () => {

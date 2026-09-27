@@ -139,14 +139,6 @@ function validatePluginCommandDefinition(
   if (!command.description.trim()) {
     return "Command description cannot be empty";
   }
-  if (command.ownership === "reserved") {
-    if (!opts?.allowReservedCommandNames) {
-      return "Reserved command ownership is only available to bundled reserved commands";
-    }
-    if (!isReservedCommandName(command.name)) {
-      return `Reserved command ownership requires a reserved command name: ${normalizeOptionalLowercaseString(command.name) ?? ""}`;
-    }
-  }
   if (command.agentPromptGuidance !== undefined && !Array.isArray(command.agentPromptGuidance)) {
     return "Agent prompt guidance must be an array of strings or objects";
   }

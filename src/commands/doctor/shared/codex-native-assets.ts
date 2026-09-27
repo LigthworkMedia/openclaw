@@ -111,7 +111,7 @@ async function discoverPluginHits(root: string): Promise<CodexNativeAssetHit[]> 
   return [...hits.values()];
 }
 
-function isCodexRuntimeConfigured(cfg: OpenClawConfig, _env: NodeJS.ProcessEnv): boolean {
+function isCodexRuntimeConfigured(cfg: OpenClawConfig): boolean {
   return collectConfiguredAgentHarnessRuntimes(cfg).includes("codex");
 }
 
@@ -131,8 +131,8 @@ function isCodexPluginConfigured(cfg: OpenClawConfig): boolean {
   return hasRecord(plugins?.entries?.codex) && plugins.entries.codex.enabled !== false;
 }
 
-function shouldScanCodexNativeAssets(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): boolean {
-  return isCodexRuntimeConfigured(cfg, env) || isCodexPluginConfigured(cfg);
+function shouldScanCodexNativeAssets(cfg: OpenClawConfig): boolean {
+  return isCodexRuntimeConfigured(cfg) || isCodexPluginConfigured(cfg);
 }
 
 /** Discover personal Codex skills, plugins, config, and hooks relevant to Codex-mode agents. */
@@ -141,7 +141,7 @@ async function scanCodexNativeAssets(params: {
   env?: NodeJS.ProcessEnv;
 }): Promise<CodexNativeAssetHit[]> {
   const env = params.env ?? process.env;
-  if (!shouldScanCodexNativeAssets(params.cfg, env)) {
+  if (!shouldScanCodexNativeAssets(params.cfg)) {
     return [];
   }
   const codexHome = resolveCodexHome(env);

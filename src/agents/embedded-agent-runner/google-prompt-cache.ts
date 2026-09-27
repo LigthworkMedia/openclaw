@@ -198,9 +198,6 @@ function readGooglePromptCacheName(value: unknown): string | null {
 }
 
 function convertManagedGoogleTools(tools: NonNullable<GooglePromptCacheContext["tools"]>) {
-  if (tools.length === 0) {
-    return undefined;
-  }
   return [
     {
       functionDeclarations: sortPromptCacheToolsByName(tools).map((tool) => ({

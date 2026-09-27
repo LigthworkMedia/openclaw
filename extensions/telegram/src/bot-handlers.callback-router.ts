@@ -111,14 +111,12 @@ export function createTelegramCallbackRouter({
     if (!callback) {
       return;
     }
-    let callbackAnswered = false;
     const answerCallbackQuery = async () => {
       await withTelegramApiErrorLogging({
         operation: "answerCallbackQuery",
         runtime,
         fn: () => startTelegramCallbackQueryAnswer(bot, callback.id, false),
       }).catch(() => {});
-      callbackAnswered = true;
     };
     if (shouldSkipUpdate(ctx)) {
       const earlyAnswerPromise = getTelegramCallbackQueryAnswerPromise(ctx);
@@ -135,7 +133,6 @@ export function createTelegramCallbackRouter({
     if (earlyAnswerPromise) {
       try {
         await earlyAnswerPromise;
-        callbackAnswered = true;
       } catch {
         await answerCallbackQuery();
       }
@@ -411,10 +408,6 @@ export function createTelegramCallbackRouter({
       runtime.error?.(danger(`callback handler failed: ${String(err)}`));
       if (isTelegramSpooledReplayUpdate(ctx.update)) {
         recordTelegramMessageProcessingResult({ kind: "failed-retryable", error: err });
-      }
-    } finally {
-      if (typedQuestionCallback && !callbackAnswered) {
-        await answerCallbackQuery();
       }
     }
   };
