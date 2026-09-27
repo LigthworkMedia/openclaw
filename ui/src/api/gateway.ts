@@ -4,13 +4,10 @@ import {
   GatewayProtocolClient,
   GatewayProtocolRequestError,
   type GatewayConnectAuthSelection,
-  type GatewayClientMode,
-  type GatewayClientName,
   type GatewayProtocolCloseContext,
   type GatewayProtocolRequestOptions,
   type GatewayProtocolRequestTiming,
   type GatewayProtocolTiming,
-  type ConnectParams,
   type ErrorShape,
   type EventFrame,
   type HelloOk,
@@ -25,9 +22,7 @@ import type {
   GatewayScopeUpgrade,
   ScopeUpgradeBinding,
 } from "@openclaw/gateway-client/scope-upgrade";
-import type { ControlUiBootstrapProfileHint } from "../../../src/gateway/control-ui-bootstrap-contract.js";
 import { roleScopesAllow } from "../../../src/shared/operator-scope-compat.js";
-import type { NativeGatewayConnectAuth } from "../app/native-gateway-auth.ts";
 import { formatUiError } from "../lib/format-error.ts";
 import { isLoopbackHostname } from "../lib/gateway-locality.ts";
 import {
@@ -47,6 +42,7 @@ import {
   CONTROL_UI_OPERATOR_ROLE,
   CONTROL_UI_OPERATOR_SCOPES,
   type ConnectPlan,
+  type GatewayBrowserConnectOptions,
 } from "./gateway-connect-plan.ts";
 export type { EventFrame as GatewayEventFrame } from "@openclaw/gateway-client/browser";
 export { GatewayPayloadLimitError } from "./gateway-browser-socket.ts";
@@ -91,22 +87,7 @@ export type GatewayHelloOk = Omit<HelloOk, "server" | "features" | "snapshot" | 
   policy?: Partial<HelloOk["policy"]>;
 };
 
-export type GatewayBrowserClientOptions = {
-  url: string;
-  nativeConnectAuth?: NativeGatewayConnectAuth;
-  token?: string;
-  bootstrapToken?: string;
-  bootstrapProfile?: ControlUiBootstrapProfileHint;
-  password?: string;
-  clientName?: GatewayClientName;
-  clientVersion?: string;
-  clientBuildId?: string;
-  platform?: string;
-  deviceFamily?: string;
-  mode?: GatewayClientMode;
-  instanceId?: string;
-  scopes?: string[];
-  modelCatalog?: ConnectParams["modelCatalog"];
+export type GatewayBrowserClientOptions = GatewayBrowserConnectOptions & {
   onHello?: (hello: GatewayHelloOk) => void;
   onEvent?: (evt: EventFrame) => void;
   onClose?: (info: {

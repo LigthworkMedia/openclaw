@@ -7,17 +7,42 @@ import {
   MIN_CLIENT_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   type ConnectParams,
+  type GatewayClientMode,
+  type GatewayClientName,
   type GatewayConnectAuthSelection,
 } from "@openclaw/gateway-client/browser";
-import { CONTROL_UI_OWNER_BOOTSTRAP_PROFILE_HINT } from "../../../src/gateway/control-ui-bootstrap-contract.js";
+import {
+  CONTROL_UI_OWNER_BOOTSTRAP_PROFILE_HINT,
+  type ControlUiBootstrapProfileHint,
+} from "../../../src/gateway/control-ui-bootstrap-contract.js";
 import {
   BOOTSTRAP_HANDOFF_OPERATOR_SCOPES,
   CONTROL_UI_OWNER_BOOTSTRAP_OPERATOR_SCOPES,
 } from "../../../src/shared/device-bootstrap-profile.js";
-import type { NativeGatewayAuthorization } from "../app/native-gateway-auth.ts";
+import type {
+  NativeGatewayAuthorization,
+  NativeGatewayConnectAuth,
+} from "../app/native-gateway-auth.ts";
 import { loadOrCreateDeviceIdentity } from "../lib/nodes/index.ts";
 import { buildGatewayConnectDevice } from "./gateway-connect-device.ts";
-import type { GatewayBrowserClientOptions } from "./gateway.ts";
+
+export type GatewayBrowserConnectOptions = {
+  url: string;
+  nativeConnectAuth?: NativeGatewayConnectAuth;
+  token?: string;
+  bootstrapToken?: string;
+  bootstrapProfile?: ControlUiBootstrapProfileHint;
+  password?: string;
+  clientName?: GatewayClientName;
+  clientVersion?: string;
+  clientBuildId?: string;
+  platform?: string;
+  deviceFamily?: string;
+  mode?: GatewayClientMode;
+  instanceId?: string;
+  scopes?: string[];
+  modelCatalog?: ConnectParams["modelCatalog"];
+};
 
 export const CONTROL_UI_OPERATOR_ROLE = "operator";
 
@@ -56,7 +81,7 @@ export async function buildBrowserGatewayConnectPlan({
   selectAuth,
   onDeviceIdentityReady,
 }: {
-  opts: GatewayBrowserClientOptions;
+  opts: GatewayBrowserConnectOptions;
   connectNonce: string | null;
   connectChallengeTs: number | null | undefined;
   generation: number;
