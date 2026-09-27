@@ -21,6 +21,7 @@ import {
 } from "../../infra/active-node-context.js";
 import { registerAgentRunDelegatedAuthorityClosedHandler } from "../../infra/agent-run-registry.js";
 import { redactSensitiveText } from "../../logging/redact.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { buildPersistedUserTurnMessage } from "../../sessions/user-turn-transcript.js";
 import { prepareSkillResourceDelivery } from "../../skills/runtime/resources.js";
 import { parseWorkerLaunchPlan } from "../../worker/launch-descriptor.js";
@@ -60,6 +61,8 @@ import {
   recoverWorkspaceBeforeTurn,
   workerWorkspaceFailure,
 } from "./workspace-result-finalize.js";
+
+const log = createSubsystemLogger("gateway/worker-turn");
 
 export async function executeWorkerTurn(
   params: Omit<Parameters<typeof executeRemoteExecTurn>[0], "environments" | "runLocal"> & {
@@ -214,17 +217,22 @@ export async function executeWorkerTurn(
       portalAvailable,
     });
   params.placements.authorizeWorkerTurnTools(params.turnClaim, toolAuthority.allowedToolNames);
-  const { operationalRunInstance, runtimeIdentity, assertActive, takeFinishingOutcome } =
-    await prepareWorkerAgentRuntimeIdentity({
-      agentId: placement.agentId,
-      runtimeInstanceId: placement.environmentId,
-      placements: params.placements,
-      sessionKey: placement.sessionKey,
-      sessionTarget: transcriptTarget,
-      assertSourceCurrent,
-      turn,
-      turnClaim: params.turnClaim,
-    });
+  const {
+    operationalRunInstance,
+    runtimeIdentity,
+    operatorAuthority,
+    assertActive,
+    takeFinishingOutcome,
+  } = await prepareWorkerAgentRuntimeIdentity({
+    agentId: placement.agentId,
+    runtimeInstanceId: placement.environmentId,
+    placements: params.placements,
+    sessionKey: placement.sessionKey,
+    sessionTarget: transcriptTarget,
+    assertSourceCurrent,
+    turn,
+    turnClaim: params.turnClaim,
+  });
   preparedComputer?.bind(operationalRunInstance, {
     authority: runtimeIdentity.approvalAuthority,
     assertCurrent: assertActive,
@@ -266,6 +274,7 @@ export async function executeWorkerTurn(
       }
     };
     githubGrant = await prepareWorkerGitHubBindingGrant({
+      operatorAuthority,
       sessionId: placement.sessionId,
       sessionKey: placement.sessionKey,
       agentId: placement.agentId,
@@ -625,9 +634,13 @@ export async function executeWorkerTurn(
       workspaceConflictSummary: workspaceConflict?.summary,
     });
   } finally {
-    await githubGrant?.revoke();
     revokeSkillAuthoring?.();
     stopWatchingClaim();
     stopWatchingRun();
+    try {
+      await githubGrant?.revoke();
+    } catch {
+      log.warn("Worker GitHub token revocation failed; the installation token will expire.");
+    }
   }
 }
