@@ -51,7 +51,11 @@ afterEach(async () => {
 });
 
 function environment() {
-  return { APPDATA: path.join(root, "appdata"), OPENCLAW_WINDOWS_TASK_NAME: "OpenClaw Gateway" };
+  return {
+    APPDATA: path.join(root, "appdata"),
+    OPENCLAW_WINDOWS_TASK_NAME: "OpenClaw Gateway",
+    OPENCLAW_PROFILE: "default",
+  };
 }
 
 async function startup(form: "cmd" | "9.2/9.3" | "9.4", taskName = "OpenClaw Gateway (rescue)") {
