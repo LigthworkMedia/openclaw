@@ -503,6 +503,8 @@ export function createAgentHarnessHostCapabilities(params: {
     prepareLocalGitHubEnvironment: (request) =>
       prepareLocalGitHubEnvironment({
         admittedRunContext: attempt.admittedRunContext,
+        agentId: attempt.agentId,
+        config: attempt.config,
         assertCurrent: () => {
           assertActive();
           request.assertCurrent();
