@@ -64,7 +64,7 @@ describe("createSessionCapability message subscriptions", () => {
     sessions.dispose();
   });
 
-  it("shares canonical observers across capabilities without releasing the live owner", async () => {
+  it("shares narration and foreground observers across capabilities without retiring the full stream", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "sessions.messages.subscribe") {
         return { key: "agent:main:main" };
@@ -80,17 +80,24 @@ describe("createSessionCapability message subscriptions", () => {
     const second = createTestSessionCapability(gateway);
 
     const [firstLease, secondLease] = await Promise.all([
-      first.subscribeMessages("main"),
+      first.subscribeMessages("main", { mode: "narration" }),
       second.subscribeMessages("agent:main:main"),
     ]);
 
-    expect(request).toHaveBeenCalledExactlyOnceWith(
+    expect(request).toHaveBeenNthCalledWith(
+      1,
       "sessions.messages.subscribe",
-      { key: "main" },
+      { key: "main", mode: "narration" },
+      subscriptionRequestOptions,
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "sessions.messages.subscribe",
+      { key: "agent:main:main" },
       subscriptionRequestOptions,
     );
     await first.unsubscribeMessages(firstLease);
-    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledTimes(2);
     await second.unsubscribeMessages(secondLease);
     expect(request).toHaveBeenLastCalledWith(
       "sessions.messages.unsubscribe",

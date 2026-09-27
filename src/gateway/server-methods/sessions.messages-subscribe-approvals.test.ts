@@ -230,6 +230,34 @@ describe("sessions.messages.subscribe approval opt-in", () => {
     vi.useRealTimers();
   });
 
+  it.each([false, true])(
+    "replaces narration intent without changing approval delivery (approvals=%s)",
+    async (includeApprovals) => {
+      const key = "agent:main:child";
+      const registry = createSessionMessageSubscriberRegistry();
+      const client = createClient({ scopes: ["operator.admin"] });
+      const { context } = createContext({
+        replay: { sessionKey: key, updatedAtMs: 42, approvals: [], truncated: false },
+      });
+      context.subscribeSessionMessageEvents = registry.subscribe;
+      const body = { key, ...(includeApprovals ? { includeApprovals: true } : {}) };
+
+      const narration = await subscribe({
+        body: { ...body, mode: "narration" },
+        client,
+        context,
+      });
+      expect(narration).toHaveBeenCalledWith(true, expect.any(Object), undefined);
+      expect([...registry.getNarration(key)]).toEqual([client.connId]);
+
+      const foreground = await subscribe({ body, client, context });
+      expect(foreground).toHaveBeenCalledWith(true, expect.any(Object), undefined);
+      expect([...registry.get(key)]).toEqual([client.connId]);
+      expect([...registry.getNarration(key)]).toEqual([]);
+      expect([...registry.getApprovals(key)]).toEqual(includeApprovals ? [client.connId] : []);
+    },
+  );
+
   it("allows an admin without a paired device and uses the exact scoped subscription key", async () => {
     const approvalReplay = {
       sessionKey: "agent:work:global",

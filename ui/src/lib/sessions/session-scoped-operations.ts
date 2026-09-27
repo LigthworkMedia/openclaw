@@ -100,7 +100,7 @@ export function createSessionScopedOperations(host: SessionScopedOperationsHost)
 
   const subscribeMessages = async (
     key: string,
-    options: { agentId?: string | null; includeApprovals?: boolean } = {},
+    options: NonNullable<Parameters<SessionCapability["subscribeMessages"]>[1]> = {},
   ): Promise<SessionMessageSubscription> => {
     const scope = host.connection.capture();
     if (!scope) {
@@ -114,6 +114,7 @@ export function createSessionScopedOperations(host: SessionScopedOperationsHost)
       .acquire(normalizedKey, {
         agentId,
         ...(options.includeApprovals ? { includeApprovals: true } : {}),
+        ...(options.mode ? { mode: options.mode } : {}),
       })
       .catch((error: unknown) => {
         if (

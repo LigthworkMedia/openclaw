@@ -57,7 +57,12 @@ import type {
   ChannelRuntimeSnapshotOptions,
   StartChannelOptions,
 } from "../server-channel-runtime.types.js";
-import type { ChatRunEntry, ChatRunRegistration, ChatRunState } from "../server-chat-state.js";
+import type {
+  ChatRunEntry,
+  ChatRunRegistration,
+  ChatRunState,
+  SessionMessageSubscriberRegistry,
+} from "../server-chat-state.js";
 import type { GatewayCronServiceContract } from "../server-cron-contract.js";
 import type {
   GatewayApprovalEventPublisher,
@@ -359,11 +364,7 @@ type GatewayTransportContext = {
   subscribeSessionEvents: (connId: string) => void;
   unsubscribeSessionEvents: (connId: string) => void;
   forgetConnectionAncestors: (connId: string) => void;
-  subscribeSessionMessageEvents: (
-    connId: string,
-    sessionKey: string,
-    opts?: { includeApprovals?: boolean; provisional?: boolean },
-  ) => ((() => void) & { commit: () => void }) | undefined;
+  subscribeSessionMessageEvents: SessionMessageSubscriberRegistry["subscribe"];
   unsubscribeSessionMessageEvents: (connId: string, sessionKey: string) => void;
   unsubscribeAllSessionEvents: (connId: string) => void;
   getSessionEventSubscriberConnIds: () => ReadonlySet<string>;

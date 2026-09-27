@@ -155,7 +155,7 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
             const rollbackSubscription = context.subscribeSessionMessageEvents(
               connId,
               subscriptionKey,
-              { includeApprovals: true, provisional: true },
+              { includeApprovals: true, provisional: true, mode: p.mode },
             );
             try {
               prepared = await context.listSessionPendingApprovals?.(subscriptionKey, client);
@@ -210,6 +210,7 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
           } else {
             const rollback = context.subscribeSessionMessageEvents(connId, subscriptionKey, {
               provisional: true,
+              mode: p.mode,
             });
             try {
               read?.assertCurrent();

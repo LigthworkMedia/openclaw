@@ -448,21 +448,27 @@ export type SessionMessageSubscriberRegistry = {
   subscribe: (
     connId: string,
     sessionKey: string,
-    opts?: { includeApprovals?: boolean; provisional?: boolean },
+    opts?: { includeApprovals?: boolean; provisional?: boolean; mode?: "narration" },
   ) => SessionMessageSubscription | undefined;
   unsubscribe: (connId: string, sessionKey: string) => void;
   unsubscribeAll: (connId: string) => void;
   get: (sessionKey: string) => ReadonlySet<string>;
   getApprovals: (sessionKey: string) => ReadonlySet<string>;
+  getNarration: (sessionKey: string) => ReadonlySet<string>;
   onChange: (listener: (sessionKey: string, connId: string) => void) => () => void;
 };
 
 type SessionMessageSubscription = (() => void) & { commit: () => void };
 
+type SessionMessageSubscriptionMode = {
+  includeApprovals: boolean;
+  mode?: "narration";
+};
+
 type ProvisionalSubscriptionState = {
-  base?: boolean;
+  committed?: SessionMessageSubscriptionMode;
   inflight: number;
-  lastSuccess?: { sequence: number; includeApprovals: boolean };
+  lastSuccess?: { sequence: number; mode: SessionMessageSubscriptionMode };
 };
 
 const TOOL_EVENT_RECIPIENT_TTL_MS = 10 * 60 * 1000;
@@ -503,49 +509,49 @@ export function createSessionMessageSubscriberRegistry(
   onSubscriptionChange?: (connId: string) => void,
 ): SessionMessageSubscriberRegistry {
   const sessionToConnIds = new Map<string, Set<string>>();
-  // Booleans retain committed approval mode; records own unsettled replays.
-  // Replacing a record fences late settlements, including connection/session reuse.
-  const connections = new Map<string, Map<string, boolean | ProvisionalSubscriptionState>>();
+  // Removing a record fences late replay settlements, including connection/session reuse.
+  const connections = new Map<string, Map<string, ProvisionalSubscriptionState>>();
   const approvalSessionToConnIds = new Map<string, Set<string>>();
+  const narrationSessionToConnIds = new Map<string, Set<string>>();
   const changeListeners = new Set<(sessionKey: string, connId: string) => void>();
   const empty = new Set<string>();
   let subscriptionSequence = 0;
 
-  const setMessageSubscription = (connId: string, sessionKey: string, subscribed: boolean) => {
-    const connIds = sessionToConnIds.get(sessionKey);
-    const wasSubscribed = connIds?.has(connId) === true;
+  const setMembership = (
+    index: Map<string, Set<string>>,
+    connId: string,
+    sessionKey: string,
+    subscribed: boolean,
+  ) => {
+    const connIds = index.get(sessionKey);
     if (subscribed) {
       const nextConnIds = connIds ?? new Set<string>();
       nextConnIds.add(connId);
-      sessionToConnIds.set(sessionKey, nextConnIds);
-      if (!wasSubscribed) {
-        for (const listener of changeListeners) {
-          listener(sessionKey, connId);
-        }
-      }
+      index.set(sessionKey, nextConnIds);
       return;
     }
     connIds?.delete(connId);
     if (connIds?.size === 0) {
-      sessionToConnIds.delete(sessionKey);
+      index.delete(sessionKey);
     }
-    if (wasSubscribed) {
+  };
+  const setSubscription = (
+    connId: string,
+    sessionKey: string,
+    mode?: SessionMessageSubscriptionMode,
+  ) => {
+    const subscribed = mode !== undefined;
+    const narration = mode?.mode === "narration";
+    const changed =
+      (sessionToConnIds.get(sessionKey)?.has(connId) === true) !== subscribed ||
+      (narrationSessionToConnIds.get(sessionKey)?.has(connId) === true) !== narration;
+    setMembership(sessionToConnIds, connId, sessionKey, subscribed);
+    setMembership(approvalSessionToConnIds, connId, sessionKey, mode?.includeApprovals === true);
+    setMembership(narrationSessionToConnIds, connId, sessionKey, narration);
+    if (changed) {
       for (const listener of changeListeners) {
         listener(sessionKey, connId);
       }
-    }
-  };
-  const setApprovalSubscription = (connId: string, sessionKey: string, subscribed: boolean) => {
-    const connIds = approvalSessionToConnIds.get(sessionKey);
-    if (subscribed) {
-      const nextConnIds = connIds ?? new Set<string>();
-      nextConnIds.add(connId);
-      approvalSessionToConnIds.set(sessionKey, nextConnIds);
-      return;
-    }
-    connIds?.delete(connId);
-    if (connIds?.size === 0) {
-      approvalSessionToConnIds.delete(sessionKey);
     }
   };
 
@@ -562,23 +568,20 @@ export function createSessionMessageSubscriberRegistry(
       }
       onSubscriptionChange?.(normalizedConnId);
       const states =
-        connections.get(normalizedConnId) ??
-        new Map<string, boolean | ProvisionalSubscriptionState>();
-      const previous = states.get(normalizedSessionKey);
-      const state: ProvisionalSubscriptionState =
-        typeof previous === "object" ? previous : { base: previous, inflight: 0 };
+        connections.get(normalizedConnId) ?? new Map<string, ProvisionalSubscriptionState>();
+      const state: ProvisionalSubscriptionState = states.get(normalizedSessionKey) ?? {
+        inflight: 0,
+      };
       state.inflight += 1;
       states.set(normalizedSessionKey, state);
       connections.set(normalizedConnId, states);
       subscriptionSequence += 1;
       const provisionalRecency = subscriptionSequence;
-      setMessageSubscription(normalizedConnId, normalizedSessionKey, true);
-
-      setApprovalSubscription(
-        normalizedConnId,
-        normalizedSessionKey,
-        opts?.includeApprovals === true,
-      );
+      const mode: SessionMessageSubscriptionMode = {
+        includeApprovals: opts?.includeApprovals === true,
+        mode: opts?.mode,
+      };
+      setSubscription(normalizedConnId, normalizedSessionKey, mode);
       let settled = false;
       const settle = (succeeded: boolean) => {
         if (settled || connections.get(normalizedConnId)?.get(normalizedSessionKey) !== state) {
@@ -589,7 +592,7 @@ export function createSessionMessageSubscriberRegistry(
           if (provisionalRecency >= (state.lastSuccess?.sequence ?? -Infinity)) {
             state.lastSuccess = {
               sequence: provisionalRecency,
-              includeApprovals: opts?.includeApprovals === true,
+              mode,
             };
           }
         }
@@ -597,17 +600,14 @@ export function createSessionMessageSubscriberRegistry(
         if (state.inflight > 0) {
           return;
         }
-        const committed = state.lastSuccess?.includeApprovals ?? state.base;
+        const committed = state.lastSuccess?.mode ?? state.committed;
+        state.committed = committed;
+        delete state.lastSuccess;
         if (committed === undefined) {
           onSubscriptionChange?.(normalizedConnId);
           states.delete(normalizedSessionKey);
-          setMessageSubscription(normalizedConnId, normalizedSessionKey, false);
-          setApprovalSubscription(normalizedConnId, normalizedSessionKey, false);
-        } else {
-          states.set(normalizedSessionKey, committed);
-          setMessageSubscription(normalizedConnId, normalizedSessionKey, true);
-          setApprovalSubscription(normalizedConnId, normalizedSessionKey, committed);
         }
+        setSubscription(normalizedConnId, normalizedSessionKey, committed);
         if (states.size === 0) {
           connections.delete(normalizedConnId);
         }
@@ -632,8 +632,7 @@ export function createSessionMessageSubscriberRegistry(
       if (states?.size === 0) {
         connections.delete(normalizedConnId);
       }
-      setMessageSubscription(normalizedConnId, normalizedSessionKey, false);
-      setApprovalSubscription(normalizedConnId, normalizedSessionKey, false);
+      setSubscription(normalizedConnId, normalizedSessionKey);
     },
     unsubscribeAll: (connId: string) => {
       const normalizedConnId = connId.trim();
@@ -647,14 +646,12 @@ export function createSessionMessageSubscriberRegistry(
       }
       connections.delete(normalizedConnId);
       for (const sessionKey of states.keys()) {
-        setMessageSubscription(normalizedConnId, sessionKey, false);
-      }
-      for (const sessionKey of states.keys()) {
-        setApprovalSubscription(normalizedConnId, sessionKey, false);
+        setSubscription(normalizedConnId, sessionKey);
       }
     },
     get: (sessionKey) => sessionToConnIds.get(sessionKey.trim()) ?? empty,
     getApprovals: (sessionKey) => approvalSessionToConnIds.get(sessionKey.trim()) ?? empty,
+    getNarration: (sessionKey) => narrationSessionToConnIds.get(sessionKey.trim()) ?? empty,
     onChange: (listener) => {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);

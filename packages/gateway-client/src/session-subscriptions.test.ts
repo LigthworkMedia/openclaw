@@ -11,6 +11,7 @@ import {
   releaseGatewaySessionMessageSubscription,
   resetGatewaySessionMessageSubscriptionCoordinator,
   type GatewaySessionMessageRequestClient,
+  type GatewaySessionMessageSubscriptionOptions,
 } from "./session-subscriptions.js";
 import { DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS } from "./timeouts.js";
 
@@ -70,6 +71,175 @@ afterEach(() => {
 });
 
 describe("GatewaySessionMessageSubscriptionCoordinator", () => {
+  it("retains acquisition intent when the caller mutates options before acknowledgment", async () => {
+    const acknowledged = createDeferred<unknown>();
+    const { client, request } = createClient();
+    request.mockImplementationOnce(async () => acknowledged.promise);
+    const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client);
+    const options: GatewaySessionMessageSubscriptionOptions = {};
+    const pending = coordinator.acquire("main", options);
+    options.mode = "narration";
+    options.includeApprovals = true;
+    acknowledged.resolve({ key: "main" });
+    const foreground = await pending;
+    expect(foreground).toEqual({ key: "main", agentId: null });
+    expect(request).toHaveBeenCalledExactlyOnceWith("sessions.messages.subscribe", { key: "main" });
+
+    const narration = await coordinator.acquire("main", { mode: "narration" });
+    await coordinator.release(foreground);
+    expect(request).toHaveBeenLastCalledWith("sessions.messages.subscribe", {
+      key: "main",
+      mode: "narration",
+    });
+    await coordinator.release(narration);
+    expect(request).toHaveBeenLastCalledWith("sessions.messages.unsubscribe", { key: "main" });
+  });
+
+  it.each([false, true])(
+    "keeps full streams until the last foreground owner releases (narration first: %s)",
+    async (narrationFirst) => {
+      const { client, request } = createClient();
+      const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client);
+      const narration = narrationFirst
+        ? await coordinator.acquire("main", { mode: "narration" })
+        : null;
+      if (narrationFirst) {
+        expect(request).toHaveBeenLastCalledWith("sessions.messages.subscribe", {
+          key: "main",
+          mode: "narration",
+        });
+      }
+      const foreground = await coordinator.acquire("main", { includeApprovals: true });
+      const background = narration ?? (await coordinator.acquire("main", { mode: "narration" }));
+      const secondForeground = await coordinator.acquire("main");
+      expect(request).toHaveBeenLastCalledWith("sessions.messages.subscribe", {
+        key: "main",
+        includeApprovals: true,
+      });
+      const fullRequests = request.mock.calls.length;
+      await coordinator.release(foreground);
+      expect(request).toHaveBeenCalledTimes(fullRequests);
+      await coordinator.release(secondForeground);
+      expect(request).toHaveBeenLastCalledWith("sessions.messages.subscribe", {
+        key: "main",
+        mode: "narration",
+        includeApprovals: true,
+      });
+      await coordinator.release(background);
+      expect(request).toHaveBeenLastCalledWith("sessions.messages.unsubscribe", { key: "main" });
+    },
+  );
+
+  it.each([false, true])(
+    "settles an in-flight foreground acquire before releasing the last full owner (reject: %s)",
+    async (reject) => {
+      const approval = createDeferred<unknown>();
+      const requested = createDeferred();
+      const { client, request } = createClient(async (_method, params) => {
+        if (params.includeApprovals) {
+          requested.resolve();
+          return approval.promise;
+        }
+        return { key: params.key };
+      });
+      const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client);
+      const foreground = await coordinator.acquire("main");
+      const narration = await coordinator.acquire("main", { mode: "narration" });
+      const nextForeground = coordinator.acquire("main", { includeApprovals: true });
+      const outcome = nextForeground.then(
+        (handle) => handle,
+        () => null,
+      );
+      await requested.promise;
+      const released = coordinator.release(foreground);
+      expect(request).toHaveBeenCalledTimes(2);
+      if (reject) {
+        approval.reject(new Error("approval replay unavailable"));
+      } else {
+        approval.resolve({ key: "main", approvalReplay: { approvals: [] } });
+      }
+      const next = await outcome;
+      await released;
+      if (next) {
+        expect(request).toHaveBeenCalledTimes(2);
+        await coordinator.release(next);
+      }
+      expect(request.mock.lastCall?.[1].mode).toBe("narration");
+      await coordinator.release(narration);
+      expect(request).toHaveBeenLastCalledWith("sessions.messages.unsubscribe", { key: "main" });
+    },
+  );
+
+  it("serializes narration approval replay before acknowledging a full-stream upgrade", async () => {
+    const approval = createDeferred<unknown>();
+    const requested = createDeferred();
+    let holdReplay = true;
+    let wireMode: unknown;
+    let wireApprovals = false;
+    const { client } = createClient(async (_method, params) => {
+      if (params.includeApprovals && holdReplay) {
+        holdReplay = false;
+        requested.resolve();
+        await approval.promise;
+      }
+      wireMode = params.mode;
+      wireApprovals = params.includeApprovals === true;
+      return { key: params.key, approvalReplay: { approvals: [] } };
+    });
+    const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client);
+    const narration = await coordinator.acquire("main", { mode: "narration" });
+    const approvalNarration = coordinator.acquire("main", {
+      mode: "narration",
+      includeApprovals: true,
+    });
+    await requested.promise;
+    const foreground = coordinator.acquire("main");
+    approval.resolve({});
+    const [approvalOwner, fullOwner] = await Promise.all([approvalNarration, foreground]);
+    expect(wireMode).toBeUndefined();
+    expect(wireApprovals).toBe(true);
+    await coordinator.release(fullOwner);
+    expect(wireMode).toBe("narration");
+    expect(wireApprovals).toBe(true);
+    await coordinator.release(narration);
+    await coordinator.release(approvalOwner);
+  });
+
+  it("restores a timed-out downgrade and drains overlapping releases without orphaning narration", async () => {
+    const downgrade = createDeferred<unknown>();
+    let holdDowngrade = false;
+    const { client, request } = createClient(async (_method, params) => {
+      if (params.mode === "narration" && holdDowngrade) {
+        holdDowngrade = false;
+        return downgrade.promise;
+      }
+      return { key: params.key };
+    });
+    const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client);
+    const foreground = await coordinator.acquire("main");
+    const narration = await coordinator.acquire("main", { mode: "narration" });
+    holdDowngrade = true;
+    const firstRelease = coordinator.release(foreground);
+    const failedRelease = expect(firstRelease).rejects.toBeInstanceOf(
+      GatewayProtocolRequestTimeoutError,
+    );
+    downgrade.reject(
+      new GatewayProtocolRequestTimeoutError({
+        method: "sessions.messages.subscribe",
+        timeoutMs: DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS,
+        requestSent: true,
+      }),
+    );
+    await failedRelease;
+    expect(request).toHaveBeenLastCalledWith("sessions.messages.subscribe", { key: "main" });
+    await Promise.all([coordinator.release(foreground), coordinator.release(narration)]);
+    expect(request).toHaveBeenLastCalledWith("sessions.messages.unsubscribe", { key: "main" });
+    const count = request.mock.calls.length;
+    await coordinator.release(foreground);
+    await coordinator.release(narration);
+    expect(request).toHaveBeenCalledTimes(count);
+  });
+
   it("shares one in-flight wire subscription across canonical session aliases", async () => {
     const { client, request } = createClient();
     const coordinator = new GatewaySessionMessageSubscriptionCoordinator(client, {

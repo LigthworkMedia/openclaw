@@ -62,6 +62,51 @@ exceed the shared page size. Use `nextOffset` to advance and deduplicate rows by
 session key across pages; do not derive the next offset from the displayed row
 count.
 
+## Session message subscriptions and narration
+
+`sessions.messages.subscribe` subscribes one connection to a session's live
+messages. Its `key` and optional `agentId` select the session; this is separate
+from the broad roster subscription above. Omit `mode` for full `chat` and `agent`
+streams, including foreground transcripts and passive views of runs started by
+another client. Repeating the request replaces the connection's subscription
+mode. `sessions.messages.unsubscribe` removes that session subscription.
+
+Background narration consumers declare `mode: "narration"`. The Gateway replaces
+their token-level `chat` deltas and raw `agent` assistant events with
+`session.narration` snapshots. Each snapshot contains `sessionKey`, optional
+`agentId`, `runId`, and `text`: at most 16,384 characters of the current visible
+assistant tail. Hidden reasoning and internal context are removed before the
+tail is bounded. An empty `text` retracts the previous narration. Consumers can
+derive a compact line from this text without reconstructing token deltas.
+
+The first text update can arrive immediately. Subsequent snapshots arrive at
+most once every two seconds per session per connection, using the latest text
+without postponing the pending deadline. Terminal chat events flush the last
+snapshot immediately before the terminal event, including final text corrections
+or retractions; this final flush is exempt from the two-second interval.
+Newer tool activity or a change of run discards pending older text, so a delayed
+snapshot cannot replace a newer tool line or switch the sidebar back to an older run.
+Lifecycle, status, tool, final, abort, and error events retain their existing
+delivery. Raw thinking streams and in-progress preamble or answer-candidate text
+are omitted; item completion and answer selection still arrive. Approval events
+still require `includeApprovals: true` and the normal
+approval authority. Queued narration is discarded on unsubscribe, mode changes,
+connection retirement, or run retirement, and delivery rechecks current access.
+
+The Gateway client SDK shares one wire subscription per session on a connection.
+If any owner requires full streams, the shared subscription remains full; it
+returns to narration only after the last full owner releases it. Narration
+consumers sharing a foreground subscription must also accept full stream events.
+
+The bundled Control UI declares narration intent for sidebar interests. It is
+version-locked to its Gateway and reloads on upgrade. Shared Apple chat clients
+use the default full mode for foreground sessions; Android and the TUI retain
+their broad event delivery. Existing SDK callers and older clients that omit
+`mode` retain full streams. Custom UI roots, development UIs, and cross-origin
+UIs exempt from build admission can therefore retain full-stream narration until
+updated. This is an additive protocol-v4 contract, with no capability negotiation
+or protocol-version change.
+
 ## Common event families
 
 - `chat`: UI chat updates such as `chat.inject` and other transcript-only chat
@@ -98,6 +143,8 @@ count.
   retain their cumulative-text contract.
 - `session.message`, `session.operation`, `session.tool`: transcript, in-flight
   session operation, and event-stream updates for a subscribed session.
+- `session.narration`: bounded assistant-text snapshots for subscriptions with
+  narration intent, paced and settled as described above.
 - `session.approval`: sanitized pending and terminal approval truth for an
   explicitly opted-in exact-session subscriber. Child approvals use the
   persisted ancestor audience; events never mutate transcripts or wake agents.
