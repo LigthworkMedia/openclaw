@@ -1148,6 +1148,9 @@ importers:
       openclaw:
         specifier: workspace:*
         version: link:../..
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
 
   extensions/document-extract:
     dependencies:
@@ -2169,6 +2172,9 @@ importers:
       openclaw:
         specifier: workspace:*
         version: link:../..
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
 
   extensions/sms:
     dependencies:

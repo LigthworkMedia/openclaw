@@ -1,9 +1,23 @@
-import type { ControlUiAccessory, ControlUiSession } from "./control-ui.js";
+type SessionHeaderLink = { url: string; label: string };
+type SessionHeaderLinkContext = {
+  signal: AbortSignal;
+  presented: boolean;
+  props: { session?: { conversationLink?: SessionHeaderLink } };
+};
+type SessionHeaderLinkMount = (
+  container: HTMLElement,
+  initialContext: SessionHeaderLinkContext,
+) => {
+  update?: (context: SessionHeaderLinkContext) => void;
+  dispose?: () => void;
+} | void;
 
 /** A plugin-owned accessory with the standard header link appearance and direct navigation. */
 export function createSessionHeaderLink(
-  resolve: (session: ControlUiSession) => { url: string; label: string } | undefined,
-): ControlUiAccessory["mount"] {
+  resolve: (
+    session: NonNullable<SessionHeaderLinkContext["props"]["session"]>,
+  ) => SessionHeaderLink | undefined,
+): SessionHeaderLinkMount {
   return (container, initialContext) => {
     const link = document.createElement("a");
     link.className = "plugin-session-header-link";
@@ -17,7 +31,7 @@ export function createSessionHeaderLink(
       link.removeAttribute("href");
       link.remove();
     };
-    const update = (context: Parameters<ControlUiAccessory["mount"]>[1]) => {
+    const update = (context: SessionHeaderLinkContext) => {
       if (disposed) {
         return;
       }

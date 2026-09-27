@@ -20,7 +20,8 @@
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
-    "openclaw": "workspace:*"
+    "openclaw": "workspace:*",
+    "tsx": "4.23.13"
   },
   "peerDependencies": {
     "openclaw": ">=2026.9.6"

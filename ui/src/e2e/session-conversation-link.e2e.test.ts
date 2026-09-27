@@ -59,8 +59,15 @@ suite.define(() => {
         {
           key: "agent:main:slack-link",
           conversationLink: {
-            label: "Slack Thread",
-            url: "https://example.slack.com/archives/C123/p1234567890123456?thread_ts=1234567890.123456&cid=C123",
+            label: "Slack",
+            url: "https://slack.com/app_redirect?channel=C123&team=T123",
+          },
+        },
+        {
+          key: "agent:main:govslack-message-link",
+          conversationLink: {
+            label: "Slack",
+            url: "https://slack-gov.com/app_redirect?channel=C123&team=T123",
           },
         },
         {
@@ -68,20 +75,6 @@ suite.define(() => {
           conversationLink: {
             label: "Discord Conversation",
             url: "https://discord.com/channels/123456789012345678/345678901234567890",
-          },
-        },
-        {
-          key: "agent:main:slack-message-link",
-          conversationLink: {
-            label: "Slack Message",
-            url: "https://example.slack.com/archives/C123/p1234567890123457",
-          },
-        },
-        {
-          key: "agent:main:govslack-message-link",
-          conversationLink: {
-            label: "Slack Message",
-            url: "https://example.slack-gov.com/archives/C123/p1234567890123458",
           },
         },
         { key: "agent:main:web-only", conversationLink: undefined },
@@ -115,11 +108,13 @@ suite.define(() => {
       });
       await page.addInitScript(createControlUiMockSameOriginGatewayScript());
       // Capture navigation at the external boundary without contacting real workspaces.
-      await context.route(/^https:\/\/(discord\.com|example\.slack(?:-gov)?\.com)\//, (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: "<title>Conversation destination</title>",
-        }),
+      await context.route(
+        /^https:\/\/(discord\.com|(?:[a-z0-9-]+\.)?slack(?:-gov)?\.com)\//,
+        (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: "<title>Conversation destination</title>",
+          }),
       );
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, firstSession.key));
       await expectBrowser(page.locator(".plugin-session-header-link")).toBeVisible();

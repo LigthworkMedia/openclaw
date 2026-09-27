@@ -1308,6 +1308,12 @@ export async function prepareSlackMessage(params: {
     storePath,
     sessionKey,
   });
+  const conversationLink = resolveSlackConversationLink({
+    channelId: message.channel,
+    teamId: opts.eventScope?.teamId ?? ctx.teamId,
+    slackApiUrl: slackClient.slackApiUrl,
+    existingLink: sessionEntry?.conversationLink,
+  });
   const previousTimestamp = sessionEntry?.updatedAt;
   const excludedMessageIds = new Set(opts.sourceMessageIds);
   if (message.ts) {
@@ -1424,16 +1430,6 @@ export async function prepareSlackMessage(params: {
     });
   }
 
-  // Resolve optional navigation before revalidating the session and cancellation below.
-  const conversationLink = await resolveSlackConversationLink({
-    ctx,
-    eventScope: opts.eventScope,
-    channelId: message.channel,
-    messageTs: threadContext.messageTs,
-    threadId:
-      effectiveMessageThreadId ?? (replyToMode !== "off" ? threadContext.messageTs : undefined),
-    existingLink: sessionEntry?.conversationLink,
-  });
   // Use direct media (including forwarded attachment media) if available, else thread starter media
   const effectiveMedia = effectiveDirectMedia ?? threadStarterMedia;
   let inboundMedia = await toInboundMediaFactsWithMetadata(effectiveMedia, {

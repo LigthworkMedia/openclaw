@@ -1,7 +1,6 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import type { App } from "@slack/bolt";
 import type { WebClientOptions } from "@slack/web-api";
-import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SlackMessageEvent } from "../../types.js";
@@ -24,25 +23,16 @@ describe("Slack inbound conversation links", () => {
   afterAll(() => storeFixture.cleanup());
 
   it.each([
-    { replyToMode: "all", channel: "C123", threadTs: undefined, target: "10.000", threaded: true },
-    {
-      replyToMode: "first",
-      channel: "C123",
-      threadTs: undefined,
-      target: "10.000",
-      threaded: true,
-    },
-    { replyToMode: "off", channel: "C123", threadTs: "9.000", target: "9.000", threaded: true },
-    { replyToMode: "off", channel: "D123", threadTs: "9.000", target: "9.000", threaded: true },
-    { replyToMode: "off", channel: "C123", threadTs: undefined, target: "10.000", threaded: false },
+    { channel: "C123", channelType: "channel", threadTs: "9.000" },
+    { channel: "D123", channelType: "im", threadTs: undefined },
+    { channel: "C123", channelType: "channel", threadTs: undefined },
   ] as const)(
-    "captures the $replyToMode $channel conversation link for thread $threadTs using the scoped client",
-    async ({ replyToMode, channel, threadTs, target, threaded }) => {
+    "links the $channel Slack conversation without an API lookup",
+    async ({ channel, channelType, threadTs }) => {
       const { storePath } = storeFixture.makeTmpStorePath();
-      const permalink = "https://workspace.slack.com/archives/C123/p10000000";
       const fetch = vi
         .fn<NonNullable<WebClientOptions["fetch"]>>()
-        .mockResolvedValue(new Response(JSON.stringify({ ok: true, permalink })));
+        .mockRejectedValue(new Error("the return link must not call Slack's API"));
       const ctx = createInboundSlackCtx({
         cfg: { session: { store: storePath }, channels: { slack: { enabled: true } } },
         app: {
@@ -57,7 +47,7 @@ describe("Slack inbound conversation links", () => {
         teamId: "T123ENTERPRISE",
         client: {
           token: "event-fixture",
-          slackApiUrl: "https://slack-api.example/api/",
+          slackApiUrl: "https://slack-gov.com/api/",
         } as SlackEventScope["client"],
       };
       const message: SlackMessageEvent = {
@@ -65,36 +55,24 @@ describe("Slack inbound conversation links", () => {
         user: "U1",
         text: "hi",
         channel,
-        channel_type: channel === "D123" ? "im" : "channel",
+        channel_type: channelType,
         ts: "10.000",
         thread_ts: threadTs,
       };
       const prepared = await prepareSlackMessage({
         ctx,
-        account: createSlackAccount({ replyToMode }),
+        account: createSlackAccount({ replyToMode: "off" }),
         message,
         opts: { source: "message", eventScope },
       });
 
       assert(prepared);
       const expectedLink = {
-        url: threaded ? `${permalink}?thread_ts=${target}&cid=${channel}` : permalink,
-        label: threaded ? "Slack Thread" : "Slack Message",
+        url: `https://slack-gov.com/app_redirect?channel=${channel}&team=T123ENTERPRISE`,
+        label: "Slack",
       };
       expect(prepared.ctxPayload.ConversationLink).toEqual(expectedLink);
-      expect(fetch).toHaveBeenCalledExactlyOnceWith(
-        "https://slack-api.example/api/chat.getPermalink",
-        expect.objectContaining({
-          headers: expect.objectContaining({ Authorization: "Bearer event-fixture" }),
-        }),
-      );
-      expect(
-        Object.fromEntries(new URLSearchParams(fetch.mock.calls[0]?.[1]?.body as string)),
-      ).toEqual({
-        team_id: "T123ENTERPRISE",
-        channel,
-        message_ts: target,
-      });
+      expect(fetch).not.toHaveBeenCalled();
 
       await upsertSessionEntry({
         storePath,
@@ -108,7 +86,7 @@ describe("Slack inbound conversation links", () => {
       fetch.mockClear();
       const repeated = await prepareSlackMessage({
         ctx,
-        account: createSlackAccount({ replyToMode }),
+        account: createSlackAccount({ replyToMode: "off" }),
         message,
         opts: { source: "message", eventScope },
       });
@@ -117,77 +95,4 @@ describe("Slack inbound conversation links", () => {
       expect(fetch).not.toHaveBeenCalled();
     },
   );
-
-  it("continues message preparation without retrying a rate-limited Slack permalink request", async () => {
-    const { storePath } = storeFixture.makeTmpStorePath();
-    const fetch = vi.fn<NonNullable<WebClientOptions["fetch"]>>().mockResolvedValue(
-      new Response(JSON.stringify({ ok: false, error: "ratelimited" }), {
-        status: 429,
-        headers: { "retry-after": "120" },
-      }),
-    );
-    const ctx = createInboundSlackCtx({
-      cfg: { session: { store: storePath }, channels: { slack: { enabled: true } } },
-      app: { client: { token: "event-fixture" }, webClientOptions: { fetch } } as unknown as App,
-    });
-    const warn = vi.spyOn(ctx.logger, "warn").mockImplementation(() => {});
-    try {
-      const prepared = await prepareSlackMessage({
-        ctx,
-        account: createSlackAccount(),
-        message: {
-          type: "message",
-          channel: "D123",
-          channel_type: "im",
-          user: "U1",
-          text: "hi",
-          ts: "1.000",
-        },
-        opts: { source: "message" },
-      });
-      assert(prepared);
-      expect(prepared.ctxPayload.ConversationLink).toBeUndefined();
-      expect(prepared.ctxPayload.BodyForAgent).toBe("hi");
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(warn).toHaveBeenCalledWith(
-        { error: expect.stringContaining("rate-limit"), channelId: "D123" },
-        "Slack conversation link unavailable",
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("honors cancellation while the optional permalink lookup is pending", async () => {
-    const { storePath } = storeFixture.makeTmpStorePath();
-    const response = createDeferred<Response>();
-    const fetch = vi.fn<NonNullable<WebClientOptions["fetch"]>>().mockReturnValue(response.promise);
-    const controller = new AbortController();
-    const ctx = createInboundSlackCtx({
-      cfg: { session: { store: storePath }, channels: { slack: { enabled: true } } },
-      app: { client: { token: "event-fixture" }, webClientOptions: { fetch } } as unknown as App,
-    });
-    const prepared = prepareSlackMessage({
-      ctx,
-      account: createSlackAccount(),
-      message: {
-        type: "message",
-        channel: "D123",
-        channel_type: "im",
-        user: "U1",
-        text: "hi",
-        ts: "1.000",
-      },
-      opts: { source: "message", abortSignal: controller.signal },
-    });
-    const result = expect(prepared).rejects.toThrow("link preparation canceled");
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    controller.abort(new Error("link preparation canceled"));
-    response.resolve(
-      new Response(
-        JSON.stringify({ ok: true, permalink: "https://workspace.slack.com/archives/D123/p1000" }),
-      ),
-    );
-    await result;
-  });
 });

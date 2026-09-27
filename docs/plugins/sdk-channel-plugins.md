@@ -64,11 +64,11 @@ conversation: {
 }
 ```
 
-The channel owns the destination URL and plain-text label. Resolve the actual
-thread after any automatic thread creation; use the platform's permalink API
-when required. Discord and Slack supply this metadata. If a lookup fails, report
-the failure through the channel's logger and omit the link without blocking the
-agent's reply.
+The channel owns the destination URL and plain-text label. Discord supplies the
+actual created or existing thread URL. Slack uses its documented
+[`app_redirect` channel link](https://docs.slack.dev/interactivity/deep-linking/)
+to open the containing channel or direct conversation; it does not request a
+message permalink while preparing an inbound reply.
 
 The host retains the first valid HTTP(S) link on the logical session, preserves
 it across resets, and carries it to explicitly spawned or forked child sessions.

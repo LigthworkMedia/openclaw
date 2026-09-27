@@ -1,9 +1,6 @@
 import type { SessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { createSlackLookupClient } from "../../client.js";
-import { formatSlackError } from "../../errors.js";
 import type { SlackMonitorContext } from "../context.js";
-import type { SlackEventScope } from "../event-scope.js";
 
 export function resolveSlackGroupSessionSubject(params: {
   channelId: string;
@@ -24,50 +21,29 @@ export function resolveSlackGroupSessionSubject(params: {
   return `Slack Channel (Workspace ID: ${params.workspaceId}, Channel ID: ${params.channelId})`;
 }
 
-export async function resolveSlackConversationLink(params: {
-  ctx: SlackMonitorContext;
-  eventScope?: SlackEventScope;
+export function resolveSlackConversationLink(params: {
   channelId: string;
-  messageTs?: string;
-  threadId?: string;
+  teamId?: string;
+  slackApiUrl?: string;
   existingLink?: SessionEntry["conversationLink"];
-}): Promise<SessionEntry["conversationLink"]> {
+}): SessionEntry["conversationLink"] {
   if (params.existingLink) {
     return params.existingLink;
   }
-  const client = params.eventScope?.client ?? params.ctx.app.client;
-  const messageId = params.threadId ?? params.messageTs;
-  if (!messageId || !client.token) {
-    return undefined;
-  }
+  const teamId = normalizeOptionalString(params.teamId);
+  let apiHost = "";
   try {
-    // Bound this optional lookup while preserving Bolt's event authorization and transport.
-    const lookupClient = createSlackLookupClient(client.token, {
-      fetch: params.ctx.app.webClientOptions?.fetch,
-      slackApiUrl: client.slackApiUrl,
-      teamId: params.eventScope?.teamId ?? params.ctx.teamId,
-    });
-    const result = await lookupClient.chat.getPermalink({
-      channel: params.channelId,
-      message_ts: messageId,
-    });
-    if (result.permalink) {
-      const url = new URL(result.permalink);
-      if (params.threadId) {
-        // New roots may omit Slack's thread parameters; preserve the native thread destination.
-        url.searchParams.set("thread_ts", params.threadId);
-        url.searchParams.set("cid", params.channelId);
-      }
-      return {
-        url: url.href,
-        label: params.threadId ? "Slack Thread" : "Slack Message",
-      };
-    }
-  } catch (error) {
-    params.ctx.logger.warn(
-      { error: formatSlackError(error), channelId: params.channelId },
-      "Slack conversation link unavailable",
-    );
+    apiHost = params.slackApiUrl ? new URL(params.slackApiUrl).hostname.toLowerCase() : "";
+  } catch {
+    // Invalid or custom API roots use the public Slack redirect host.
   }
-  return undefined;
+  // Slack documents app_redirect for opening a conversation. Its exact-message permalink
+  // API is remote and optional, so session preparation must not wait on it.
+  const host = apiHost === "slack-gov.com" ? "slack-gov.com" : "slack.com";
+  const url = new URL(`https://${host}/app_redirect`);
+  url.searchParams.set("channel", params.channelId);
+  if (teamId) {
+    url.searchParams.set("team", teamId);
+  }
+  return { url: url.href, label: "Slack" };
 }
