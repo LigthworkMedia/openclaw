@@ -376,6 +376,17 @@ describe.skipIf(process.platform === "win32")("iOS Access simulator workflow", (
     "CloudflareAccessTransferTests",
     "CloudflareAccessSessionStoreTests",
   ];
+  const commonSelectors = [
+    ...authClasses.map((name) => `-only-testing:OpenClawTests/${name}`),
+    "-only-testing:OpenClawTests/ChatTypingFocusTests",
+    "-only-testing:OpenClawTests/ChatSendHydrationTests",
+    "-only-testing:OpenClawTests/ExecApprovalNotificationBridgeTests",
+    "-only-testing:OpenClawTests/PluginApprovalNotificationBridgeTests",
+    "-only-testing:OpenClawTests/GatewaySettingsStoreTests",
+    "-only-testing:OpenClawTests/NodeAppModelInvokeTests",
+    "-only-testing:OpenClawTests/WatchApprovalTransportSourceGuardTests",
+    "-only-testing:OpenClawLogicTests/WatchChatStatusLocalizationTests",
+  ];
 
   it("executes the actual auth test classes during smoke and excludes compatibility targets", () => {
     expect(iosStep?.if).toContain("matrix.phase == 'smoke'");
@@ -386,37 +397,49 @@ describe.skipIf(process.platform === "win32")("iOS Access simulator workflow", (
     const tests = commands.filter((command) => command.tool === "xcodebuild");
     expect(tests).toHaveLength(1);
     expect(tests[0]?.args).toContain("platform=iOS Simulator,id=watch-fixture");
-    expect(tests[0]?.args.filter((arg) => arg.startsWith("-only-testing:"))).toEqual([
-      ...authClasses.map((name) => `-only-testing:OpenClawTests/${name}`),
-      "-only-testing:OpenClawTests/ChatTypingFocusTests",
-      "-only-testing:OpenClawTests/ChatSendHydrationTests",
-    ]);
+    expect(tests[0]?.args.filter((arg) => arg.startsWith("-only-testing:"))).toEqual(
+      commonSelectors,
+    );
     for (const name of authClasses) {
       expect(readFileSync(`apps/ios/Tests/${name}.swift`, "utf8")).toContain(`struct ${name}`);
     }
   });
 
-  it("keeps full lifecycle and UI tests alongside Access tests in full validation", () => {
-    const { result, commands } = runSimulatorStep("voice", [prepareStep, iosStep], {
-      IOS_CI_PHASE: "tests",
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const tests = commands.filter((command) => command.tool === "xcodebuild");
-    expect(tests).toHaveLength(2);
-    expect(tests[0]?.args).toEqual(
-      expect.arrayContaining([
-        ...authClasses.map((name) => `-only-testing:OpenClawTests/${name}`),
-        "-only-testing:OpenClawTests/ChatTypingFocusTests",
-        "-only-testing:OpenClawTests/ChatSendHydrationTests",
+  it.each([false, true])(
+    "keeps every lifecycle unit suite with main=%s and launches UI only in full validation",
+    (main) => {
+      const { result, commands } = runSimulatorStep("voice", [prepareStep, iosStep], {
+        IOS_CI_PHASE: "tests",
+        IOS_MAIN_TIER: String(main),
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const tests = commands.filter((command) => command.tool === "xcodebuild");
+      expect(tests).toHaveLength(main ? 1 : 2);
+      expect(tests[0]?.args.filter((arg) => arg.startsWith("-only-testing:"))).toEqual([
+        ...commonSelectors,
         "-only-testing:OpenClawLogicTests/WatchVoiceTurnTrackerTests",
-        "-only-testing:OpenClawTests/NodeAppModelInvokeTests",
+        "-only-testing:OpenClawTests/DelayedActionGateTests",
+        "-only-testing:OpenClawTests/IOSGatewayChatTransportTests",
+        "-only-testing:OpenClawTests/LocationServiceCallbackTests",
+        "-only-testing:OpenClawTests/LocationServiceOrderingTests",
+        "-only-testing:OpenClawTests/OpenClawAppDelegateTests",
+        "-only-testing:OpenClawTests/WatchMessagingInboundTransportTests",
+        "-only-testing:OpenClawTests/WatchSessionActivationGateTests",
         "-only-testing:OpenClawTests/OpenClawTypographyTests",
-      ]),
-    );
-    expect(tests[1]?.args).toContain(
-      "-only-testing:OpenClawUITests/OpenClawSnapshotUITests/testWatchMessageDeliveryIsReachableFromSettings",
-    );
-  });
+        "-only-testing:OpenClawTests/NotificationServingPreferenceTests",
+        "-only-testing:OpenClawTests/RootTabsSourceGuardTests",
+        "-only-testing:OpenClawTests/TraceHeadingVisualProofTests",
+      ]);
+      expect(tests[0]?.args).toEqual(
+        expect.arrayContaining(["-collect-test-diagnostics", main ? "never" : "on-failure"]),
+      );
+      if (!main) {
+        expect(tests[1]?.args).toContain(
+          "-only-testing:OpenClawUITests/OpenClawSnapshotUITests/testWatchMessageDeliveryIsReachableFromSettings",
+        );
+      }
+    },
+  );
 
   it("fails on auth test errors before attempting later UI tests", () => {
     const { result, commands } = runSimulatorStep("voice-tests-failed", [prepareStep, iosStep], {
