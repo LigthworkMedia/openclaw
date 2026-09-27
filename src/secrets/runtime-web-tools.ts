@@ -1,6 +1,5 @@
 /** Builds web-tool secret metadata from config, plugins, and provider contracts. */
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveSecretInputRef } from "../config/types.secrets.js";
 import { loadInstalledPluginIndexInstallRecordsSync } from "../plugins/installed-plugin-index-records.js";
@@ -575,16 +574,11 @@ async function resolveBundledWebSearchProviders(params: {
   sourceConfig: OpenClawConfig;
   context: ResolverContext;
   configuredBundledPluginId?: string;
-  onlyPluginIds?: readonly string[];
   hasCustomWebSearchPluginRisk: boolean;
 }): Promise<PluginWebSearchProviderEntry[]> {
   const env = { ...process.env, ...params.context.env };
   const onlyPluginIds =
-    params.configuredBundledPluginId !== undefined
-      ? [params.configuredBundledPluginId]
-      : params.onlyPluginIds && params.onlyPluginIds.length > 0
-        ? sortUniqueStrings(params.onlyPluginIds)
-        : undefined;
+    params.configuredBundledPluginId !== undefined ? [params.configuredBundledPluginId] : undefined;
   // Narrow plugin hints can use explicit public artifacts first; broad custom-plugin risk still
   // routes through runtime discovery because installed or path-loaded providers may participate.
   if (onlyPluginIds && onlyPluginIds.length > 0) {

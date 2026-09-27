@@ -809,10 +809,6 @@ export function resolveVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallC
   }
 
   // Tunnel Config
-  resolved.tunnel = resolved.tunnel ?? {
-    provider: "none",
-    allowNgrokFreeTierLoopbackBypass: false,
-  };
   resolved.tunnel.allowNgrokFreeTierLoopbackBypass =
     resolved.tunnel.allowNgrokFreeTierLoopbackBypass ?? false;
   resolved.tunnel.ngrokAuthToken =
@@ -821,11 +817,6 @@ export function resolveVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallC
     resolved.tunnel.ngrokDomain ?? resolveSpeechProviderApiKey(process.env.NGROK_DOMAIN);
 
   // Webhook Security Config
-  resolved.webhookSecurity = resolved.webhookSecurity ?? {
-    allowedHosts: [],
-    trustForwardingHeaders: false,
-    trustedProxyIPs: [],
-  };
   resolved.webhookSecurity.allowedHosts = resolved.webhookSecurity.allowedHosts ?? [];
   resolved.webhookSecurity.trustForwardingHeaders =
     resolved.webhookSecurity.trustForwardingHeaders ?? false;

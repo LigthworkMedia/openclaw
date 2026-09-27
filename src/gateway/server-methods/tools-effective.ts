@@ -300,9 +300,6 @@ function appendToolInventoryNotice(
 }
 
 function formatMcpServerNames(names: readonly string[]): string {
-  if (names.length === 0) {
-    return "configured MCP servers";
-  }
   const visible = names
     .slice(0, 3)
     .map((name) => `"${name}"`)

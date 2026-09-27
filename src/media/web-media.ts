@@ -238,9 +238,6 @@ function getTextStats(text: string): { printableRatio: number } {
     printable += 1;
   }
   const total = printable + control;
-  if (total === 0) {
-    return { printableRatio: 0 };
-  }
   return { printableRatio: printable / total };
 }
 

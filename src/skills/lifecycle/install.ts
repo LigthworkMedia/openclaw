@@ -139,9 +139,6 @@ function buildInstallCommand(
         "tool",
         "install",
       ]);
-    case "download": {
-      return { argv: null, error: "download install handled separately" };
-    }
     default:
       return { argv: null, error: "unsupported installer" };
   }
@@ -163,13 +160,8 @@ async function resolveBrewPrefixBinDir(
   return undefined;
 }
 
-async function resolveBrewBinDir(timeoutMs: number, brewExe?: string): Promise<string | undefined> {
-  const exe = brewExe ?? (hasBinary("brew") ? "brew" : resolveBrewExecutable());
-  if (!exe) {
-    return undefined;
-  }
-
-  const prefixBin = await resolveBrewPrefixBinDir(timeoutMs, exe);
+async function resolveBrewBinDir(timeoutMs: number, brewExe: string): Promise<string | undefined> {
+  const prefixBin = await resolveBrewPrefixBinDir(timeoutMs, brewExe);
   if (prefixBin) {
     return prefixBin;
   }

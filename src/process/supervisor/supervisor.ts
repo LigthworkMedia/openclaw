@@ -308,11 +308,7 @@ export function createProcessSupervisor(): ProcessSupervisor & {
     const constructionAbortError = new Error("adapter construction aborted");
     const constructionAbortPromise = new Promise<never>((_, reject) => {
       const rejectConstruction = () => reject(constructionAbortError);
-      if (constructionAbort.signal.aborted) {
-        rejectConstruction();
-      } else {
-        constructionAbort.signal.addEventListener("abort", rejectConstruction, { once: true });
-      }
+      constructionAbort.signal.addEventListener("abort", rejectConstruction, { once: true });
     });
 
     const requestCancel = (reason: TerminationReason) => {

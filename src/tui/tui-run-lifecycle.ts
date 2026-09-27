@@ -60,10 +60,7 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
     localMode,
   } = context;
   const { sessionRuns, liveTerminalErrorMessages } = runCoordinator;
-  const pendingTerminalLifecycleErrors = new Map<
-    string,
-    { errorMessage: string; timer: ReturnType<typeof setTimeout> }
-  >();
+  const pendingTerminalLifecycleErrors = new Map<string, ReturnType<typeof setTimeout>>();
   const streamingWatchdogMs =
     typeof context.streamingWatchdogMs === "number" &&
     Number.isFinite(context.streamingWatchdogMs) &&
@@ -100,13 +97,13 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
     if (!pending) {
       return;
     }
-    clearTimeout(pending.timer);
+    clearTimeout(pending);
     pendingTerminalLifecycleErrors.delete(runId);
   };
 
   const clearPendingTerminalLifecycleErrors = () => {
     for (const pending of pendingTerminalLifecycleErrors.values()) {
-      clearTimeout(pending.timer);
+      clearTimeout(pending);
     }
     pendingTerminalLifecycleErrors.clear();
   };
@@ -415,7 +412,7 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
       }
     }, LIFECYCLE_ERROR_RETRY_GRACE_MS);
     timer.unref?.();
-    pendingTerminalLifecycleErrors.set(runId, { errorMessage, timer });
+    pendingTerminalLifecycleErrors.set(runId, timer);
   };
 
   const dispose = () => {

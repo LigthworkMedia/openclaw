@@ -396,11 +396,7 @@ export class TwilioProvider implements VoiceCallProvider {
    * Generate TwiML response for webhook.
    * When a call is answered, connects to media stream for bidirectional audio.
    */
-  private generateTwimlResponse(ctx?: WebhookContext): string {
-    if (!ctx) {
-      return TwilioProvider.EMPTY_TWIML;
-    }
-
+  private generateTwimlResponse(ctx: WebhookContext): string {
     const view = readTwimlRequestView(ctx);
     const storedTwiml = view.callIdFromQuery
       ? this.twimlStorage.get(view.callIdFromQuery)

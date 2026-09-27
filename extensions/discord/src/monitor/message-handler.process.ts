@@ -622,10 +622,6 @@ export async function processDiscordMessage(
     await draftPreview.cleanup({ failed: finalDeliveryFailed || dispatchError });
     await reactions.finish({ dispatchAborted, dispatchError, finalDeliveryFailed });
   }
-  if (dispatchAborted) {
-    return;
-  }
-
   const finalDispatchResult = dispatchResult;
   if (!finalDispatchResult || !hasFinalInboundReplyDispatch(finalDispatchResult)) {
     return;
