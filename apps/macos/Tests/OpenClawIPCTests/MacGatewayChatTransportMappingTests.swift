@@ -645,7 +645,8 @@ extension MacGatewayChatTransportMappingTests {
                 elements.first {
                     let value: Any? = $0.accessibilityValue?()
                     return $0.accessibilityIdentifier?() == "chat-composer-inline-model" &&
-                        $0.accessibilityLabel?() == "Model" && value as? String == "model-a"
+                        $0.accessibilityTitle?() == "Model" && value as? String == "model-a" &&
+                        $0.isAccessibilityEnabled?() == true
                 }
             }
             try await AppKitTestSupport.openMenu(button, in: window, requireCompositedPopup: true) { menu in
@@ -671,6 +672,13 @@ private struct SessionDefaultsRenderTransport: OpenClawChatTransport {
 
     func listModels(agentID _: String?) async throws -> [OpenClawChatModelChoice] {
         [.init(modelID: "model-a", name: "Model A", provider: "example", available: true, contextWindow: 128_000)]
+    }
+
+    func loadModelCatalog(
+        sessionKey _: String,
+        agentID: String?) async throws -> OpenClawChatModelCatalogSnapshot
+    {
+        .init(choices: try await self.listModels(agentID: agentID), availabilityIsSessionScoped: true)
     }
 
     func requestHealth(timeoutMs _: Int) async throws -> Bool {
