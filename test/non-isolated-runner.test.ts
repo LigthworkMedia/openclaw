@@ -12,6 +12,7 @@ import { resolveTestNodeExecPath } from "../src/test-utils/node-process.js";
 import { runVitestShutdownCommand } from "./helpers/vitest-shutdown-command.ts";
 import { agentReaderFixtureFiles } from "./non-isolated-runner.agent-reader-fixtures.ts";
 import { gatewayWorkerLifetimeFixtureFiles } from "./non-isolated-runner.gateway-lifecycle-fixtures.ts";
+import { mcpManagerFixtureFiles } from "./non-isolated-runner.mcp-fixtures.ts";
 import { mockResolutionFixtureFiles } from "./non-isolated-runner.mock-resolution-fixtures.ts";
 import { testApiLifecycleFixtureFiles } from "./non-isolated-runner.test-api-fixtures.ts";
 
@@ -113,7 +114,10 @@ import { expect, vi, type RunnerTestFile } from "vitest";
 const resetModules = vi.resetModules;
 export default class FixtureRunner extends Runner {
   override async onAfterRunFiles(files: RunnerTestFile[]) {
-    await super.onAfterRunFiles(files);
+    const cleanup = files.some(file => file.filepath.endsWith("99-mcp-b-retained-owner.test.ts"))
+      ? (await import(${JSON.stringify(path.join(repoRoot, "test", "non-isolated-runner.ts") + "?mcp-retirement-generation")})).default.prototype.onAfterRunFiles
+      : Runner.prototype.onAfterRunFiles;
+    await cleanup.call(this, files);
     expect(vi.resetModules, "file cleanup restores the native module reset").toBe(resetModules);
   }
 }
@@ -430,6 +434,7 @@ it("reloads the redirected mock after a real import", () => {
 });
 `,
     ...mockResolutionFixtureFiles,
+    ...mcpManagerFixtureFiles(repoRoot),
     ...testApiLifecycleFixtureFiles(repoRoot),
     ...documentFocusFixtureFiles(),
     ...agentReaderFixtureFiles(repoRoot, fixtureRoot),
@@ -460,7 +465,7 @@ async function assertCompletion(
     pid: expected.pid,
     root: expected.root,
     processTimedOut: false,
-    ended: { reason: "failed", unhandledErrors: 0, failedModules: 1, suiteErrors: 1 },
+    ended: { reason: "failed", unhandledErrors: 0, failedModules: 4, suiteErrors: 4 },
   });
   const project = {
     name: "non-isolated-runner",
@@ -478,8 +483,8 @@ async function assertCompletion(
   const report: JsonTestResults = JSON.parse(await fs.readFile(expected.reportPath, "utf8"));
   expect(report.testResults.map((file) => file.name).toSorted()).toEqual(expected.files);
   expect(report).toMatchObject({
-    numTotalTests: 53,
-    numPassedTests: 52,
+    numTotalTests: 66,
+    numPassedTests: 65,
     numPendingTests: 1,
     numFailedTests: 0,
     numTodoTests: 0,
@@ -487,13 +492,27 @@ async function assertCompletion(
   for (const file of report.testResults) {
     const name = path.basename(file.name);
     const crashed = name === "01-a-crash.test.ts";
+    const uncertainMcp =
+      name === "99-mcp-a-uncertain-owner.test.ts" || name === "98-mcp-c-prior-failure.test.ts";
+    const mockedMcpDisposer = name === "98-mcp-a-direct-disposer.test.ts";
     const skipped = name === "09-f-test-api-skipped.test.ts";
     const lifecycle = ["09-d-test-api-producer.test.ts", "09-e-test-api-observer.test.ts"].includes(
       name,
     );
     const count = crashed ? 0 : lifecycle ? 2 : 1;
-    expect(file.status, name).toBe(crashed ? "failed" : "passed");
-    expect(file.message, name).toBe(crashed ? "synthetic collect failure" : "");
+    expect(file.status, name).toBe(
+      crashed || uncertainMcp || mockedMcpDisposer ? "failed" : "passed",
+    );
+    if (uncertainMcp || mockedMcpDisposer) {
+      expect(file.message).toContain("MCP runtime custody failed");
+      expect(file.message).toContain(
+        uncertainMcp
+          ? "MCP test teardown could not confirm cleanup"
+          : "MCP test teardown cannot use a mocked disposer",
+      );
+    } else {
+      expect(file.message, name).toBe(crashed ? "synthetic collect failure" : "");
+    }
     expect(file.assertionResults, name).toHaveLength(count);
     expect(new Set(file.assertionResults.map((test) => test.fullName)).size, name).toBe(count);
     for (const test of file.assertionResults) {
@@ -682,9 +701,9 @@ export default defineConfig({
       { reason: "passed" },
       { unhandledErrors: 1 },
       { failedModules: 0 },
-      { failedModules: 2 },
+      { failedModules: 5 },
       { suiteErrors: 0 },
-      { suiteErrors: 2 },
+      { suiteErrors: 5 },
     ]) {
       faults.push([
         `invalid native end: ${JSON.stringify(patch)}`,
