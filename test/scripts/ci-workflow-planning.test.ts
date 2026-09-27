@@ -2137,7 +2137,13 @@ describe("ci workflow guards", () => {
             env: { HISTORICAL_TARGET: "false" },
           }),
           name,
-        ).toBe(release || name !== "Prove native managed document download and export");
+        ).toBe(
+          release ||
+            ![
+              "Prove native managed document download and export",
+              "Run focused Apple Watch operation simulator tests",
+            ].includes(name),
+        );
       }
       const packageStep = workflow.jobs["docker-seed-e2e"].steps.find(
         (step: WorkflowStep) => step.name === "Prepare main Docker smoke package",
@@ -2267,7 +2273,6 @@ describe("ci workflow guards", () => {
                 "Build iOS app",
                 ...(historical ? [] : ["Run focused iOS voice cleanup simulator tests"]),
                 ...(historical ? [] : ["Run focused iOS lifecycle simulator tests"]),
-                ...(historical ? [] : ["Run focused Apple Watch operation simulator tests"]),
               ],
               release: ["Build iOS app (Release)"],
               tests: [
