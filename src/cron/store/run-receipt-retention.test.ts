@@ -11,9 +11,11 @@ import { setupCronServiceSuite } from "../service.test-harness.js";
 import type { CronServiceDeps } from "../service/state.js";
 import { loadCronStore } from "../store.js";
 import { cronStoreKey } from "./key.js";
-import { claimCronRunReceiptForTest } from "./run-receipt-claim.test-support.js";
 import { finishCronRunReceipt, prepareCronRunReceiptClaim } from "./run-receipt-store.js";
-import { inspectActiveCronRunReceipt } from "./run-receipt-store.test-support.js";
+import {
+  claimCronRunReceiptInDatabaseForTest,
+  inspectActiveCronRunReceipt,
+} from "./run-receipt-store.test-support.js";
 
 const { logger, makeStorePath } = setupCronServiceSuite({ prefix: "cron-pending-retention-" });
 
@@ -66,7 +68,7 @@ describe("pending cron receipt retention", () => {
         startedAtMs: now + 100 + index * 2,
       });
       const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptForTest({
+        claimCronRunReceiptInDatabaseForTest({
           database: db,
           prepared,
           resolveAgentId: (current) => current.agentId!,

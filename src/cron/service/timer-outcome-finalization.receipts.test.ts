@@ -13,13 +13,15 @@ import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-c
 import { advanceCronActiveJobGeneration, markCronJobActive } from "../active-jobs.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import { finishCronRunReceipt, prepareCronRunReceiptClaim } from "../store/run-receipt-store.js";
-import { inspectActiveCronRunReceipt } from "../store/run-receipt-store.test-support.js";
+import {
+  claimCronRunReceiptInDatabaseForTest,
+  inspectActiveCronRunReceipt,
+} from "../store/run-receipt-store.test-support.js";
 import type { CronJob } from "../types.js";
 import { reserveQueuedCronRun } from "./run-admission.js";
+import { createCronRunHandle } from "./run-history.js";
 import { createCronServiceState } from "./state.js";
-import { tryCreateCronTaskRunHandle } from "./task-runs.js";
 import type { TimedCronRunOutcome } from "./timer-execution-timeout.js";
 import { finalizeCompletedCronRunOutcomes } from "./timer-outcome-finalization.js";
 import { authorCronRunCompletion } from "./timer.js";
@@ -36,7 +38,7 @@ function claimReceipt(storePath: string, job: CronJob, startedAtMs: number) {
     startedAtMs,
   });
   return runOpenClawStateWriteTransaction(({ db }) =>
-    claimCronRunReceiptForTest({
+    claimCronRunReceiptInDatabaseForTest({
       database: db,
       prepared,
       resolveAgentId: (current) => current.agentId ?? "main",
@@ -79,7 +81,7 @@ describe("cron outcome receipt finalization", () => {
         nowMs: () => startedAt,
         runIsolatedAgentJob: vi.fn(),
       });
-      const taskRunId = tryCreateCronTaskRunHandle({
+      const taskRunId = createCronRunHandle({
         state,
         job: retired,
         startedAt,

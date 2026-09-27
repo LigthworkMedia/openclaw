@@ -10,12 +10,12 @@ import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-c
 import { setupCronServiceSuite } from "../service.test-harness.js";
 import * as cronStoreModule from "../store.js";
 import { loadCronStore, saveCronStore } from "../store.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
   CronRunReceiptConflictError,
   finishCronRunReceipt,
   prepareCronRunReceiptClaim,
 } from "../store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../store/run-receipt-store.test-support.js";
 import type { CronJob } from "../types.js";
 import { findJobOrThrow } from "./jobs-scheduling.js";
 import { cronNotificationJob, type CronNotificationIntent } from "./notification-intents.js";
@@ -767,7 +767,7 @@ describe("cron service store seam coverage", () => {
       startedAtMs: STORE_TEST_NOW,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptForTest({
+      claimCronRunReceiptInDatabaseForTest({
         database: db,
         prepared,
         resolveAgentId: (current) => current.agentId!,

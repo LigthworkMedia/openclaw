@@ -14,12 +14,12 @@ import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-c
 import { CronService } from "../service.js";
 import { setupCronServiceSuite, writeCronStoreSnapshot } from "../service.test-harness.js";
 import { loadCronStore } from "../store.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
 import {
+  claimCronRunReceiptInDatabaseForTest,
   inspectActiveCronRunReceipt,
   makeCronRecoveryJob,
 } from "../store/run-receipt-store.test-support.js";
@@ -104,7 +104,11 @@ it("lists behind healthy recovery while a writer is held, and retires a waiting 
         startedAtMs,
       });
       const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
+        claimCronRunReceiptInDatabaseForTest({
+          database: db,
+          prepared,
+          resolveAgentId: () => "alpha",
+        }),
       );
       receipts.push(receipt);
       job.state.runningAtMs = startedAtMs;

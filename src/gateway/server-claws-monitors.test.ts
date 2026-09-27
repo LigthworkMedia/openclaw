@@ -16,13 +16,13 @@ import {
 } from "../cron/service/active-run-cancellation.js";
 import * as sessionReaper from "../cron/session-reaper.js";
 import { upsertCronJobRow } from "../cron/store/row-codec.js";
-import { claimCronRunReceiptForTest } from "../cron/store/run-receipt-claim.test-support.js";
 import {
   findActiveCronRunReceiptInDatabase,
   isCronRunReceiptOwnerStale,
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../cron/store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../cron/store/run-receipt-store.test-support.js";
 import { getFileLockProcessStartTime } from "../shared/pid-alive.js";
 import {
   beginAgentDeletionJournal,
@@ -252,7 +252,7 @@ describe("Claw serving monitor cleanup", () => {
         startedAtMs: Date.now(),
       });
       const handle = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptForTest({
+        claimCronRunReceiptInDatabaseForTest({
           database: db,
           prepared,
           resolveAgentId: () => "worker",

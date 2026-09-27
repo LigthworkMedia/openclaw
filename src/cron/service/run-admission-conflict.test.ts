@@ -9,17 +9,19 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../../state/openclaw-state-db.js";
-import { findTaskByRunId } from "../../tasks/task-executor.js";
-import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
+import {
+  findCronRunForTests,
+  readCronRunHistoryPageForTests,
+} from "../run-history.test-support.js";
 import { loadCronStore, saveCronJobsStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
   finishCronRunReceipt,
   isCronRunReceiptOwnerStale,
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../store/run-receipt-store.test-support.js";
 import { start, stop } from "./ops-lifecycle.js";
 import { list } from "./ops-read.js";
 import { run } from "./ops-run.js";
@@ -28,8 +30,8 @@ import {
   persistQueuedCronRunReservations,
   reserveQueuedCronRun,
 } from "./run-admission.js";
+import { createCronRunHandle } from "./run-history.js";
 import * as runtimeMutation from "./runtime-mutation.js";
-import { tryCreateCronTaskRunHandle } from "./task-runs.js";
 import { onTimer } from "./timer.test-support.js";
 
 const fixtures = setupCronRegressionFixtures({ prefix: "cron-admission-conflict-" });
@@ -43,7 +45,7 @@ function claimReceipt(storePath: string, job: ReturnType<typeof createDueIsolate
     startedAtMs: at,
   });
   return runOpenClawStateWriteTransaction(({ db }) =>
-    claimCronRunReceiptForTest({
+    claimCronRunReceiptInDatabaseForTest({
       database: db,
       prepared,
       resolveAgentId: (current) => current.agentId ?? "main",
@@ -106,7 +108,7 @@ it("recovers a dead running owner on timer refresh without an admission conflict
     runIsolatedAgentJob,
     onEvent,
   });
-  const taskRun = tryCreateCronTaskRunHandle({
+  const taskRun = createCronRunHandle({
     state: sibling,
     job,
     startedAt: now,
@@ -124,7 +126,7 @@ it("recovers a dead running owner on timer refresh without an admission conflict
   expect(reclaimed?.state.runningAtMs).toBeUndefined();
   expect(reclaimed?.state.nextRunAtMs).toBeUndefined();
   expect(reclaimed?.state.startupCatchupAtMs).toBeUndefined();
-  expect(findTaskByRunId(taskRun.runId)).toMatchObject({
+  expect(findCronRunForTests(taskRun.runId)).toMatchObject({
     status: "failed",
     error: "cron: job interrupted by gateway restart",
   });
@@ -192,7 +194,7 @@ it("preserves a foreign claim committed before worker admission while reserving 
     agentId: foreignRunning.agentId ?? "main",
     startedAtMs,
   });
-  let receipt: ReturnType<typeof claimCronRunReceiptForTest> | undefined;
+  let receipt: ReturnType<typeof claimCronRunReceiptInDatabaseForTest> | undefined;
   const execute = runtimeMutation.runCronRuntimeMutation;
   const reader = vi
     .spyOn(runtimeMutation, "runCronRuntimeMutation")
@@ -204,7 +206,7 @@ it("preserves a foreign claim committed before worker admission while reserving 
           {
             transactionHooks: {
               beforeWrite: (database) => {
-                receipt = claimCronRunReceiptForTest({
+                receipt = claimCronRunReceiptInDatabaseForTest({
                   database,
                   prepared,
                   resolveAgentId: (job) => job.agentId ?? "main",

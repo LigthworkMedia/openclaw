@@ -39,6 +39,7 @@ export type CronRuntimeMutationInputs = {
     scheduleOwnershipAtMs: number;
     onExit: boolean;
   };
+  "cron.maintainHistory": Record<string, never>;
   "cron.activateRun": {
     storeKey: string;
     handle: CronRunReceiptHandle;

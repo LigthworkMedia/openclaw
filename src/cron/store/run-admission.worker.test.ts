@@ -14,12 +14,12 @@ import { resolveCronJobConfigRevision } from "../config-revision.js";
 import { saveCronStore } from "../store.js";
 import { cronStoreKey } from "./key.js";
 import { reserveCronRunsInWorker } from "./run-admission.worker.js";
-import { claimCronRunReceiptForTest } from "./run-receipt-claim.test-support.js";
 import {
   CronRunReceiptConflictError,
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "./run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "./run-receipt-store.test-support.js";
 
 it.each(["confirmed", "aborted-open"] as const)(
   "reports a reservation conflict only after a usable rollback: %s",
@@ -38,7 +38,11 @@ it.each(["confirmed", "aborted-open"] as const)(
         observed: undefined,
       });
       const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "main" }),
+        claimCronRunReceiptInDatabaseForTest({
+          database: db,
+          prepared,
+          resolveAgentId: () => "main",
+        }),
       );
       const candidate = prepareCronRunReceiptClaim({
         storePath,

@@ -8,6 +8,7 @@ import type {
 import {
   bindExecutionOwnerLifecycleMetadata,
   deleteExecutionOwnerLifecycleMetadata,
+  ensureExecutionOwnerLifecycleBindingSchema,
 } from "../../audit/execution-owner-lifecycle-binding-store.js";
 import {
   executeSqliteQuerySync,
@@ -34,6 +35,10 @@ import {
   type CronRunReceiptRow,
 } from "./run-receipt-read.js";
 import { createCronRunReceiptSettlementOwner } from "./run-receipt-settlement.js";
+import {
+  prepareCronRunReceiptWriteSchema,
+  type CronRunReceiptWriteSchema,
+} from "./run-receipt-write-admission.js";
 import type {
   CronRunReceipt,
   CronRunReceiptHandle,
@@ -96,7 +101,11 @@ export class CronRunReceiptRevisionError extends Error {
 const settlement = createCronRunReceiptSettlementOwner({
   finishNative: (params) =>
     withReceiptWrite("cron.run-receipt.finish", params.env ? { env: params.env } : {}, (database) =>
-      finishCronRunReceiptInDatabase({ database, ...params }),
+      finishCronRunReceiptInDatabase({
+        database,
+        receiptSchema: prepareCronRunReceiptWriteSchema(database),
+        ...params,
+      }),
     ),
   revisionError: (receiptId, message) => new CronRunReceiptRevisionError(receiptId, message),
 });
@@ -178,6 +187,7 @@ export function bindCronRunReceiptExecutionInDatabase(
   database: DatabaseSync,
   handle: CronRunReceiptHandle,
   binding: ExecutionOwnerBinding,
+  receiptSchema: CronRunReceiptWriteSchema,
 ): ExecutionOwnerBindingResult {
   ensureCronRunReceiptSchema(database);
   try {
@@ -187,6 +197,11 @@ export function bindCronRunReceiptExecutionInDatabase(
       throw error;
     }
     return "missing";
+  }
+  // Only a live exact receipt may allocate opt-in binding storage. DDL and
+  // metadata remain in this admitted transaction, so refusal rolls both back.
+  if (!receiptSchema.executionOwnerLifecycleBindings) {
+    ensureExecutionOwnerLifecycleBindingSchema(database);
   }
   return bindExecutionOwnerLifecycleMetadata({
     db: database,
@@ -249,6 +264,7 @@ function pruneTerminalReceipts(
   storeKey: string,
   jobId: string,
   job: CronJob | undefined,
+  receiptSchema: CronRunReceiptWriteSchema,
 ): void {
   const pendingReceiptId =
     job?.state.runningAtMs === undefined ? undefined : job.state.runningReceiptId;
@@ -282,6 +298,7 @@ function pruneTerminalReceipts(
       db: database,
       ownerKind: "cron",
       ownerIds: receiptIds,
+      executionOwnerLifecycleBindings: receiptSchema.executionOwnerLifecycleBindings,
     });
     executeSqliteQuerySync(
       database,
@@ -381,6 +398,7 @@ export function adjudicateActiveCronRunReceiptInDatabase(params: {
 export function claimCronRunReceiptInDatabase(params: {
   database: DatabaseSync;
   prepared: PreparedCronRunReceiptClaim;
+  receiptSchema: CronRunReceiptWriteSchema;
   resolveAgentId: ResolveReceiptAgentId;
 }): CronRunReceiptHandle {
   const { handle } = params.prepared;
@@ -398,7 +416,7 @@ export function claimCronRunReceiptInDatabase(params: {
     handle,
     resolveAgentId: params.resolveAgentId,
   });
-  pruneTerminalReceipts(params.database, handle.storeKey, handle.jobId, job);
+  pruneTerminalReceipts(params.database, handle.storeKey, handle.jobId, job, params.receiptSchema);
   executeSqliteQuerySync(
     params.database,
     query(params.database)
@@ -567,6 +585,7 @@ export function assertCronRunReceiptCurrent(
 /** Completes the exact active receipt inside its caller's cron-state transaction. */
 export function finishCronRunReceiptInDatabase(params: {
   database: DatabaseSync;
+  receiptSchema: CronRunReceiptWriteSchema;
   handle: CronRunReceiptHandle;
   status: Exclude<CronRunReceiptStatus, "running">;
   finishedAtMs: number;
@@ -590,6 +609,7 @@ export function finishCronRunReceiptInDatabase(params: {
     params.handle.storeKey,
     params.handle.jobId,
     currentJob(params.database, params.handle.storeKey, params.handle.jobId),
+    params.receiptSchema,
   );
   const row = executeSqliteQueryTakeFirstSync(
     params.database,

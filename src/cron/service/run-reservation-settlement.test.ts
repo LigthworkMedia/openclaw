@@ -10,17 +10,126 @@ import {
 } from "../../../test/helpers/cron/service-regression-fixtures.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
+import { CRON_AGENT_SELECTION_REQUIRED_MESSAGE } from "../agent-id.js";
+import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
 import { start, stop } from "./ops-lifecycle.js";
+import { list } from "./ops-read.js";
 import { run } from "./ops-run.js";
-import { runWithCronAdmission } from "./run-admission.js";
+import { persistQueuedCronRunReservations, runWithCronAdmission } from "./run-admission.js";
+import * as runHistory from "./run-history.js";
 import { runMissedJobs } from "./timer.js";
 import { onTimer } from "./timer.test-support.js";
 
 const opsRegressionFixtures = setupCronRegressionFixtures({
   prefix: "cron-reservation-settlement-",
 });
+
+it.each(["reservation", "timer", "startup"] as const)(
+  "fences the old %s pass when stop and restart cross ownerless history persistence",
+  async (entrypoint) => {
+    const { storePath } = opsRegressionFixtures.makeStorePath();
+    const now = Date.now();
+    const ownerless = createDueIsolatedJob({
+      id: "ownerless-history",
+      nowMs: now - 2_000,
+      nextRunAtMs: now - 1_000,
+    });
+    const owned = {
+      ...createDueIsolatedJob({
+        id: "owned-after-history",
+        nowMs: now - 2_000,
+        nextRunAtMs: now - 1_000,
+      }),
+      agentId: "alpha",
+      payload: { kind: "command" as const, argv: ["echo", "synthetic"] },
+    };
+    const runner = vi.fn(async () => ({ status: "ok" as const }));
+    const onEvent = vi.fn();
+    const state = createCronRegressionState({
+      storePath,
+      nowMs: () => now,
+      defaultAgentId: undefined,
+      resolveDefaultAgentId: () => undefined,
+      isAgentAvailable: () => true,
+      runCommandJob: runner,
+      runIsolatedAgentJob: runner,
+      onEvent,
+    });
+    await saveCronStore(storePath, { version: 1, jobs: [ownerless, owned] });
+    await list(state);
+    onEvent.mockClear();
+    const entered = createDeferred();
+    const release = createDeferred();
+    let observed = false;
+    const finish = runHistory.finishCronRun;
+    const history = vi.spyOn(runHistory, "finishCronRun").mockImplementation(async (...args) => {
+      if (args[1].ownerlessRun && args[1].event.jobId === ownerless.id) {
+        observed = true;
+        entered.resolve();
+        await release.promise;
+      }
+      await finish(...args);
+    });
+    const pending =
+      entrypoint === "reservation"
+        ? persistQueuedCronRunReservations({
+            state,
+            candidates: [ownerless, owned],
+            reservedAtMs: now,
+          })
+        : entrypoint === "timer"
+          ? onTimer(state)
+          : start(state);
+    void pending.then(
+      () => entered.resolve(),
+      () => entered.resolve(),
+    );
+    try {
+      await entered.promise;
+      expect(observed).toBe(true);
+      stop(state);
+      // A disabled restart changes the generation without admitting successor work.
+      state.deps.cronEnabled = false;
+      await start(state);
+      expect(state.stopped).toBe(false);
+      release.resolve();
+      const result = await pending;
+      if (entrypoint === "reservation") {
+        expect(result).toEqual([]);
+      }
+      expect(runner).not.toHaveBeenCalled();
+      const persisted = (await loadCronStore(storePath)).jobs;
+      expect(persisted.find((job) => job.id === owned.id)?.state).toEqual(owned.state);
+      expect(persisted.find((job) => job.id === ownerless.id)?.state).toMatchObject({
+        lastRunStatus: "skipped",
+        lastError: CRON_AGENT_SELECTION_REQUIRED_MESSAGE,
+      });
+      expect(
+        openOpenClawStateDatabase()
+          .db.prepare("SELECT receipt_id FROM cron_run_receipts WHERE store_key = ?")
+          .all(cronStoreKey(storePath)),
+      ).toEqual([]);
+      expect(
+        readCronRunHistoryPageForTests({ storeKey: cronStoreKey(storePath), jobId: ownerless.id })
+          .entries,
+      ).toEqual([expect.objectContaining({ jobId: ownerless.id, status: "skipped" })]);
+      expect(
+        onEvent.mock.calls.map(([event]) => event).filter((event) => event.action === "finished"),
+      ).toEqual([expect.objectContaining({ jobId: ownerless.id, status: "skipped" })]);
+      expect(state.queuedRunReservationsByJobId.size).toBe(0);
+      expect(state.runAdmission.active).toBe(0);
+      expect(state.activeTimerTicks).toBe(0);
+    } finally {
+      release.resolve();
+      await pending.catch(() => undefined);
+      history.mockRestore();
+      stop(state);
+      await state.op;
+    }
+  },
+);
 
 it.each([
   { trigger: "manual", restartScheduler: false },

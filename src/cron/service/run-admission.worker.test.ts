@@ -22,7 +22,6 @@ import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { clearCronJobActive } from "../active-jobs.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import * as cronStore from "../store.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import {
   findActiveCronRunReceiptInDatabase,
   finishCronRunReceiptAsync,
@@ -31,6 +30,7 @@ import {
   prepareCronRunReceiptClaim,
   trackCronRunReceiptSettlement,
 } from "../store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../store/run-receipt-store.test-support.js";
 import { listForeignReceipts } from "./foreign-receipt-monitor.js";
 import { stop } from "./ops-lifecycle.js";
 import { list } from "./ops-read.js";
@@ -143,7 +143,7 @@ it("fences an activation whose durable receipt was replaced after reservation", 
       startedAtMs: original.startedAtMs,
     });
     const replacement = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptForTest({
+      claimCronRunReceiptInDatabaseForTest({
         database: db,
         prepared,
         resolveAgentId: () => original.agentId,

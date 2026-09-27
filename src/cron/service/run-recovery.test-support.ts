@@ -8,8 +8,8 @@ import * as stateRead from "../../state/openclaw-state-db-readonly.js";
 import { runOpenClawStateWriteTransaction } from "../../state/openclaw-state-db.js";
 import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import { cronStoreKey } from "../store/key.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
 import { prepareCronRunReceiptClaim } from "../store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../store/run-receipt-store.test-support.js";
 import type { CronRunRecoveryProposal } from "../store/run-recovery-read.types.js";
 import type { CronRunRecoveryResult } from "../store/run-recovery.types.js";
 import type { CronJob } from "../types.js";
@@ -98,7 +98,7 @@ export function claimCronRecoveryReceipt(
     startedAtMs,
   });
   return runOpenClawStateWriteTransaction(({ db }) =>
-    claimCronRunReceiptForTest({
+    claimCronRunReceiptInDatabaseForTest({
       database: db,
       prepared,
       resolveAgentId: (current) => current.agentId ?? defaultAgentId,

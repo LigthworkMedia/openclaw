@@ -8,11 +8,11 @@ import { createOperationalRunInstanceRef } from "../../agents/admitted-run-conte
 import { CronService } from "../../cron/service.js";
 import { assertServiceCronRunReceiptCurrent } from "../../cron/service/run-receipts.js";
 import { saveCronStore } from "../../cron/store.js";
-import { claimCronRunReceiptForTest } from "../../cron/store/run-receipt-claim.test-support.js";
 import {
   finishCronRunReceiptAsync,
   prepareCronRunReceiptClaim,
 } from "../../cron/store/run-receipt-store.js";
+import { claimCronRunReceiptInDatabaseForTest } from "../../cron/store/run-receipt-store.test-support.js";
 import {
   claimAgentRunDelegatedAuthority,
   releaseAgentRunDelegatedAuthority,
@@ -49,7 +49,11 @@ it("revalidates a scheduled Gateway caller while its child reservation holds the
       observed: undefined,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "main" }),
+      claimCronRunReceiptInDatabaseForTest({
+        database: db,
+        prepared,
+        resolveAgentId: () => "main",
+      }),
     );
     const operationalRunInstance = createOperationalRunInstanceRef("scheduled-cron-caller");
     const authority = claimAgentRunDelegatedAuthority(operationalRunInstance, () =>

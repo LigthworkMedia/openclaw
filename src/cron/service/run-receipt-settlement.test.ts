@@ -18,13 +18,15 @@ import { CronService, type CronEvent } from "../service.js";
 import { setupCronServiceSuite } from "../service.test-harness.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
-import { loadedCronStoreFromRows, loadCronRows } from "../store/row-codec.js";
-import { claimCronRunReceiptForTest } from "../store/run-receipt-claim.test-support.js";
+import { loadCronRows, loadedCronStoreFromRows } from "../store/row-codec.js";
 import {
   prepareCronRunReceiptClaim,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
-import { inspectActiveCronRunReceipt } from "../store/run-receipt-store.test-support.js";
+import {
+  claimCronRunReceiptInDatabaseForTest,
+  inspectActiveCronRunReceipt,
+} from "../store/run-receipt-store.test-support.js";
 import { cronStreamScheduleKey } from "../stream-schedule.js";
 import type { CronJob } from "../types.js";
 
@@ -225,7 +227,11 @@ describe("cron run receipt settlement", () => {
         startedAtMs,
       });
       const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-        claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
+        claimCronRunReceiptInDatabaseForTest({
+          database: db,
+          prepared,
+          resolveAgentId: () => "alpha",
+        }),
       );
       job.state.runningReceiptId = receipt.receiptId;
       await saveCronStore(storePath, { version: 1, jobs: [job] });
@@ -306,7 +312,11 @@ describe("cron run receipt settlement", () => {
       startedAtMs,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptForTest({ database: db, prepared, resolveAgentId: () => "alpha" }),
+      claimCronRunReceiptInDatabaseForTest({
+        database: db,
+        prepared,
+        resolveAgentId: () => "alpha",
+      }),
     );
     // Process exit drops the local liveness claim but leaves the durable receipt.
     releaseLocalCronRunReceiptOwnership(receipt);

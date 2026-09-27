@@ -15,16 +15,16 @@ import {
 import { describeUnavailableCronAgent } from "../agent-availability.js";
 import { resolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { cronStoreKey } from "../store/key.js";
-import { loadedCronStoreFromRows, loadCronRows } from "../store/row-codec.js";
+import { loadCronRows, loadedCronStoreFromRows } from "../store/row-codec.js";
 import {
   adjudicateActiveCronRunReceiptInDatabase,
   assertCronRunReceiptCurrent,
   assertCronRunReceiptCurrentInDatabase,
   assertCronRunReceiptOwnedInDatabase,
   CronRunReceiptRevisionError,
+  findActiveCronRunReceiptInDatabase,
   finishCronRunReceipt,
   finishCronRunReceiptInDatabase,
-  findActiveCronRunReceiptInDatabase,
   isCronRunReceiptSettlementPending,
   prepareCronRunReceiptAdjudication,
   prepareCronRunReceiptClaim,
@@ -33,6 +33,7 @@ import {
   type CronRunReceiptSettlementDisposition,
 } from "../store/run-receipt-store.js";
 import { retireCronRunTriggerStateInDatabase } from "../store/run-receipt-trigger-state.js";
+import type { CronRunReceiptWriteSchema } from "../store/run-receipt-write-admission.js";
 import type {
   CronRunReceiptHandle,
   CronRunReceiptOwnerObservation,
@@ -46,8 +47,8 @@ import {
   resolveCronJobMessageActionAuthorityInputs,
   resolveCronJobMessageToolAuthorityInputs,
 } from "./jobs-tool-policy.js";
+import { findCronRunRecoveryInDatabase } from "./run-history-recovery.js";
 import type { CronServiceState } from "./state.js";
-import { findCronTaskRunRecoveryInDatabase } from "./task-runs.js";
 import { runsDetachedFromMainSession } from "./timer-execution-timeout.js";
 
 function currentDefaultAgentId(state: CronServiceState): string | undefined {
@@ -246,7 +247,7 @@ export function cronRunReceiptMutationHooks(params: {
   }
   return {
     ...ownerHooks,
-    beforeWrite: (database) => {
+    beforeWrite: (database, receiptSchema) => {
       if (params.scheduleChangedJob) {
         const current = loadedCronStoreFromRows(
           loadCronRows(
@@ -266,7 +267,7 @@ export function cronRunReceiptMutationHooks(params: {
       if (params.triggerStateChanged) {
         retireServiceCronRunTriggerStateInDatabase({ ...params, database });
       }
-      ownerHooks?.beforeWrite?.(database);
+      ownerHooks?.beforeWrite?.(database, receiptSchema);
     },
     afterCommit: () => {
       ownerHooks?.afterCommit?.();
@@ -304,10 +305,10 @@ function retireServiceCronRunTriggerStateInDatabase(params: {
     return;
   }
   // Owner edits close execution authority before scheduler reconciliation.
-  // Only legacy markers without a receipt association need task-history fallback.
+  // Only legacy markers without a receipt association need history fallback.
   const receiptId =
     job.state.runningReceiptId ??
-    findCronTaskRunRecoveryInDatabase({
+    findCronRunRecoveryInDatabase({
       database,
       jobId,
       storeKey,
@@ -432,8 +433,10 @@ export function cronRunReceiptPersistHooks(params: {
       ? {
           afterWrite: (
             database: Parameters<NonNullable<CronStoreTransactionHooks["afterWrite"]>>[0],
+            receiptSchema: CronRunReceiptWriteSchema,
           ) => {
             finishCronRunReceiptInDatabase({
+              receiptSchema,
               database,
               ...terminal,
             });

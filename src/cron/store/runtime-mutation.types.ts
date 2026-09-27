@@ -24,6 +24,12 @@ export type CronRuntimeMutationContracts = {
       replacedReceipts: CronRunReceiptHandle[];
     };
   };
+  "cron.maintainHistory": {
+    input: CronRuntimeMutationInputs["cron.maintainHistory"];
+    facts: { jobIds: string[]; receipts: CronRunReceiptHandle[] };
+    preparation: { nowMs: number; protectedJobIds: string[] };
+    outcome: { reconciled: number; pruned: number };
+  };
   "cron.activateRun": {
     input: CronRuntimeMutationInputs["cron.activateRun"];
     facts: Record<string, never>;

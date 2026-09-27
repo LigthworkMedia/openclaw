@@ -1,7 +1,7 @@
 // Cron service ops tests cover high-level service operations and state transitions.
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCronRegressionState } from "../../../test/helpers/cron/service-regression-fixtures.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { AgentDeletionCommitUncertainError } from "../../agents/agent-lifecycle-registry.js";
@@ -10,15 +10,12 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../../state/openclaw-state-db.js";
-import * as taskExecutor from "../../tasks/task-executor.js";
-import { findTaskByRunId, listTaskRecords } from "../../tasks/task-registry.js";
-import { resetTaskRegistryForTests } from "../../tasks/task-runtime.test-helpers.js";
-import { formatTaskStatusDetail } from "../../tasks/task-status.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
 } from "../../test-utils/gateway-scheduler-clock.js";
+import { findCronRunForTests, readCronRunRecordsForTests } from "../run-history.test-support.js";
 import { createCronExecutionId } from "../run-id.js";
 import * as cronSchedule from "../schedule.js";
 import { readCronJobScratchState, writeCronJobScratch } from "../scratch-store.js";
@@ -41,13 +38,13 @@ import {
 import { list, writeScratch } from "./ops-read.js";
 import { inspectManualRunDisposition } from "./ops-run-preparation.js";
 import { run } from "./ops-run.js";
+import * as taskRuns from "./run-history.js";
 import {
   claimCronRecoveryReceipt,
   observeCronRecoveryForTest,
   recoverCronRunForTest,
 } from "./run-recovery.test-support.js";
 import type { CronAddResult, CronEvent } from "./state.js";
-import * as taskRuns from "./task-runs.js";
 import { runMissedJobs } from "./timer.js";
 
 const { logger, makeStorePath } = setupCronServiceSuite({
@@ -507,13 +504,11 @@ async function withStateDirForStorePath<T>(
 ): Promise<T> {
   const stateRoot = path.dirname(path.dirname(storePath));
   await closeOpenClawStateDatabaseAsync();
-  resetTaskRegistryForTests();
   return await withEnvAsync({ OPENCLAW_STATE_DIR: stateRoot }, async () => {
     try {
       return await runWithStateDir();
     } finally {
       await closeOpenClawStateDatabaseAsync();
-      resetTaskRegistryForTests();
     }
   });
 }
@@ -698,18 +693,6 @@ describe("cron stale job-family adoption", () => {
   });
 });
 
-async function expectDueIsolatedManualRunProgresses(storePath: string, now: number) {
-  const state = createOkIsolatedCronState({ storePath, now, summary: "done" });
-
-  await expect(run(state, "isolated-timeout")).resolves.toEqual({ ok: true, ran: true });
-
-  const persisted = (await loadCronStore(storePath)) as {
-    jobs: CronJob[];
-  };
-  expect(persisted.jobs[0]?.state.runningAtMs).toBeUndefined();
-  expect(persisted.jobs[0]?.state.lastStatus).toBe("ok");
-}
-
 function expectWarnedJob(params: { field: "jobId" | "jobStatus"; value: string; message: string }) {
   const warnCalls = logger.warn.mock.calls as unknown as Array<[Record<string, unknown>, string]>;
   const warning = warnCalls.find(
@@ -719,26 +702,16 @@ function expectWarnedJob(params: { field: "jobId" | "jobStatus"; value: string; 
   expect(warning?.[1]).toBe(params.message);
 }
 
-function expectTaskRun(params: {
-  runId: string;
-  runtime: string;
-  status: string;
-  sourceId: string;
-  progressSummary?: string;
-}) {
+function expectCronRun(params: { runId: string; status: string; jobId: string }) {
   const task = findCronTaskByBaseRunId(params.runId);
-  expect(task?.runtime).toBe(params.runtime);
   expect(task?.status).toBe(params.status);
-  expect(task?.sourceId).toBe(params.sourceId);
-  if (params.progressSummary !== undefined) {
-    expect(task?.progressSummary).toBe(params.progressSummary);
-  }
+  expect(task?.jobId).toBe(params.jobId);
 }
 
 function findCronTaskByBaseRunId(baseRunId: string) {
   return (
-    findTaskByRunId(baseRunId) ??
-    listTaskRecords().find((task) => task.runId?.startsWith(`${baseRunId}:`))
+    findCronRunForTests(baseRunId) ??
+    readCronRunRecordsForTests().find((task) => task.runId?.startsWith(`${baseRunId}:`))
   );
 }
 
@@ -1003,9 +976,10 @@ describe("cron service ops seam coverage", () => {
       { version: 1, jobs: [completedJob] },
       {
         transactionHooks: {
-          afterWrite: (db) => {
+          afterWrite: (db, receiptSchema) => {
             runReceiptStore.finishCronRunReceiptInDatabase({
               database: db,
+              receiptSchema,
               handle: receipt,
               status: "ok",
               finishedAtMs: now,
@@ -1080,29 +1054,14 @@ describe("cron service ops seam coverage", () => {
         });
         const taskRunId =
           reservationOffsetMs === undefined && foreignRunId === undefined
-            ? taskRuns.tryCreateCronTaskRunHandle({ state, job, startedAt, runReceipt: receipt })
-                ?.runId
-            : taskExecutor.createRunningTaskRunCore({
-                runtime: "cron",
-                sourceId: job.id,
-                ownerKey: "",
-                scopeKind: "system",
-                runId:
-                  foreignRunId ??
-                  `${createCronExecutionId(job.id, startedAt - reservationOffsetMs!)}:legacy-upgrade`,
-                agentId: "main",
-                task: job.name,
-                deliveryStatus: "not_applicable",
-                notifyPolicy: "silent",
-                startedAt,
-                lastEventAt: startedAt,
-                detail: { storeKey: cronStoreKey(storePath) },
-              })?.runId;
+            ? taskRuns.createCronRunHandle({ state, job, startedAt, runReceipt: receipt })?.runId
+            : (foreignRunId ??
+              `${createCronExecutionId(job.id, startedAt - reservationOffsetMs!)}:legacy-upgrade`);
         if (!taskRunId) {
           throw new Error("expected reserved cron task run");
         }
 
-        taskRuns.tryFinishCronTaskRun(state, {
+        await taskRuns.finishCronRun(state, {
           taskRunId,
           job,
           triggerEval: { fired: true, stateChanged: true, state: { cursor: "new" } },
@@ -1127,10 +1086,10 @@ describe("cron service ops seam coverage", () => {
         }
         await start(state);
 
-        expect(findTaskByRunId(taskRunId)).toMatchObject({
+        expect(findCronRunForTests(taskRunId)).toMatchObject({
           status: "succeeded",
           startedAt,
-          terminalSummary: "completed before crash",
+          summary: "completed before crash",
           endedAt,
           detail: {
             kind: "cron-run",
@@ -1218,7 +1177,7 @@ describe("cron service ops seam coverage", () => {
         nowMs: () => now,
         runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
       });
-      const taskRunId = taskRuns.tryCreateCronTaskRunHandle({
+      const taskRunId = taskRuns.createCronRunHandle({
         state,
         job,
         startedAt,
@@ -1227,7 +1186,7 @@ describe("cron service ops seam coverage", () => {
       if (!taskRunId) {
         throw new Error("expected invalid finalized cron task run");
       }
-      taskRuns.tryFinishCronTaskRun(state, {
+      await taskRuns.finishCronRun(state, {
         taskRunId,
         job,
         event: {
@@ -1290,11 +1249,11 @@ describe("cron service ops seam coverage", () => {
         runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
         onEvent: (event) => events.push(structuredClone(event)),
       });
-      const taskRunId = taskRuns.tryCreateCronTaskRunHandle({ state, job, startedAt })?.runId;
+      const taskRunId = taskRuns.createCronRunHandle({ state, job, startedAt })?.runId;
       if (!taskRunId) {
         throw new Error("expected cron task run");
       }
-      taskRuns.tryFinishCronTaskRun(state, {
+      await taskRuns.finishCronRun(state, {
         taskRunId,
         job,
         event: {
@@ -1355,11 +1314,11 @@ describe("cron service ops seam coverage", () => {
         nowMs: () => now,
         runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
       });
-      const taskRunId = taskRuns.tryCreateCronTaskRunHandle({ state, job, startedAt })?.runId;
+      const taskRunId = taskRuns.createCronRunHandle({ state, job, startedAt })?.runId;
       if (!taskRunId) {
         throw new Error("expected cron task run");
       }
-      taskRuns.tryFinishCronTaskRun(state, {
+      await taskRuns.finishCronRun(state, {
         taskRunId,
         job,
         event: {
@@ -1425,7 +1384,7 @@ describe("cron service ops seam coverage", () => {
           nowMs: () => now,
           runIsolatedAgentJob,
         });
-        const taskRunId = taskRuns.tryCreateCronTaskRunHandle({
+        const taskRunId = taskRuns.createCronRunHandle({
           state,
           job: original,
           startedAt,
@@ -1433,7 +1392,7 @@ describe("cron service ops seam coverage", () => {
         if (!taskRunId) {
           throw new Error("expected cron task run");
         }
-        taskRuns.tryFinishCronTaskRun(state, {
+        await taskRuns.finishCronRun(state, {
           taskRunId,
           job: original,
           event: {
@@ -1466,7 +1425,9 @@ describe("cron service ops seam coverage", () => {
           expect(restored?.state.lastRunAtMs).toBe(startedAt);
           expect(restored?.state.lastRunStatus).toBe(status);
           expect(runIsolatedAgentJob).not.toHaveBeenCalled();
-          expect(findTaskByRunId(taskRunId)?.status).toBe(status === "ok" ? "succeeded" : "failed");
+          expect(findCronRunForTests(taskRunId)?.status).toBe(
+            status === "ok" ? "succeeded" : "failed",
+          );
         } finally {
           stop(state);
         }
@@ -1492,7 +1453,7 @@ describe("cron service ops seam coverage", () => {
         runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
       });
 
-      taskRuns.tryFinishCronTaskRun(state, {
+      await taskRuns.finishCronRun(state, {
         job,
         event: {
           jobId: job.id,
@@ -1586,14 +1547,12 @@ describe("cron service ops seam coverage", () => {
         )
         .get(cronStoreKey(storePath), "isolated-timeout") as { receiptId: string };
       const taskRunId = `cron:isolated-timeout:${now}:${receipt.receiptId}:${manualRunId}`;
-      expectTaskRun({
+      expectCronRun({
         runId: taskRunId,
-        runtime: "cron",
         status: "succeeded",
-        sourceId: "isolated-timeout",
-        progressSummary: "Running automation.",
+        jobId: "isolated-timeout",
       });
-      expect(findTaskByRunId(manualRunId)).toBeUndefined();
+      expect(findCronRunForTests(manualRunId)).toBeUndefined();
     });
   });
 
@@ -1645,11 +1604,10 @@ describe("cron service ops seam coverage", () => {
 
       await run(state, "isolated-timeout");
 
-      expectTaskRun({
+      expectCronRun({
         runId: `cron:isolated-timeout:${now}`,
-        runtime: "cron",
         status: "timed_out",
-        sourceId: "isolated-timeout",
+        jobId: "isolated-timeout",
       });
       expect(findCronTaskByBaseRunId(`cron:isolated-timeout:${now}`)?.detail).toMatchObject({
         kind: "cron-run",
@@ -1726,69 +1684,6 @@ describe("cron service ops seam coverage", () => {
         },
       });
       expect(persisted.jobs[0]?.state.nextRunAtMs).toBeUndefined();
-    });
-  });
-
-  it("keeps manual cron runs progressing when task ledger creation fails", async () => {
-    const { storePath } = await makeStorePath();
-    const now = Date.parse("2026-03-23T12:00:00.000Z");
-
-    await writeCronStoreSnapshot({
-      storePath,
-      jobs: [createDueIsolatedJob(now)],
-    });
-
-    const createTaskRecord = taskExecutor.createRunningTaskRunCore;
-    const createTaskRecordSpy = vi
-      .spyOn(taskExecutor, "createRunningTaskRunCore")
-      .mockImplementationOnce(() => {
-        throw new Error("disk full");
-      })
-      .mockImplementation((params) => createTaskRecord(params));
-
-    try {
-      await expectDueIsolatedManualRunProgresses(storePath, now);
-      expectWarnedJob({
-        field: "jobId",
-        value: "isolated-timeout",
-        message: "cron: failed to create task ledger record",
-      });
-      const receipt = openOpenClawStateDatabase()
-        .db.prepare(
-          "SELECT receipt_id AS receiptId FROM cron_run_receipts WHERE store_key = ? AND job_id = ? ORDER BY started_at_ms DESC, receipt_id DESC LIMIT 1",
-        )
-        .get(cronStoreKey(storePath), "isolated-timeout") as { receiptId: string };
-      expect(findTaskByRunId(`cron:isolated-timeout:${now}:${receipt.receiptId}`)).toMatchObject({
-        status: "succeeded",
-      });
-    } finally {
-      createTaskRecordSpy.mockRestore();
-    }
-  });
-
-  it("keeps manual cron cleanup progressing when task ledger updates fail", async () => {
-    const { storePath } = await makeStorePath();
-    const now = Date.parse("2026-03-23T12:00:00.000Z");
-
-    await withStateDirForStorePath(storePath, async () => {
-      await writeDueIsolatedJobSnapshot(storePath, now);
-
-      const updateTaskRecordSpy = vi
-        .spyOn(taskExecutor, "finalizeTaskRunByRunIdCore")
-        .mockImplementation(() => {
-          throw new Error("disk full");
-        });
-
-      try {
-        await expectDueIsolatedManualRunProgresses(storePath, now);
-        expectWarnedJob({
-          field: "jobStatus",
-          value: "ok",
-          message: "cron: failed to update task ledger record",
-        });
-      } finally {
-        updateTaskRecordSpy.mockRestore();
-      }
     });
   });
 
@@ -1871,47 +1766,11 @@ describe("cron service ops seam coverage", () => {
 
       await runMissedJobs(state);
 
-      expectTaskRun({
+      expectCronRun({
         runId: `cron:startup-timeout:${now}`,
-        runtime: "cron",
         status: "timed_out",
-        sourceId: "startup-timeout",
-        progressSummary: "Running automation.",
+        jobId: "startup-timeout",
       });
-    });
-  });
-
-  it("seeds active manual cron task progress for status surfaces", async () => {
-    const { storePath } = await makeStorePath();
-    const now = Date.parse("2026-03-23T12:00:00.000Z");
-
-    await withStateDirForStorePath(storePath, async () => {
-      await writeDueIsolatedJobSnapshot(storePath, now);
-      const started = createDeferred();
-      const completion = createDeferred<{ status: "ok"; summary: string }>();
-      const state = createCronServiceState({
-        storePath,
-        nowMs: () => now,
-        runIsolatedAgentJob: vi.fn(() => {
-          started.resolve();
-          return completion.promise;
-        }),
-      });
-
-      const manualRun = run(state, "isolated-timeout");
-      try {
-        await Promise.race([started.promise, manualRun]);
-        expect(state.deps.runIsolatedAgentJob).toHaveBeenCalledTimes(1);
-
-        const task = findCronTaskByBaseRunId(`cron:isolated-timeout:${now}`);
-        assert.isDefined(task, "expected active manual cron task ledger record");
-        expect(task.status).toBe("running");
-        expect(task.progressSummary).toBe("Running automation.");
-        expect(formatTaskStatusDetail(task)).toBe("Running automation.");
-      } finally {
-        completion.resolve({ status: "ok", summary: "done" });
-        await manualRun;
-      }
     });
   });
 

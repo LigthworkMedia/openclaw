@@ -14,8 +14,6 @@ import {
   tryBeginGatewayIndependentRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
-import * as notificationMutation from "../tasks/task-notification-mutation.async.js";
-import { captureTaskDeliveryWork } from "../tasks/task-registry-delivery.test-support.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
@@ -25,9 +23,11 @@ import { observeCronTimerAdmissions } from "./service/run-recovery.test-support.
 import { onTimer } from "./service/timer.test-support.js";
 import { loadCronStore, saveCronStore } from "./store.js";
 import { cronStoreKey } from "./store/key.js";
-import { claimCronRunReceiptForTest } from "./store/run-receipt-claim.test-support.js";
 import { finishCronRunReceipt, prepareCronRunReceiptClaim } from "./store/run-receipt-store.js";
-import { inspectActiveCronRunReceipt } from "./store/run-receipt-store.test-support.js";
+import {
+  claimCronRunReceiptInDatabaseForTest,
+  inspectActiveCronRunReceipt,
+} from "./store/run-receipt-store.test-support.js";
 import type { CronRunReceiptHandle } from "./store/run-receipt.types.js";
 import type { CronJob } from "./types.js";
 
@@ -336,7 +336,7 @@ describe("cron service cross-tick bounded admission", () => {
       startedAtMs: t0,
     });
     const receipt = runOpenClawStateWriteTransaction(({ db }) =>
-      claimCronRunReceiptForTest({
+      claimCronRunReceiptInDatabaseForTest({
         database: db,
         prepared,
         resolveAgentId: (job) => job.agentId ?? "main",
@@ -431,7 +431,7 @@ describe("cron service cross-tick bounded admission", () => {
         // the durable owner race at that boundary.
         if (nowCalls === 3) {
           foreignReceipt = runOpenClawStateWriteTransaction(({ db }) => {
-            const receipt = claimCronRunReceiptForTest({
+            const receipt = claimCronRunReceiptInDatabaseForTest({
               database: db,
               prepared: preparedForeignReceipt,
               resolveAgentId: (job) => job.agentId ?? "main",
@@ -475,8 +475,6 @@ describe("cron service cross-tick bounded admission", () => {
   });
 
   it("runs the next future wake under its own Gateway root while an earlier batch runs", async () => {
-    using deliveries = captureTaskDeliveryWork();
-    const releaseNotification = createDeferred();
     const store = fixtures.makeStorePath();
     const t0 = Date.now();
     const clock = createGatewaySchedulerClock(t0);
@@ -542,47 +540,22 @@ describe("cron service cross-tick bounded admission", () => {
       ).toBeDefined();
       expect(getActiveGatewayRootWorkCount()).toBe(2);
 
-      const capture = notificationMutation.captureTaskNotificationMutationOwner;
-      vi.spyOn(notificationMutation, "captureTaskNotificationMutationOwner").mockImplementation(
-        (assertCurrent) => {
-          const owner = capture(assertCurrent);
-          return {
-            ...owner,
-            async prepare<T>(
-              consume: Parameters<typeof owner.prepare<T>>[0],
-              subagentChildSessionKey?: string,
-            ): Promise<T> {
-              await releaseNotification.promise;
-              return owner.prepare(consume, subagentChildSessionKey);
-            },
-          };
-        },
-      );
       releaseA.resolve({ status: "ok", summary: "a done" });
       await tickA;
-      // Task notifications outlive the timer result under independent admissions.
-      releaseNotification.resolve();
-      await deliveries.settle();
       expect(
         getActiveGatewayRootWorkCount(),
         JSON.stringify(getActiveGatewayRootWorkHolders()),
       ).toBe(1);
       releaseB.resolve({ status: "ok", summary: "b done" });
       await tickB;
-      await deliveries.settle();
       expect(getActiveGatewayRootWorkCount()).toBe(0);
       expect(state.activeTimerTicks).toBe(0);
     } finally {
-      releaseNotification.resolve();
       releaseA.resolve({ status: "ok", summary: "a cleanup" });
       releaseB.resolve({ status: "ok", summary: "b cleanup" });
       await Promise.all([tickA, tickB]);
-      try {
-        await deliveries.settle();
-      } finally {
-        stop(state);
-        await scheduler.stop();
-      }
+      stop(state);
+      await scheduler.stop();
     }
   });
 });
