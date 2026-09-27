@@ -106,6 +106,7 @@ describe("runCronIsolatedAgentTurn runtime model thinking", () => {
     resolveSupportedThinkingLevelMock.mockReturnValue("off");
 
     await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {
@@ -154,6 +155,7 @@ describe("runCronIsolatedAgentTurn runtime model thinking", () => {
     loadModelCatalogMock.mockResolvedValue([]);
 
     await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {
@@ -196,6 +198,7 @@ describe("runCronIsolatedAgentTurn runtime model thinking", () => {
       loadModelCatalogMock.mockResolvedValue([]);
 
       await runCronIsolatedAgentTurn({
+        deliveryAttemptFence: null,
         cfg: {
           agents: {
             defaults,
@@ -254,6 +257,7 @@ describe("runCronIsolatedAgentTurn runtime model thinking", () => {
       });
 
       await runCronIsolatedAgentTurn({
+        deliveryAttemptFence: null,
         cfg: {
           agents: {
             defaults: {
@@ -337,6 +341,7 @@ describe("runCronIsolatedAgentTurn runtime model thinking", () => {
     });
 
     await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {

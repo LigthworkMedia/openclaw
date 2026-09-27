@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
+import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import {
   isCronSelfRemovalCurrent,
   markCronJobActive,
@@ -65,6 +66,7 @@ export function markServiceCronJobActive(
 ): CronActiveJobMarker | undefined {
   return markCronJobActive(job.id, {
     agentId: runReceipt.agentId,
+    stateIdentityKey: captureOpenClawStateWorkerContext().admission.identity.key,
     declarationKey: job.declarationKey,
     preserveAcrossGenerationAdvance: !runsDetachedFromMainSession(job),
     isMessageActionAuthorityCurrent: createServiceCronRunMessageAuthorityChecker({

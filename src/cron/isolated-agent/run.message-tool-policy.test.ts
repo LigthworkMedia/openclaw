@@ -8,7 +8,14 @@ import type { SkillSnapshot } from "../../skills/types.js";
 import { mockCall } from "../../test-utils/mock-call-assertions.js";
 import { applyJobPatch } from "../service/jobs.js";
 import type { CronDeliveryMode } from "../types.js";
+import { makeIsolatedAgentParamsFixture } from "./job-fixtures.js";
 import type { MutableCronSession } from "./run-session-state.js";
+import {
+  makeMessageToolPolicyJob,
+  makeAnnounceMessageToolJob,
+  makeAnnounceDeliveryPlan,
+  makeResolvedAnnounceTarget,
+} from "./run.message-tool-policy.test-fixtures.js";
 import {
   buildSafeExternalPromptMock,
   callGatewayMock,
@@ -34,46 +41,13 @@ import {
 const runCronIsolatedAgentTurn = await loadRunCronIsolatedAgentTurn();
 const { executeCronRun } = await import("./run-executor.js");
 
-function makeMessageToolPolicyJob(
-  delivery: Record<string, unknown> = { mode: "none" },
-  payload: Record<string, unknown> = { kind: "agentTurn", message: "send a message" },
-) {
-  return {
-    id: "message-tool-policy",
-    name: "Message Tool Policy",
-    schedule: { kind: "every", everyMs: 60_000 },
-    sessionTarget: "isolated",
-    payload,
-    delivery,
-  } as never;
-}
-
-function makeAnnounceMessageToolJob(
-  options: {
-    id?: string;
-    name?: string;
-    delivery?: Record<string, unknown>;
-    payload?: Record<string, unknown>;
-  } = {},
-) {
-  return {
-    id: options.id ?? "message-tool-policy",
-    name: options.name ?? "Message Tool Policy",
-    schedule: { kind: "every", everyMs: 60_000 },
-    sessionTarget: "isolated",
-    payload: { kind: "agentTurn", message: "send a message", ...options.payload },
-    delivery: { mode: "announce", channel: "messagechat", to: "123", ...options.delivery },
-  } as never;
-}
-
 function makeParams(job = makeMessageToolPolicyJob()) {
-  return {
-    cfg: {},
-    deps: {} as never,
+  return makeIsolatedAgentParamsFixture({
+    deliveryAttemptFence: { beforeAttempt: async () => {}, assertCurrent: () => {} },
     job,
     message: "send a message",
     sessionKey: "cron:message-tool-policy",
-  };
+  });
 }
 
 function mockThreadedNoDeliveryRun() {
@@ -89,28 +63,6 @@ function mockThreadedNoDeliveryRun() {
     error: undefined,
   });
   return makeMessageToolPolicyJob(delivery);
-}
-
-function makeAnnounceDeliveryPlan(overrides: Record<string, unknown> = {}) {
-  return {
-    requested: true,
-    mode: "announce",
-    channel: "messagechat",
-    to: "123",
-    ...overrides,
-  };
-}
-
-function makeResolvedAnnounceTarget(overrides: Record<string, unknown> = {}) {
-  return {
-    ok: true,
-    channel: "messagechat",
-    to: "123",
-    accountId: undefined,
-    threadId: undefined,
-    mode: "explicit",
-    ...overrides,
-  };
 }
 
 function makeMessageToolRunResult(messagingToolSentTargets: Array<Record<string, unknown>>) {
@@ -369,6 +321,7 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
           cfg: {},
           cfgWithAgentDefaults: {},
           job: makeMessageToolPolicyJob(),
+          deliveryAttemptFence: null,
           agentId: "default",
           agentDir: "/tmp/agent-dir",
           agentSessionKey: "cron:message-tool-policy",

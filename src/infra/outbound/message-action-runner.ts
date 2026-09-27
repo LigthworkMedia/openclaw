@@ -7,21 +7,19 @@ import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-pay
 import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import type { AgentToolResult } from "../../agents/runtime/index.js";
 import { readStringArrayParam, readToolStringParam } from "../../agents/tools/common.js";
-import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
 import {
   appendReplyMediaFailures,
   getReplyPayloadMetadata,
-  type ReplyPayload,
 } from "../../auto-reply/reply-payload.js";
+import { isFencedProviderReadAction } from "../../channels/plugins/message-action-dispatch.js";
 import type { ChannelId, ChannelPlugin } from "../../channels/plugins/types.public.js";
+import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
+import { withSessionTranscriptWriteAssertion } from "../../config/sessions/transcript-write-context.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { readBooleanParam } from "../../plugin-sdk/boolean-param.js";
 import { hasPollCreationParams } from "../../poll-params.js";
 import { withChannelReadAuthority } from "../../shared/channel-read-authority.js";
-import {
-  CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY,
-  readClawHubRecommendations,
-} from "../../shared/clawhub-recommendations.js";
+import { CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY } from "../../shared/clawhub-recommendations.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import { formatErrorMessage, toErrorObject } from "../errors.js";
@@ -31,7 +29,10 @@ import {
   resolveMessageChannelSelection,
 } from "./channel-selection.js";
 import { assertOutboundHandoffCurrent, OutboundHandoffRejectedError } from "./deliver-handoff.js";
-import { shouldUseInternalSourceReplySink } from "./internal-source-reply.js";
+import {
+  buildInternalSourceReplyToolResult,
+  shouldUseInternalSourceReplySink,
+} from "./internal-source-reply.js";
 import { validateExplicitMessageAccountSelection } from "./message-account-selection.js";
 import {
   resolveMessageActionOutcome,
@@ -86,6 +87,23 @@ function withMessageTargetPreparation<T>(
     assertOutboundHandoffCurrent(assertCurrent);
     throw error;
   });
+}
+
+function assertMessageDeliveryCurrent(input: MessageActionInput): void {
+  throwIfAborted(input.abortSignal);
+  input.assertDirectAdapterHandoff?.();
+  input.messageActionAuthorization?.scheduled?.assertCurrent();
+  input.messageActionAuthorization?.deliveryAttempt?.assertCurrent();
+}
+
+async function beforeMessageDeliveryAttempt(input: MessageActionInput): Promise<void> {
+  const deliveryAttempt = input.messageActionAuthorization?.deliveryAttempt;
+  if (!deliveryAttempt) {
+    return;
+  }
+  assertMessageDeliveryCurrent(input);
+  await deliveryAttempt.beforeAttempt();
+  assertMessageDeliveryCurrent(input);
 }
 
 async function handleBroadcastAction(
@@ -421,24 +439,45 @@ async function handleInternalSourceReplySendAction(
   const idempotencyKey = normalizeOptionalString(params.idempotencyKey);
   let persistedIdempotencyKey: string | undefined;
   let persistedTranscriptOwner = false;
+  if (!dryRun) {
+    await beforeMessageDeliveryAttempt(input);
+  }
   if (!dryRun && input.sessionId) {
     const sessionKey = input.sourceReplySessionKey ?? input.sessionKey;
     if (!sessionKey) {
       throw new Error("Internal source reply requires a session key");
     }
     const { persistInternalSourceReply } = await loadInternalSourceReplyPersistence();
-    await persistInternalSourceReply({
-      cfg: input.cfg,
-      sessionKey,
-      expectedSessionId: input.sessionId,
-      agentId: input.agentId ?? resolveSessionAgentId({ sessionKey, config: input.cfg }),
-      payload: sourceReplyPayload,
-      idempotencyKey,
-      runId: input.runId,
-      sourceReplyFinal: input.sourceReplyFinal,
-      toolCallId: input.sourceReplyToolCallId,
-      sourceTurnId: input.messageActionAuthorization?.toolContext?.currentSourceTurnId,
-    });
+    const persist = () =>
+      persistInternalSourceReply({
+        cfg: input.cfg,
+        sessionKey,
+        expectedSessionId: input.sessionId,
+        agentId: input.agentId ?? resolveSessionAgentId({ sessionKey, config: input.cfg }),
+        payload: sourceReplyPayload,
+        idempotencyKey,
+        runId: input.runId,
+        sourceReplyFinal: input.sourceReplyFinal,
+        toolCallId: input.sourceReplyToolCallId,
+        sourceTurnId: input.messageActionAuthorization?.toolContext?.currentSourceTurnId,
+      });
+    if (
+      input.messageActionAuthorization?.scheduled ||
+      input.messageActionAuthorization?.deliveryAttempt
+    ) {
+      await withSessionTranscriptWriteAssertion(
+        {
+          agentId: input.agentId ?? resolveSessionAgentId({ sessionKey, config: input.cfg }),
+          sessionKey,
+          sessionId: input.sessionId,
+          storePath: resolveSessionStorePathCore(input.cfg.session?.store, { agentId }),
+        },
+        () => assertMessageDeliveryCurrent(input),
+        persist,
+      );
+    } else {
+      await persist();
+    }
     persistedIdempotencyKey = idempotencyKey;
     persistedTranscriptOwner = true;
   }
@@ -470,47 +509,6 @@ async function handleInternalSourceReplySendAction(
     },
     sourceReply.normalization,
   );
-}
-
-function buildInternalSourceReplyToolResult(payload: {
-  status: string;
-  deliveryStatus: string;
-  channel: ChannelId;
-  target: string;
-  sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
-  idempotencyKey?: string;
-  sourceReplyTranscriptOwner?: true;
-  sourceReplySink?: "internal-ui";
-  sourceReply: ReplyPayload;
-  message?: string;
-  mediaUrl?: string;
-  mediaUrls?: string[];
-  dryRun: boolean;
-}): AgentToolResult<typeof payload> {
-  const action = payload.dryRun ? "Prepared" : "Sent";
-  const sink = payload.sourceReplySink ? ` via ${payload.sourceReplySink}` : "";
-  const cards = readClawHubRecommendations(payload.sourceReply.channelData);
-  // The model sees content, not private details. Report verified state even when it supplied prose.
-  const recommendationSummary = cards.length
-    ? cards
-        .map((card) => `${card.name}: ${card.installed ? "Installed" : "Available to install"}.`)
-        .join("\n")
-    : payload.sourceReply.channelData?.[CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY]
-      ? payload.sourceReply.text
-      : undefined;
-  const { sourceReplyDeliveryMode, ...details } = payload;
-  return {
-    content: [
-      {
-        type: "text",
-        text: `${action} visible reply to the current source conversation${sink}.${recommendationSummary ? `\n${recommendationSummary}` : ""}`,
-      },
-    ],
-    details: {
-      ...details,
-      ...(sourceReplyDeliveryMode ? { sourceReplyDeliveryMode } : {}),
-    },
-  };
 }
 
 export async function runMessageAction(input: MessageActionInput): Promise<MessageActionResult> {
@@ -685,6 +683,19 @@ export async function runMessageAction(input: MessageActionInput): Promise<Messa
         },
         input.abortSignal,
       );
+      if (!context.dryRun && !isFencedProviderReadAction(action)) {
+        await beforeMessageDeliveryAttempt(context.input);
+        if (
+          context.input.messageActionAuthorization?.scheduled ||
+          context.input.messageActionAuthorization?.deliveryAttempt
+        ) {
+          const deliveryInput = context.input;
+          context.input = {
+            ...deliveryInput,
+            assertDirectAdapterHandoff: () => assertMessageDeliveryCurrent(deliveryInput),
+          };
+        }
+      }
       if (action === "send") {
         return executeMessageSend(context);
       }

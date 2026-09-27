@@ -3,10 +3,19 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import type { AgentToolResult } from "../../agents/runtime/index.js";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
-import type { ChannelThreadingToolContext } from "../../channels/plugins/types.public.js";
+import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
+import type {
+  ChannelId,
+  ChannelThreadingToolContext,
+} from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { parseSessionDeliveryRoute } from "../../routing/session-key.js";
+import {
+  CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY,
+  readClawHubRecommendations,
+} from "../../shared/clawhub-recommendations.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import { readTrimmedStringAlias } from "../../utils/string-readers.js";
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
@@ -99,4 +108,45 @@ export async function shouldUseInternalSourceReplySink(
   // Configured current-source channels can infer the target and deliver through
   // the normal plugin path; the sink is only the private fallback.
   return !(await hasConfiguredCurrentSourceChannel(input));
+}
+
+export function buildInternalSourceReplyToolResult(payload: {
+  status: string;
+  deliveryStatus: string;
+  channel: ChannelId;
+  target: string;
+  sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
+  idempotencyKey?: string;
+  sourceReplyTranscriptOwner?: true;
+  sourceReplySink?: "internal-ui";
+  sourceReply: ReplyPayload;
+  message?: string;
+  mediaUrl?: string;
+  mediaUrls?: string[];
+  dryRun: boolean;
+}): AgentToolResult<typeof payload> {
+  const action = payload.dryRun ? "Prepared" : "Sent";
+  const sink = payload.sourceReplySink ? ` via ${payload.sourceReplySink}` : "";
+  const cards = readClawHubRecommendations(payload.sourceReply.channelData);
+  // The model sees content, not private details. Report verified state even when it supplied prose.
+  const recommendationSummary = cards.length
+    ? cards
+        .map((card) => `${card.name}: ${card.installed ? "Installed" : "Available to install"}.`)
+        .join("\n")
+    : payload.sourceReply.channelData?.[CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY]
+      ? payload.sourceReply.text
+      : undefined;
+  const { sourceReplyDeliveryMode, ...details } = payload;
+  return {
+    content: [
+      {
+        type: "text",
+        text: `${action} visible reply to the current source conversation${sink}.${recommendationSummary ? `\n${recommendationSummary}` : ""}`,
+      },
+    ],
+    details: {
+      ...details,
+      ...(sourceReplyDeliveryMode ? { sourceReplyDeliveryMode } : {}),
+    },
+  };
 }

@@ -43,6 +43,7 @@ function makeJob(overrides?: Record<string, unknown>) {
 
 function makeParams(overrides?: Record<string, unknown>) {
   return {
+    deliveryAttemptFence: null,
     cfg: {},
     deps: {} as never,
     job: makeJob(),

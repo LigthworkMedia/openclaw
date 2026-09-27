@@ -24,6 +24,7 @@ const runCronIsolatedAgentTurn = await loadRunCronIsolatedAgentTurn();
 
 function makeParams() {
   return {
+    deliveryAttemptFence: null,
     cfg: {},
     deps: {} as never,
     job: {

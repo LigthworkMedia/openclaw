@@ -642,49 +642,6 @@ describe("CronService restart catch-up", () => {
     );
   });
 
-  it("recovers interrupted one-shot jobs through startup catch-up", async () => {
-    const dueAt = Date.parse("2025-12-13T16:00:00.000Z");
-    const staleRunningAt = Date.parse("2025-12-13T16:30:00.000Z");
-
-    await withRestartedCron(
-      [
-        {
-          id: "restart-stale-one-shot",
-          name: "one shot stale marker",
-          enabled: true,
-          createdAtMs: Date.parse("2025-12-10T12:00:00.000Z"),
-          updatedAtMs: Date.parse("2025-12-13T16:30:00.000Z"),
-          schedule: { kind: "at", at: "2025-12-13T16:00:00.000Z" },
-          sessionTarget: "main",
-          wakeMode: "next-heartbeat",
-          payload: { kind: "systemEvent", text: "one-shot stale marker" },
-          state: {
-            nextRunAtMs: dueAt,
-            runningAtMs: staleRunningAt,
-          },
-        },
-      ],
-      async ({ cron, enqueueSystemEvent, requestHeartbeat, onEvent }) => {
-        expect(enqueueSystemEvent).toHaveBeenCalledOnce();
-        expect(requestHeartbeat).toHaveBeenCalledOnce();
-
-        const listedJobs = await cron.list({ includeDisabled: true });
-        const updated = listedJobs.find((job) => job.id === "restart-stale-one-shot");
-        expect(updated?.enabled).toBe(false);
-        expect(updated?.state.runningAtMs).toBeUndefined();
-        expect(updated?.state.lastStatus).toBe("ok");
-        expect(updated?.state.lastRunStatus).toBe("ok");
-        expect(updated?.state.lastRunAtMs).toBe(Date.now());
-        expect(updated?.state.nextRunAtMs).toBeUndefined();
-        expect(updated?.state.lastError).toBeUndefined();
-        expectInterruptedJobEvent(onEvent, {
-          jobId: "restart-stale-one-shot",
-          runAtMs: staleRunningAt,
-        });
-      },
-    );
-  });
-
   it.each([false, true])(
     "preserves a future one-shot rescheduled before an interrupted run restarts (deleteAfterRun=%s)",
     async (deleteAfterRun) => {
@@ -756,9 +713,21 @@ describe("CronService restart catch-up", () => {
       async ({ cron, enqueueSystemEvent, requestHeartbeat, onEvent }) => {
         const listedJobs = await cron.list({ includeDisabled: true });
         const recovered = listedJobs.find((job) => job.id === jobId);
-        expect(recovered).toBeUndefined();
-        expect(enqueueSystemEvent).toHaveBeenCalledOnce();
-        expect(requestHeartbeat).toHaveBeenCalledOnce();
+        expect(recovered).toMatchObject({
+          enabled: false,
+          deleteAfterRun: true,
+          schedule: { kind: "at", at: new Date(originalAt).toISOString() },
+          state: {
+            lastRunAtMs: interruptedAt,
+            lastRunStatus: "error",
+            lastDeliveryStatus: "unknown",
+          },
+        });
+        expect(recovered?.state.runningAtMs).toBeUndefined();
+        expect(recovered?.state.nextRunAtMs).toBeUndefined();
+        expect(recovered?.state.startupCatchupAtMs).toBeUndefined();
+        expect(enqueueSystemEvent).not.toHaveBeenCalled();
+        expect(requestHeartbeat).not.toHaveBeenCalled();
         expectInterruptedJobEvent(onEvent, { jobId, runAtMs: interruptedAt });
       },
     );
