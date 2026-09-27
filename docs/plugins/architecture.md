@@ -234,6 +234,11 @@ directory snapshot per admitted identity, preserving old binary and companion
 bytes through in-place edits. Files in this namespace are prepared at admission;
 module execution remains on demand. Registrations share admission facts without
 sharing their runtime authority.
+When native packages share a dependency, admission reconciles identities only for
+its own hardlinks, even when the filesystem's ctime has not advanced. Recorded
+digests are checked against installed bytes before promotion, including companions
+previously captured as independent copies. Unchanged companions remain valid during
+Doctor and reload; source content checks still reject edits.
 When file symlinks are unavailable, a generation can use hardlinks only if its
 directory preserves every captured companion and the selected host SDK. Otherwise
 that plugin reports a load error asking for file symlink support; the update
@@ -325,8 +330,10 @@ Before runtime plugin loading, startup attempts receipt-aware cleanup under
 exclusive maintenance ownership. It can reclaim a retired, unlocked instance
 immediately, including unpublished native payloads retained until the previous
 process exited. Published native payloads still referenced by the installed index
-remain available. Busy maintenance or cleanup failures produce a warning and
-startup continues; observational reads leave captures untouched.
+remain available. If another process holds state ownership, this opportunistic
+cleanup silently skips without asking the operator to stop a healthy Gateway.
+Other maintenance or cleanup failures produce a warning and startup continues;
+observational reads leave captures untouched.
 
 Hourly cleanup also inspects this owned subtree. An instance becomes eligible
 after one hour. Age alone never authorizes removal: for token-bearing instances, cleanup must
@@ -593,7 +600,7 @@ That means:
 
 <AccordionGroup>
   <Accordion title="Vendor multi-capability">
-    `google` owns text inference, CLI backend, embeddings, speech, realtime voice, media understanding, image/music/video generation, and web search. `openai` owns text inference, embeddings, speech, realtime transcription, realtime voice, media understanding, image/video generation. `minimax` owns text inference plus media understanding, speech, image/music/video generation, and web search.
+    `google` owns text inference, CLI backend, embeddings, speech, realtime voice, media understanding, image/music/video generation, and web search. `openai` owns text inference, embeddings, speech, realtime transcription, realtime voice, media understanding, image generation. `minimax` owns text inference plus media understanding, speech, image/music/video generation, and web search.
   </Accordion>
   <Accordion title="Vendor single-capability">
     `arcee` and `chutes` own text inference only; `microsoft` owns speech only. A vendor plugin can stay this narrow until it needs to cover more of that vendor's surface.
