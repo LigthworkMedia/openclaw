@@ -35,6 +35,20 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const joinSettling = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true &&
     Date.now() - (priorMeeting.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS});
   const inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
+  // Status work awaits permission queries and UI settling, so authority is rechecked right before each
+  // click: the in-call membership header, or the same preview with no other call live.
+  const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity && (inCall
+    ? Boolean(firstRaw(selectors.channelHeaderInHuddle))
+    : Boolean(preview && firstRaw(selectors.preview) === preview && !firstRaw(selectors.inCall)));
+  let authorityLost = false;
+  const act = (node) => {
+    if (authorityLost || !authorityHolds()) {
+      authorityLost = true;
+      return false;
+    }
+    node.click();
+    return true;
+  };
   if (canMutateSession && identityVerified && meetingOwnerConflict) adoptAudioBridgeSourcesForSession();
   if (canMutateSession && !inCall) retireOwnedAudioBridges();
   if (canMutateSession && identityVerified) {
@@ -96,24 +110,25 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   }
   const ownsCameraScope = inCall || Boolean(preview);
   if (canMutateSession && identityVerified && ownsCameraScope && !manualAction && cameraState === "on" && !unavailable(camera)) {
-    camera.click();
-    await waitForUi();
-    cameraState = toggleState(document.querySelector('button[role="switch"][aria-label="Camera"]'), "camera");
+    if (act(camera)) {
+      await waitForUi();
+      cameraState = toggleState(document.querySelector('button[role="switch"][aria-label="Camera"]'), "camera");
+    }
   }
   if (canMutateSession && identityVerified && inCall && allowMicrophone && !audioInputRouted && !manualAction) {
     if (microphoneState === "on" && !unavailable(microphone)) {
-      microphone.click();
-      await waitForUi();
-      microphoneState = readMicrophone();
+      if (act(microphone)) {
+        await waitForUi();
+        microphoneState = readMicrophone();
+      }
     }
     const audioSettings = first(selectors.deviceSettings);
-    if (!unavailable(audioSettings)) {
-      audioSettings.click();
+    if (!unavailable(audioSettings) && act(audioSettings)) {
       await waitForUi();
       const choice = selectors.audioDeviceOptions.flatMap((selector) => [...document.querySelectorAll(selector)])
         .find((node) => isVirtualAudioDevice(text(node)) && !unavailable(node));
-      if (choice) {
-        clickable(choice)?.click?.();
+      const target = choice ? clickable(choice) : undefined;
+      if (target && act(target)) {
         await waitForUi();
       }
       audioInputDeviceLabel = selectedMicrophoneLabel();
@@ -124,11 +139,12 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     // Join muted until Slack reports the virtual input; the host's physical microphone must never go live.
     const desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
     if (microphoneState !== desiredMicrophoneState && microphoneState && !unavailable(microphone)) {
-      microphone.click();
-      await waitForUi();
-      microphoneState = readMicrophone();
+      if (act(microphone)) {
+        await waitForUi();
+        microphoneState = readMicrophone();
+      }
     }
-    if (microphoneState !== desiredMicrophoneState) {
+    if (microphoneState !== desiredMicrophoneState && !authorityLost) {
       manualAction = manualActionFor("slack-microphone-required", !allowMicrophone
         ? "Turn off the Slack huddle microphone for observe-only mode, then retry."
         : desiredMicrophoneState === "on"
@@ -140,13 +156,16 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     manualAction = manualActionFor("slack-camera-required", "Turn off the Slack huddle camera, then retry.");
   }
   let clickedJoin = false;
-  if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction &&
-      !unavailable(join) && /^join huddle$/i.test(text(join))) {
+  if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction && !authorityLost &&
+      !unavailable(join) && /^join huddle$/i.test(text(join)) && authorityHolds()) {
     window.__openclawSlackHuddle.joinRequested = true;
     window.__openclawSlackHuddle.joinRequestedAt = Date.now();
     join.click();
     clickedJoin = true;
     notes.push("Clicked Join Huddle for an active Slack huddle.");
+  }
+  if (authorityLost) {
+    notes.push("Slack huddle state changed during status; later controls were left untouched.");
   }`,
     manualActionSource: "",
     platform: {

@@ -744,6 +744,41 @@ it("selects and verifies the virtual microphone before enabling in-call talk-bac
   expect(result).toMatchObject({ audioInputRouted: true, micMuted: false });
 });
 
+it("stops routing clicks when Slack's membership header vanishes during an awaited step", async () => {
+  const { document, mic } = inCall(undefined, true);
+  const header = document.body.children.find((node) =>
+    (node.attributes.class ?? "").includes("p-huddle_channel_header_button--in_huddle"),
+  );
+  const settings = qaNode("huddle-toolbar-mic-popover-button", "");
+  document.body.append(
+    new PageNode("div", { id: "microphone-info" }, "Built-in Microphone"),
+    settings,
+  );
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    if (header) {
+      header.attributes.class = "p-huddle_channel_header_button__container";
+    }
+  };
+  await fixture({ document, joined: true }).status({ mode: "agent" });
+  expect(mic.clicks).toBe(1);
+  expect(settings.clicks).toBe(0);
+});
+
+it("does not click Join when another call appears while the preview microphone settles", async () => {
+  const { document, join, mic } = preview("Join Huddle", true);
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    document.body.append(qaNode("huddle_toolbar__leave_button", "Leave Huddle"));
+  };
+  const result = await fixture({ document }).status({ mode: "agent" });
+  expect(mic.clicks).toBe(1);
+  expect(join.clicks).toBe(0);
+  expect(result.clickedJoin).not.toBe(true);
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(

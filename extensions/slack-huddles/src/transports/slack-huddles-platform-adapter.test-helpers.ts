@@ -282,7 +282,11 @@ export function fixture(params: {
       return JSON.parse(runInNewContext(`(${source})()`, sandbox)) as Record<string, unknown>;
     },
     startAudioCapture() {
-      const source = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildAudioCaptureScript({
+      const build = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildAudioCaptureScript;
+      if (!build) {
+        throw new Error("Missing audio capture script");
+      }
+      const source = build({
         action: "start",
         captureId: "capture-1",
         meetingSessionId: "session-1",
