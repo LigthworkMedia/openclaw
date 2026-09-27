@@ -115,7 +115,9 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const setMicrophone = async (desired) => {
     const control = currentMicrophone();
     const live = readMicrophone();
-    if (live && live !== desired && !unavailable(control) && act(control)) {
+    // Unmuting is only safe while Slack still reports the virtual microphone as its selected input.
+    const safe = desired !== "on" || Boolean(selectedMicrophoneLabel());
+    if (live && live !== desired && safe && !unavailable(control) && act(control)) {
       await waitForUi();
     }
     microphoneState = readMicrophone();
@@ -161,7 +163,9 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   let clickedJoin = false;
   if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction && !authorityLost &&
       !unavailable(join) && /^join huddle$/i.test(text(join))) {
-    if (authorityHolds()) {
+    if (authorityHolds() && readMicrophone() === "on" && !selectedMicrophoneLabel()) {
+      manualAction = manualActionFor("slack-microphone-required", "Mute the Slack huddle microphone until the OpenClaw virtual microphone is selected, then retry.");
+    } else if (authorityHolds()) {
       window.__openclawSlackHuddle.joinRequested = true;
       window.__openclawSlackHuddle.joinRequestedAt = Date.now();
       join.click();

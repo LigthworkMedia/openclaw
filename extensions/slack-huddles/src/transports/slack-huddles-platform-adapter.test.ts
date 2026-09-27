@@ -851,6 +851,44 @@ it("never re-enables a microphone someone muted while the status script awaited"
   expect(mic.getAttribute("aria-checked")).toBe("false");
 });
 
+it("never unmutes when Slack switches away from the virtual input during an await", async () => {
+  const { document, mic } = inCall(undefined, false);
+  const selected = new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch");
+  const camera = new PageNode("button", {
+    role: "switch",
+    "aria-label": "Camera",
+    "aria-checked": "true",
+  });
+  camera.onClick = () => {
+    camera.setAttribute("aria-checked", "false");
+    selected.textContent = "Built-in Microphone";
+  };
+  document.body.append(selected, camera);
+  await fixture({ document, joined: true }).status({ mode: "agent" });
+  expect(camera.clicks).toBe(1);
+  expect(mic.clicks).toBe(0);
+  expect(mic.getAttribute("aria-checked")).toBe("false");
+});
+
+it("does not join with a live microphone once Slack's selected input is no longer virtual", async () => {
+  const { document, join, mic } = preview("Join Huddle", true);
+  const selected = new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch");
+  const camera = new PageNode("button", {
+    role: "switch",
+    "aria-label": "Camera",
+    "aria-checked": "true",
+  });
+  camera.onClick = () => {
+    camera.setAttribute("aria-checked", "false");
+    selected.textContent = "Built-in Microphone";
+  };
+  document.body.append(selected, camera);
+  const result = await fixture({ document }).status({ mode: "agent" });
+  expect(join.clicks).toBe(0);
+  expect(mic.getAttribute("aria-checked")).toBe("true");
+  expect(result).toMatchObject({ manualAction: { reason: "slack-microphone-required" } });
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(
