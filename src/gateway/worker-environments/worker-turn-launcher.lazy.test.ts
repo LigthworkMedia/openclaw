@@ -28,12 +28,16 @@ describe("worker turn execution loading", () => {
       "claim-replaced",
       "placement-drained",
       "loader-failed",
+      "cancelled",
     ] as const)("retains admission and the exact claim across loading: %s", async (scenario) => {
       await fixture.seedActivePlacement(mode);
       const claimTurn = vi.spyOn(fixture.placements, "claimTurn");
       const loadStarted = createDeferredCore();
       const releaseLoad = createDeferredCore();
       const failure = new Error(`execution load ${scenario}`);
+      const cancellation = new AbortController();
+      const { createAgentRunRestartAbortError } = await import("../../agents/run-termination.js");
+      const restart = createAgentRunRestartAbortError();
       let revoked = false;
       const execute = vi.fn(
         async (params: {
@@ -84,7 +88,7 @@ describe("worker turn execution loading", () => {
       };
       const run = provider.executeTurn(
         request,
-        fixture.turn(request.runId),
+        { ...fixture.turn(request.runId), abortSignal: cancellation.signal },
         runLocal,
         onAdmitted,
         assertCurrent,
@@ -137,6 +141,11 @@ describe("worker turn execution loading", () => {
           });
         }
         revoked = scenario === "revoked";
+        if (scenario === "cancelled") {
+          cancellation.abort(restart);
+          await expect(run).rejects.toBe(restart);
+          expect(fixture.placements.get(fixture.SESSION_ID)?.turnClaim).toBeNull();
+        }
         releaseLoad.resolve();
         if (scenario === "current") {
           await expect(run).resolves.toEqual({ meta: { durationMs: 1 } });
@@ -145,7 +154,9 @@ describe("worker turn execution loading", () => {
           expect(execute.mock.calls[0]?.[0].turnClaim).toEqual(retained);
           expect(createOwner).toHaveBeenCalledTimes(mode === "worker-turn" ? 1 : 0);
         } else {
-          if (scenario === "revoked") {
+          if (scenario === "cancelled") {
+            await expect(run).rejects.toBe(restart);
+          } else if (scenario === "revoked") {
             await expect(run).rejects.toBe(failure);
           } else if (scenario === "loader-failed") {
             await expect(run).rejects.toMatchObject({ cause: failure });

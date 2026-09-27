@@ -5,11 +5,11 @@ import type {
   SessionPlacementAdmissionProvider,
 } from "../../agents/session-placement-admission.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { emitAgentRunStatusEvent } from "../../infra/agent-run-status-events.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { WORKER_ADMISSION_DEADLINE_MS } from "../../worker/worker-connection-contract.js";
 import { StaleWorkerBuildError } from "./admission.js";
+import { raceNodeWorkerOperation } from "./node-worker-abort.js";
 import { matchesWorkerPlacementTarget } from "./placement-reclaim-contract.js";
 import { placementTurnOwner, sameWorkerSessionTurnClaim } from "./placement-record.js";
 import type {
@@ -377,8 +377,8 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
             activeWorkerTurns.set(turnClaim.sessionId, activeWorkerTurn);
           }
           const assertPreparationCurrent = () => {
-            assertAdmissionCurrent();
             turn.abortSignal?.throwIfAborted();
+            assertAdmissionCurrent();
             const preparedPlacement = options.placements.get(turnClaim.sessionId);
             if (
               preparedPlacement?.state !== "active" ||
@@ -399,15 +399,15 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
           assertPreparationCurrent();
           // These preparations only read/resolve facts. Cancellation may stop
           // waiting, but no late result can enter execution after the exact owner closes.
-          const workspace = await racePromiseWithAbortSignal(
+          const workspace = await raceNodeWorkerOperation(
             options.resolveWorkspace(identity),
             turn.abortSignal,
           );
           placement = assertPreparationCurrent();
           const execute = remoteExec
-            ? (await racePromiseWithAbortSignal(loadRemoteExecTurn(), turn.abortSignal))
+            ? (await raceNodeWorkerOperation(loadRemoteExecTurn(), turn.abortSignal))
                 .executeRemoteExecTurn
-            : (await racePromiseWithAbortSignal(loadWorkerTurnExecution(), turn.abortSignal))
+            : (await raceNodeWorkerOperation(loadWorkerTurnExecution(), turn.abortSignal))
                 .executeWorkerTurn;
           assertPreparationCurrent();
           const executionParams = {

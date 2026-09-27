@@ -36,8 +36,9 @@ describe("worker workspace operation coordinator", () => {
     const controller = new AbortController();
     const cancelledTask = vi.fn(async () => {});
     const cancelled = coordinator.run("worker", cancelledTask, controller.signal);
-    controller.abort();
-    await expect(cancelled).rejects.toThrow("aborted");
+    const reason = new Error("queued worker owner closed");
+    controller.abort(reason);
+    await expect(cancelled).rejects.toBe(reason);
     const followingTask = vi.fn(async () => {});
     const following = coordinator.run("worker", followingTask);
     await Promise.resolve();
