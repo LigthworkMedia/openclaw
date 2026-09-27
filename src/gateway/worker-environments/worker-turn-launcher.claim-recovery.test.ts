@@ -563,6 +563,9 @@ describe("worker pre-launch claim recovery", () => {
       expect(replacement?.runId).toBe("successor-third");
       resume.resolve();
       expect(await outcome).toBeInstanceOf(Error);
+      if (!dispatched) {
+        expect(await outcome).toMatchObject({ name: "AbortError" });
+      }
       expect(placements.get(SESSION_ID)?.turnClaim).toEqual(replacement);
       expect(launch).toHaveBeenCalledTimes(dispatched ? 2 : 1);
       expect(environments.destroy).not.toHaveBeenCalled();

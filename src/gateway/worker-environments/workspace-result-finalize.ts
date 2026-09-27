@@ -133,6 +133,9 @@ export async function recoverWorkspaceBeforeTurn(params: {
       params.signal,
     );
   } catch (error) {
+    if (params.signal?.aborted && error === params.signal.reason) {
+      throw error;
+    }
     throw new WorkerWorkspaceReconciliationError(
       `Cloud worker workspace recovery could not complete: ${workspaceError(error)}`,
       { cause: error },

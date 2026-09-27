@@ -1,4 +1,4 @@
-import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
+import { raceNodeWorkerOperation } from "./node-worker-abort.js";
 
 export type WorkerWorkspaceOperationCoordinator = {
   run<T>(environmentId: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T>;
@@ -15,7 +15,7 @@ export function createWorkerWorkspaceOperationCoordinator(): WorkerWorkspaceOper
     ): Promise<T> {
       const previous = tails.get(environmentId) ?? Promise.resolve();
       // Only queued work can detach. Once entered, mutation owns its settlement.
-      const result = racePromiseWithAbortSignal(previous, signal).then(() => {
+      const result = raceNodeWorkerOperation(previous, signal).then(() => {
         signal?.throwIfAborted();
         return operation();
       });
