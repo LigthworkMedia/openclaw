@@ -17863,17 +17863,20 @@ public struct SessionsListParams: Codable, Sendable {
 public struct SessionsMessagesSubscribeParams: Codable, Sendable {
     public let key: String
     public let agentid: String?
+    public let subscriptionid: String?
     public let mode: String?
     public let includeapprovals: Bool?
 
     public init(
         key: String,
         agentid: String? = nil,
+        subscriptionid: String? = nil,
         mode: String? = nil,
         includeapprovals: Bool? = nil)
     {
         self.key = key
         self.agentid = agentid
+        self.subscriptionid = subscriptionid
         self.mode = mode
         self.includeapprovals = includeapprovals
     }
@@ -17881,6 +17884,7 @@ public struct SessionsMessagesSubscribeParams: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case key
         case agentid = "agentId"
+        case subscriptionid = "subscriptionId"
         case mode
         case includeapprovals = "includeApprovals"
     }
@@ -17889,18 +17893,22 @@ public struct SessionsMessagesSubscribeParams: Codable, Sendable {
 public struct SessionsMessagesUnsubscribeParams: Codable, Sendable {
     public let key: String
     public let agentid: String?
+    public let subscriptionid: String?
 
     public init(
         key: String,
-        agentid: String? = nil)
+        agentid: String? = nil,
+        subscriptionid: String? = nil)
     {
         self.key = key
         self.agentid = agentid
+        self.subscriptionid = subscriptionid
     }
 
     private enum CodingKeys: String, CodingKey {
         case key
         case agentid = "agentId"
+        case subscriptionid = "subscriptionId"
     }
 }
 

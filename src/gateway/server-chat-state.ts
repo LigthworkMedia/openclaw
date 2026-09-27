@@ -448,9 +448,14 @@ export type SessionMessageSubscriberRegistry = {
   subscribe: (
     connId: string,
     sessionKey: string,
-    opts?: { includeApprovals?: boolean; provisional?: boolean; mode?: "narration" },
+    opts?: {
+      includeApprovals?: boolean;
+      provisional?: boolean;
+      mode?: "narration";
+      subscriptionId?: string;
+    },
   ) => SessionMessageSubscription | undefined;
-  unsubscribe: (connId: string, sessionKey: string) => void;
+  unsubscribe: (connId: string, sessionKey: string, subscriptionId?: string) => void;
   unsubscribeAll: (connId: string) => void;
   get: (sessionKey: string) => ReadonlySet<string>;
   getApprovals: (sessionKey: string) => ReadonlySet<string>;
@@ -466,10 +471,11 @@ type SessionMessageSubscriptionMode = {
 };
 
 type ProvisionalSubscriptionState = {
-  committed?: SessionMessageSubscriptionMode;
-  inflight: number;
-  lastSuccess?: { sequence: number; mode: SessionMessageSubscriptionMode };
+  committed?: { sequence: number; mode: SessionMessageSubscriptionMode };
+  inflight: Map<number, SessionMessageSubscriptionMode>;
 };
+
+type SessionMessageSubscriptionOwners = Map<string | undefined, ProvisionalSubscriptionState>;
 
 const TOOL_EVENT_RECIPIENT_TTL_MS = 10 * 60 * 1000;
 const TOOL_EVENT_RECIPIENT_FINAL_GRACE_MS = 30 * 1000;
@@ -510,7 +516,7 @@ export function createSessionMessageSubscriberRegistry(
 ): SessionMessageSubscriberRegistry {
   const sessionToConnIds = new Map<string, Set<string>>();
   // Removing a record fences late replay settlements, including connection/session reuse.
-  const connections = new Map<string, Map<string, ProvisionalSubscriptionState>>();
+  const connections = new Map<string, Map<string, SessionMessageSubscriptionOwners>>();
   const approvalSessionToConnIds = new Map<string, Set<string>>();
   const narrationSessionToConnIds = new Map<string, Set<string>>();
   const changeListeners = new Set<(sessionKey: string, connId: string) => void>();
@@ -554,6 +560,32 @@ export function createSessionMessageSubscriberRegistry(
       }
     }
   };
+  const updateSubscription = (
+    connId: string,
+    sessionKey: string,
+    owners?: SessionMessageSubscriptionOwners,
+  ) => {
+    let mode: SessionMessageSubscriptionMode | undefined;
+    const include = (interest: SessionMessageSubscriptionMode) => {
+      if (!mode) {
+        mode = { ...interest };
+      } else {
+        mode.includeApprovals ||= interest.includeApprovals;
+        if (interest.mode !== "narration") {
+          mode.mode = undefined;
+        }
+      }
+    };
+    for (const owner of owners?.values() ?? []) {
+      if (owner.committed) {
+        include(owner.committed.mode);
+      }
+      for (const interest of owner.inflight.values()) {
+        include(interest);
+      }
+    }
+    setSubscription(connId, sessionKey, mode);
+  };
 
   const registry: SessionMessageSubscriberRegistry = {
     subscribe: (connId: string, sessionKey: string, opts) => {
@@ -568,12 +600,15 @@ export function createSessionMessageSubscriberRegistry(
       }
       onSubscriptionChange?.(normalizedConnId);
       const states =
-        connections.get(normalizedConnId) ?? new Map<string, ProvisionalSubscriptionState>();
-      const state: ProvisionalSubscriptionState = states.get(normalizedSessionKey) ?? {
-        inflight: 0,
+        connections.get(normalizedConnId) ?? new Map<string, SessionMessageSubscriptionOwners>();
+      const owners: SessionMessageSubscriptionOwners =
+        states.get(normalizedSessionKey) ?? new Map();
+      const subscriptionId = opts?.subscriptionId;
+      const state: ProvisionalSubscriptionState = owners.get(subscriptionId) ?? {
+        inflight: new Map(),
       };
-      state.inflight += 1;
-      states.set(normalizedSessionKey, state);
+      owners.set(subscriptionId, state);
+      states.set(normalizedSessionKey, owners);
       connections.set(normalizedConnId, states);
       subscriptionSequence += 1;
       const provisionalRecency = subscriptionSequence;
@@ -581,33 +616,33 @@ export function createSessionMessageSubscriberRegistry(
         includeApprovals: opts?.includeApprovals === true,
         mode: opts?.mode,
       };
-      setSubscription(normalizedConnId, normalizedSessionKey, mode);
+      state.inflight.set(provisionalRecency, mode);
+      updateSubscription(normalizedConnId, normalizedSessionKey, owners);
       let settled = false;
       const settle = (succeeded: boolean) => {
-        if (settled || connections.get(normalizedConnId)?.get(normalizedSessionKey) !== state) {
+        if (
+          settled ||
+          connections.get(normalizedConnId)?.get(normalizedSessionKey)?.get(subscriptionId) !==
+            state
+        ) {
           return;
         }
         settled = true;
-        if (succeeded) {
-          if (provisionalRecency >= (state.lastSuccess?.sequence ?? -Infinity)) {
-            state.lastSuccess = {
-              sequence: provisionalRecency,
-              mode,
-            };
-          }
+        if (succeeded && provisionalRecency >= (state.committed?.sequence ?? -Infinity)) {
+          state.committed = {
+            sequence: provisionalRecency,
+            mode,
+          };
         }
-        state.inflight -= 1;
-        if (state.inflight > 0) {
-          return;
-        }
-        const committed = state.lastSuccess?.mode ?? state.committed;
-        state.committed = committed;
-        delete state.lastSuccess;
-        if (committed === undefined) {
+        state.inflight.delete(provisionalRecency);
+        if (!state.committed && state.inflight.size === 0) {
           onSubscriptionChange?.(normalizedConnId);
+          owners.delete(subscriptionId);
+        }
+        if (owners.size === 0) {
           states.delete(normalizedSessionKey);
         }
-        setSubscription(normalizedConnId, normalizedSessionKey, committed);
+        updateSubscription(normalizedConnId, normalizedSessionKey, owners);
         if (states.size === 0) {
           connections.delete(normalizedConnId);
         }
@@ -620,7 +655,7 @@ export function createSessionMessageSubscriberRegistry(
       }
       return rollback;
     },
-    unsubscribe: (connId: string, sessionKey: string) => {
+    unsubscribe: (connId: string, sessionKey: string, subscriptionId?: string) => {
       const normalizedConnId = connId.trim();
       const normalizedSessionKey = sessionKey.trim();
       if (!normalizedConnId || !normalizedSessionKey) {
@@ -628,11 +663,15 @@ export function createSessionMessageSubscriberRegistry(
       }
       onSubscriptionChange?.(normalizedConnId);
       const states = connections.get(normalizedConnId);
-      states?.delete(normalizedSessionKey);
+      const owners = states?.get(normalizedSessionKey);
+      owners?.delete(subscriptionId);
+      if (owners?.size === 0) {
+        states?.delete(normalizedSessionKey);
+      }
       if (states?.size === 0) {
         connections.delete(normalizedConnId);
       }
-      setSubscription(normalizedConnId, normalizedSessionKey);
+      updateSubscription(normalizedConnId, normalizedSessionKey, owners);
     },
     unsubscribeAll: (connId: string) => {
       const normalizedConnId = connId.trim();

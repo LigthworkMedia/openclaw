@@ -68,8 +68,18 @@ count.
 messages. Its `key` and optional `agentId` select the session; this is separate
 from the broad roster subscription above. Omit `mode` for full `chat` and `agent`
 streams, including foreground transcripts and passive views of runs started by
-another client. Repeating the request replaces the connection's subscription
-mode. `sessions.messages.unsubscribe` removes that session subscription.
+another client. Repeating a request replaces that observer's subscription mode.
+`sessions.messages.unsubscribe` removes the observer identified by the same
+optional `subscriptionId`; omission selects the legacy observer.
+The subscribe acknowledgment includes the canonical `key` and resolved `agentId`.
+Clients retain the resolved owner for later `global` requests, whose key alone
+does not identify an agent. The SDK sends a stable opaque `subscriptionId` for
+each wire observer and includes it in resubscriptions and unsubscribe requests.
+For multiple IDs on one connection and session, full-stream interest takes
+precedence until its last owner releases; approvals remain enabled while any
+owner requests them. Omitting the ID retains the legacy single-observer behavior.
+Older clients remain compatible with the updated Gateway; the updated SDK's
+ownership fields require an updated Gateway.
 
 Background narration consumers declare `mode: "narration"`. The Gateway replaces
 their token-level `chat` deltas and raw `agent` assistant events with
@@ -93,10 +103,13 @@ still require `includeApprovals: true` and the normal
 approval authority. Queued narration is discarded on unsubscribe, mode changes,
 connection retirement, or run retirement, and delivery rechecks current access.
 
-The Gateway client SDK shares one wire subscription per session on a connection.
-If any owner requires full streams, the shared subscription remains full; it
-returns to narration only after the last full owner releases it. Narration
-consumers sharing a foreground subscription must also accept full stream events.
+The Gateway client SDK shares matching session addresses among local owners.
+The Gateway also combines independently identified observers that resolve to the
+same subscription key. If any owner requires full streams, delivery remains
+full; it returns to narration only after the last full owner releases it.
+Narration consumers sharing a foreground subscription must also accept full
+stream events. The Control UI waits for foreground admission before fetching
+history, so the snapshot covers activity emitted before full streams were enabled.
 
 The bundled Control UI declares narration intent for sidebar interests. It is
 version-locked to its Gateway and reloads on upgrade. Shared Apple chat clients

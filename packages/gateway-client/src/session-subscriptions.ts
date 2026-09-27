@@ -1,3 +1,5 @@
+import { normalizeAgentIdStrict } from "@openclaw/normalization-core/agent-id";
+import { generateUUID } from "@openclaw/normalization-core/uuid";
 import {
   GatewayProtocolRequestTimeoutError,
   type GatewayProtocolRequestOptions,
@@ -32,9 +34,12 @@ type SessionMessageSubscriptionResponse = {
 };
 
 type SessionMessageSubscriptionEntry = {
+  subscriptionId: string;
   key: string;
   requestedKeys: Set<string>;
   agentId: string | null;
+  scopeAgentId: string | null;
+  ownerAgentId: string | null;
   ready: Promise<SessionMessageSubscriptionResponse>;
   approvalRequest: Promise<SessionMessageSubscriptionResponse> | null;
   plainFallback: Promise<SessionMessageSubscriptionResponse> | null;
@@ -59,9 +64,17 @@ export type GatewaySessionMessageSubscriptionCoordinatorOptions = {
   keysEquivalent?: (left: string, right: string) => boolean;
 };
 
+function normalizedAgentScope(agentId: string | null): string | null {
+  if (!agentId) {
+    return null;
+  }
+  const normalized = normalizeAgentIdStrict(agentId);
+  return normalized.ok ? normalized.value : agentId;
+}
+
 /**
- * One Gateway connection owns one targeted observer per canonical session.
- * Approval delivery is an upgrade of that observer, never a second observer.
+ * Shared leases retain one wire observer ID. The Gateway combines independently
+ * addressed observers; approval delivery upgrades the same owner.
  */
 export class GatewaySessionMessageSubscriptionCoordinator {
   readonly #client: GatewaySessionMessageRequestClient;
@@ -99,6 +112,7 @@ export class GatewaySessionMessageSubscriptionCoordinator {
       throw new Error("Session message subscription requires a session key");
     }
     const agentId = options.agentId?.trim() || null;
+    const scopeAgentId = normalizedAgentScope(agentId);
     const narration = options.mode === "narration";
     const includeApprovals = options.includeApprovals === true;
 
@@ -108,24 +122,23 @@ export class GatewaySessionMessageSubscriptionCoordinator {
       if (this.#retired) {
         throw new Error("Session message subscription belongs to a replaced Gateway connection");
       }
-      const existing = [...this.#entries].find(
-        (candidate) =>
-          candidate.agentId === agentId &&
-          (this.#areKeysEquivalent(candidate.key, normalizedKey) ||
-            [...candidate.requestedKeys].some((requestedKey) =>
-              this.#areKeysEquivalent(requestedKey, normalizedKey),
-            )),
-      );
+      const existing = [...this.#entries].find((candidate) => {
+        return (
+          candidate.scopeAgentId === scopeAgentId &&
+          ([...candidate.requestedKeys].some((requestedKey) =>
+            this.#areKeysEquivalent(requestedKey, normalizedKey),
+          ) ||
+            (candidate.key !== "global" && this.#areKeysEquivalent(candidate.key, normalizedKey)))
+        );
+      });
       if (!existing) {
         const provisional = [...this.#entries].find(
           (candidate) =>
-            candidate.agentId === agentId &&
+            candidate.scopeAgentId === scopeAgentId &&
             !candidate.canonicalSettled &&
             this.#couldShareCanonicalIdentity(candidate.key, normalizedKey),
         );
         if (provisional) {
-          // Only potentially aliased sessions need the first Gateway acknowledgment;
-          // unrelated bodies must not inherit another observer's request deadline.
           await (provisional.plainFallback ?? provisional.ready).catch(() => undefined);
           continue;
         }
@@ -282,9 +295,12 @@ export class GatewaySessionMessageSubscriptionCoordinator {
 
   #createEntry(key: string, agentId: string | null): SessionMessageSubscriptionEntry {
     const entry: SessionMessageSubscriptionEntry = {
+      subscriptionId: generateUUID(),
       key,
       requestedKeys: new Set([key]),
       agentId,
+      scopeAgentId: normalizedAgentScope(agentId),
+      ownerAgentId: null,
       ready: Promise.resolve({ key }),
       approvalRequest: null,
       plainFallback: null,
@@ -375,11 +391,13 @@ export class GatewaySessionMessageSubscriptionCoordinator {
     entry: SessionMessageSubscriptionEntry,
     subscription?: { mode?: "narration"; includeApprovals: boolean },
   ) {
+    const agentId = entry.key === "global" ? (entry.ownerAgentId ?? entry.agentId) : entry.agentId;
     return this.#client.request(
       subscription ? "sessions.messages.subscribe" : "sessions.messages.unsubscribe",
       {
+        subscriptionId: entry.subscriptionId,
         key: entry.key,
-        ...(entry.agentId ? { agentId: entry.agentId } : {}),
+        ...(agentId ? { agentId } : {}),
         ...(subscription?.mode ? { mode: subscription.mode } : {}),
         ...(subscription?.includeApprovals ? { includeApprovals: true } : {}),
       },
@@ -452,6 +470,12 @@ export class GatewaySessionMessageSubscriptionCoordinator {
     entry.key =
       typeof responseKey === "string" && responseKey.trim() ? responseKey.trim() : entry.key;
     entry.canonicalSettled = true;
+    const responseAgentId = response && "agentId" in response ? response.agentId : undefined;
+    entry.ownerAgentId = normalizedAgentScope(
+      (typeof responseAgentId === "string" ? responseAgentId : null) ??
+        entry.ownerAgentId ??
+        entry.scopeAgentId,
+    );
     entry.mode = mode;
     entry.includeApprovals = includeApprovals;
     return {

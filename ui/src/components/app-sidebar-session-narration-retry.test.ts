@@ -146,9 +146,12 @@ describe("sidebar narration subscription retries", () => {
     controller.disconnect();
     await vi.advanceTimersByTimeAsync(0);
     expect(request.mock.calls.map(([method, params]) => [method, params])).toEqual([
-      ["sessions.messages.subscribe", { key, mode: "narration" }],
-      ["sessions.messages.unsubscribe", { key }],
-      ["sessions.messages.subscribe", { key }],
+      [
+        "sessions.messages.subscribe",
+        { key, mode: "narration", subscriptionId: expect.any(String) },
+      ],
+      ["sessions.messages.unsubscribe", { key, subscriptionId: expect.any(String) }],
+      ["sessions.messages.subscribe", { key, subscriptionId: expect.any(String) }],
     ]);
     expect(wireKeys.has(key)).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
@@ -157,7 +160,7 @@ describe("sidebar narration subscription retries", () => {
     expect(request).toHaveBeenCalledTimes(4);
     expect(request.mock.calls.at(-1)?.slice(0, 2)).toEqual([
       "sessions.messages.unsubscribe",
-      { key },
+      { key, subscriptionId: expect.any(String) },
     ]);
     expect(wireKeys.size).toBe(0);
   });

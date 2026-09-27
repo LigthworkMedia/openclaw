@@ -1,5 +1,7 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+import { parseAgentSessionKey } from "@openclaw/session-url-contract/session-key-normalization";
 import type { SessionNarrationEvent } from "../../packages/gateway-protocol/src/schema/sessions.js";
 import { stripInternalRuntimeContext } from "../agents/internal-runtime-context.js";
 import { extractAssistantPhaseText } from "../shared/chat-message-content.js";
@@ -17,10 +19,12 @@ const NARRATION_TAIL_CHARS = 16_384;
 
 type PendingNarration = {
   payload: Record<string, unknown>;
+  projection: NarrationProjection;
   sessionKeys: readonly string[];
   opts?: GatewayBroadcastOpts;
 };
 type NarrationState = {
+  subscriptionKeys: readonly string[];
   lastSentAt?: number;
   last?: SessionNarrationEvent;
   pending?: PendingNarration;
@@ -32,6 +36,12 @@ type ConnectionNarration = {
   sessions: Map<string, NarrationState>;
   close: () => void;
 };
+type NarrationProjection = {
+  explicitAgentId?: string;
+  agentId?: string;
+  key: string;
+  digest?: SessionNarrationEvent;
+};
 
 /** Per-session pacing retains only the newest publication, never token queues. */
 export function createGatewayNarrationDelivery(params: {
@@ -40,7 +50,7 @@ export function createGatewayNarrationDelivery(params: {
   send: GatewayBroadcastToConnIdsFn;
 }) {
   const connections = new WeakMap<GatewayWsClient, ConnectionNarration>();
-  const projections = new WeakMap<object, SessionNarrationEvent>();
+  const projections = new WeakMap<object, NarrationProjection>();
   const groups = new WeakMap<AbortSignal, Set<NarrationState>>();
   const subscribers = params.sessionMessageSubscribers;
 
@@ -92,7 +102,7 @@ export function createGatewayNarrationDelivery(params: {
     }
     // A new intent cannot inherit queued text from the previous subscription.
     for (const [sessionKey, state] of connection.sessions) {
-      if (sessionKey === key || state.pending?.sessionKeys.includes(key)) {
+      if (state.subscriptionKeys.includes(key)) {
         cancelPending(state);
         connection.sessions.delete(sessionKey);
       }
@@ -101,10 +111,32 @@ export function createGatewayNarrationDelivery(params: {
       connection.close();
     }
   });
-  const project = (payload: Record<string, unknown>): SessionNarrationEvent => {
+  const projectionFor = (
+    payload: Record<string, unknown>,
+    sessionKey: string,
+    explicitAgentId?: string,
+  ): NarrationProjection => {
     const existing = projections.get(payload);
-    if (existing) {
+    if (existing && existing.explicitAgentId === explicitAgentId) {
       return existing;
+    }
+    const agentId =
+      normalizeOptionalLowercaseString(explicitAgentId ?? payload.agentId) ??
+      parseAgentSessionKey(sessionKey)?.agentId;
+    const projection = {
+      explicitAgentId,
+      agentId,
+      key: `${sessionKey.length}:${sessionKey}${agentId ?? ""}`,
+    };
+    projections.set(payload, projection);
+    return projection;
+  };
+  const project = (
+    payload: Record<string, unknown>,
+    projection: NarrationProjection,
+  ): SessionNarrationEvent => {
+    if (projection.digest) {
+      return projection.digest;
     }
     // Filter the complete snapshot before slicing: a tail can start inside a
     // hidden block whose opening marker no longer fits in the bounded digest.
@@ -119,10 +151,10 @@ export function createGatewayNarrationDelivery(params: {
     const digest: SessionNarrationEvent = {
       sessionKey: String(payload.sessionKey),
       runId: String(payload.runId),
-      ...(typeof payload.agentId === "string" ? { agentId: payload.agentId } : {}),
+      ...(projection.agentId ? { agentId: projection.agentId } : {}),
       text: sliceUtf16Safe(visible, -NARRATION_TAIL_CHARS),
     };
-    projections.set(payload, digest);
+    projection.digest = digest;
     return digest;
   };
   const flush = (
@@ -135,7 +167,7 @@ export function createGatewayNarrationDelivery(params: {
     if (!pending || client.socket !== connection.socket || !params.clients.has(client)) {
       return;
     }
-    const { payload, sessionKeys, opts } = pending;
+    const { payload, projection, sessionKeys, opts } = pending;
     const live = opts?.liveText;
     if (!isNarration(client.connId, sessionKeys) || live?.group.aborted) {
       return;
@@ -147,7 +179,7 @@ export function createGatewayNarrationDelivery(params: {
     } catch {
       return;
     }
-    const digest = project(payload);
+    const digest = project(payload, projection);
     if (state.last?.runId === digest.runId && state.last.text === digest.text) {
       return;
     }
@@ -157,7 +189,7 @@ export function createGatewayNarrationDelivery(params: {
     // sharing, subscription mode, socket liveness, and slow-consumer policy.
     params.send("session.narration", digest, new Set([client.connId]), {
       sessionKeys,
-      agentId: opts?.agentId,
+      agentId: projection.agentId,
       dropIfSlow: true,
       sessionSubscriptionVerified: true,
     });
@@ -191,10 +223,11 @@ export function createGatewayNarrationDelivery(params: {
           return true;
         }
       }
-      const key = sessionKeys[0];
-      if (!key) {
+      if (typeof payload.sessionKey !== "string") {
         return false;
       }
+      const projection = projectionFor(payload, payload.sessionKey, opts?.agentId);
+      const key = projection.key;
       const pendingState = connections.get(client)?.sessions.get(key);
       if (
         pendingState?.pending &&
@@ -210,11 +243,7 @@ export function createGatewayNarrationDelivery(params: {
         // Delayed text cannot overtake newer activity. Keep the existing pacing window.
         cancelPending(pendingState);
       }
-      if (
-        event !== "chat" ||
-        typeof payload.sessionKey !== "string" ||
-        typeof payload.runId !== "string"
-      ) {
+      if (event !== "chat" || typeof payload.runId !== "string") {
         return false;
       }
       const delta = payload.state === "delta";
@@ -224,11 +253,14 @@ export function createGatewayNarrationDelivery(params: {
         return false;
       }
       const connection = connectionFor(client);
-      const state: NarrationState = connection.sessions.get(key) ?? {};
+      const state: NarrationState = connection.sessions.get(key) ?? {
+        subscriptionKeys: sessionKeys,
+      };
+      state.subscriptionKeys = sessionKeys;
       connection.sessions.set(key, state);
       if (isRecord(payload.message)) {
         cancelPending(state);
-        state.pending = { payload, sessionKeys, opts };
+        state.pending = { payload, projection, sessionKeys, opts };
         const signal = opts?.liveText?.group;
         if (signal) {
           let states = groups.get(signal);

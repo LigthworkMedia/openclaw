@@ -455,6 +455,8 @@ export const SessionsSendParamsSchema = closedObject({
 export const SessionsMessagesSubscribeParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
+  /** Stable connection-local observer identity; omission replaces the legacy observer. */
+  subscriptionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   /** Background narration receives bounded digests; omission preserves full transcript streams. */
   mode: Type.Optional(Type.Literal("narration")),
   /** Opt in to sanitized durable approval events for this session and its descendants. */
@@ -473,6 +475,7 @@ export const SessionNarrationEventSchema = closedObject({
 export const SessionsMessagesUnsubscribeParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
+  subscriptionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 });
 
 /** Aborts the active or named run for a session. */

@@ -12,7 +12,7 @@ const key = "agent:main:narrated";
 type Frame = {
   event: string;
   seq: number;
-  payload: { runId: string; text?: string; state?: string };
+  payload: { runId: string; sessionKey?: string; agentId?: string; text?: string; state?: string };
 };
 
 function peer(connId: string) {
@@ -315,5 +315,66 @@ describe("narration delivery through the Gateway broadcaster", () => {
       "chat",
     ]);
     expect(h.narration.frames.at(-2)?.payload.text).toBe("Last partial.");
+  });
+
+  it("separates logical global sessions and retires every state for a released wire key", () => {
+    const h = harness();
+    const mainKey = "agent:main:global";
+    const opsKey = "agent:ops:global";
+    h.subscribers.subscribe("narration", mainKey, { subscriptionId: "raw", mode: "narration" });
+    h.subscribers.subscribe("narration", mainKey, {
+      subscriptionId: "literal",
+      mode: "narration",
+    });
+    h.subscribers.subscribe("narration", opsKey, { subscriptionId: "ops", mode: "narration" });
+    const initial = { ...chat("Initial."), sessionKey: "global" };
+    h.broadcast("chat", initial, { sessionKeys: [mainKey], agentId: "main" });
+    h.broadcast("chat", { ...initial, sessionKey: mainKey }, { sessionKeys: [mainKey] });
+    h.broadcast("chat", initial, { sessionKeys: [opsKey], agentId: "ops" });
+    expect(
+      h.narration.frames.map(({ payload }) => [payload.sessionKey, payload.agentId, payload.text]),
+    ).toEqual([
+      ["global", "main", "Initial."],
+      [mainKey, "main", "Initial."],
+      ["global", "ops", "Initial."],
+    ]);
+
+    const publish = (sessionKey: string, agentId: string, text: string) =>
+      h.broadcast(
+        "chat",
+        { ...chat(text), sessionKey, agentId },
+        { sessionKeys: [`agent:${agentId}:global`] },
+      );
+    vi.advanceTimersByTime(100);
+    publish("global", "main", "Raw pending.");
+    publish(mainKey, "main", "Literal pending.");
+    publish("global", "ops", "Ops pending.");
+    h.broadcast(
+      "session.tool",
+      { sessionKey: "global", runId: "run", stream: "tool", data: { name: "read" } },
+      { sessionKeys: [mainKey], agentId: "main" },
+    );
+    vi.advanceTimersByTime(1_900);
+    expect(h.narration.frames.slice(-2).map(({ payload }) => payload.text)).toEqual([
+      "Literal pending.",
+      "Ops pending.",
+    ]);
+    expect(h.narration.frames).toHaveLength(6);
+
+    publish("global", "main", "Raw resumed.");
+    vi.advanceTimersByTime(100);
+    publish("global", "main", "Raw retired.");
+    publish(mainKey, "main", "Literal retired.");
+    publish("global", "ops", "Ops retained.");
+    h.subscribers.unsubscribe("narration", mainKey, "raw");
+    h.subscribers.unsubscribe("narration", mainKey, "literal");
+    vi.advanceTimersByTime(1_900);
+    expect(h.narration.frames).toHaveLength(8);
+    expect(h.narration.frames.at(-1)?.payload.text).toBe("Ops retained.");
+
+    publish("global", "ops", "Retired on foreground admission.");
+    h.subscribers.subscribe("narration", opsKey, { subscriptionId: "ops" });
+    vi.advanceTimersByTime(2_000);
+    expect(h.narration.frames).toHaveLength(8);
   });
 });
