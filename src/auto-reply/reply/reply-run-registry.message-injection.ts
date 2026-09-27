@@ -240,7 +240,6 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
   ) {
     return {
       backend,
-      toolAuthorityMatched,
       injection: {
         isAvailable: () => true,
         queueMessage: async (text, options) => {
@@ -260,7 +259,7 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
             ? injection.cancelPendingUserInput
             : undefined,
       }
-    : { backend, injection, toolAuthorityMatched };
+    : { backend, injection };
 }
 
 function resolveReplyMessageInjectionFailure(
@@ -325,6 +324,7 @@ export function beginReplyMessageInjectionTarget(
   const owner = target[replyMessageInjectionTargetOwner];
   const {
     toolAuthorityOverlay,
+    personalToolParticipant,
     assertCurrent,
     allowPendingUserInputAnswer,
     inboundAudio,
@@ -404,14 +404,10 @@ export function beginReplyMessageInjectionTarget(
   let acceptanceSettled = false;
   let participantRecorded = false;
   const recordParticipant = () => {
-    if (
-      !participantRecorded &&
-      queueOptions?.isInboundUserMessage &&
-      toolAuthorityOverlay &&
-      resolved.toolAuthorityMatched
-    ) {
+    const participant = toolAuthorityOverlay ?? personalToolParticipant;
+    if (!participantRecorded && queueOptions?.isInboundUserMessage && participant) {
       participantRecorded = true;
-      owner.acceptParticipant?.(toolAuthorityOverlay);
+      owner.acceptParticipant?.(participant);
     }
   };
   const settleAcceptance = (accepted: boolean) => {

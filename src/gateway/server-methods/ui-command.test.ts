@@ -4,7 +4,11 @@ import {
   GATEWAY_CLIENT_CAPS,
   GATEWAY_CLIENT_IDS,
 } from "../../../packages/gateway-protocol/src/client-info.js";
-import { createGatewayToolCallerWrapper } from "../../agents/tools/gateway-caller-context.js";
+import {
+  createGatewayToolCallerWrapper,
+  getGatewayToolCallerIdentity,
+  withoutGatewayToolCallerIdentity,
+} from "../../agents/tools/gateway-caller-context.js";
 import { createScreenTool } from "../../agents/tools/screen-tool.js";
 import {
   callPersonalToolUiCommand as call,
@@ -175,6 +179,11 @@ describe("ui.command gateway method", () => {
       };
 
       await withPersonalToolTurn({ owner, backendKind, hiddenQuestion }, async (turn) => {
+        const { resolve } = expectDefined(
+          turn.operation.personalToolParticipants,
+          "turn participants",
+        );
+        const selectedOwner = expectDefined(resolve(), "turn owner");
         expectTarget(await execute(), "alice-tab");
         expectTarget(await execute(owner.senderId), "alice-tab");
         expectRejected(await execute(steerer.senderId));
@@ -192,6 +201,7 @@ describe("ui.command gateway method", () => {
         expectTarget(await execute(), "alice-tab");
 
         expect(await turn.steer(steerer)).toMatchObject({ status: "accepted" });
+        expect(() => selectedOwner.assertCurrent()).toThrow("Alice (user: alice-sender)");
         const ambiguous = await execute();
         expectRejected(ambiguous, "Alice (user: alice-sender)");
         expectRejected(ambiguous, "Bob (user: bob-sender)");
@@ -217,6 +227,81 @@ describe("ui.command gateway method", () => {
       });
     },
   );
+
+  it("resolves an identity-only request through its exact registered turn participant owner", async () => {
+    const owner = {
+      profileId: "alice",
+      senderId: "alice-sender",
+      name: "Alice",
+      gatewayUiCommandTarget: { connId: "alice-tab", profileId: "alice" },
+    };
+    const steerer = {
+      profileId: "bob",
+      senderId: "bob-sender",
+      name: "Bob",
+      gatewayUiCommandTarget: { connId: "bob-tab", profileId: "bob" },
+    };
+    const recipients = [
+      client("alice-tab", undefined, undefined, "alice"),
+      client("bob-tab", undefined, undefined, "bob"),
+    ];
+    await withPersonalToolTurn({ owner }, async (turn) => {
+      const runtimeClient = client("runtime", GATEWAY_CLIENT_IDS.GATEWAY_CLIENT);
+      runtimeClient.internal = {
+        syntheticClient: true,
+        agentRuntimeIdentity: turn.runtimeIdentity,
+      };
+      const request = () =>
+        withoutGatewayToolCallerIdentity(() => {
+          expect(getGatewayToolCallerIdentity()).toBeUndefined();
+          return call({ command: { kind: "sidebar", visible: false } }, recipients, runtimeClient);
+        });
+      const original = await request();
+      expect(original.broadcastToConnIds).toHaveBeenCalledWith(
+        "ui.command",
+        expect.any(Object),
+        new Set(["alice-tab"]),
+      );
+      for (const mismatch of [
+        { sessionKey: "agent:main:other" },
+        { agentId: "other" },
+        {
+          operationalRunInstance: {
+            ...turn.runtimeIdentity.operationalRunInstance,
+            instanceId: "other-instance",
+          },
+        },
+      ]) {
+        runtimeClient.internal.agentRuntimeIdentity = { ...turn.runtimeIdentity, ...mismatch };
+        const rejected = await request();
+        expect(rejected.respond).toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({ code: "INVALID_REQUEST" }),
+        );
+        expect(rejected.broadcastToConnIds).not.toHaveBeenCalled();
+      }
+      runtimeClient.internal.agentRuntimeIdentity = turn.runtimeIdentity;
+      expect(await turn.steer(steerer)).toMatchObject({ status: "accepted" });
+      const ambiguous = await request();
+      expect(ambiguous.respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          message: expect.stringMatching(/Alice \(user: alice-sender\).*Bob \(user: bob-sender\)/),
+        }),
+      );
+      expect(ambiguous.broadcastToConnIds).not.toHaveBeenCalled();
+      turn.complete();
+      const ended = await request();
+      expect(ended.respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({ code: "INVALID_REQUEST" }),
+      );
+      expect(ended.broadcastToConnIds).not.toHaveBeenCalled();
+    });
+  });
 
   it.each([
     "missing",

@@ -2,6 +2,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExecutionIdentityAdmissionToken } from "../../audit/execution-identity-admission.js";
 import type { ReplyTurnParticipants } from "../../auto-reply/reply/reply-run-registry.contracts.js";
+import type { AgentRuntimeIdentity } from "../../gateway/agent-runtime-identity-token.js";
 import type { CronCreatorAuthorityGrant } from "../../gateway/cron-creator-authority-grant.types.js";
 import type {
   GatewayContextResolver,
@@ -26,7 +27,10 @@ import {
   type OperationalRunInstanceRef,
 } from "../admitted-run-context.js";
 import { copyAgentToolMetadata } from "../agent-tool-metadata.js";
-import type { EmbeddedRunToolAuthorityBinding } from "../embedded-agent-runner/run-state.js";
+import {
+  captureActiveEmbeddedRunPersonalToolParticipants,
+  type EmbeddedRunToolAuthorityBinding,
+} from "../embedded-agent-runner/run-state.js";
 import {
   attachInternalToolExecutionPreparer,
   getInternalToolExecutionPreparer,
@@ -224,13 +228,29 @@ export async function withGatewayPersonalToolUser<T>(
   return await gatewayToolCallerStorage.run({ ...caller, personalToolUser: user }, run);
 }
 
-export function resolveGatewayPersonalToolParticipant() {
+export function resolveGatewayPersonalToolParticipant(runtimeIdentity?: AgentRuntimeIdentity) {
   const caller = getGatewayToolCallerIdentity();
   if (caller?.personalToolParticipants) {
     return caller.personalToolParticipants.resolve(caller.personalToolUser);
   }
   if (caller?.personalToolUser !== undefined) {
     throw new Error("Selecting user requires an active personal-tool turn.");
+  }
+  if (!caller && runtimeIdentity) {
+    const registered = captureActiveEmbeddedRunPersonalToolParticipants(runtimeIdentity);
+    if (!registered) {
+      return undefined;
+    }
+    const participant = registered.participants?.resolve();
+    return (
+      participant && {
+        ...participant,
+        assertCurrent: () => {
+          registered.assertCurrent();
+          participant.assertCurrent();
+        },
+      }
+    );
   }
   return undefined;
 }

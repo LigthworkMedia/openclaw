@@ -8,7 +8,10 @@ import {
   createThemeDefinitionFixture,
   createThemePaletteFixture,
 } from "../../../test/helpers/theme-fixture.js";
-import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import {
+  withGatewayToolCallerIdentity,
+  withoutGatewayToolCallerIdentity,
+} from "../../agents/tools/gateway-caller-context.js";
 import {
   createPersonalThemeToolCaller,
   withPersonalToolTurn,
@@ -847,10 +850,6 @@ describe("theme RPC", () => {
     const owner = { profileId: requesterProfileId, senderId: "alice-sender", name: "Alice" };
     const steerer = { profileId: otherProfileId, senderId: "bob-sender", name: "Bob" };
     const synthetic = client();
-    synthetic.internal = {
-      syntheticClient: true,
-      agentRuntimeIdentity: runtimeIdentity(requesterProfileId),
-    };
     const execute = await createPersonalThemeToolCaller((method, params) =>
       invoke(method, params, { client: synthetic }),
     );
@@ -862,12 +861,10 @@ describe("theme RPC", () => {
     ];
 
     await withPersonalToolTurn({ owner }, async (turn) => {
-      for (const params of [
-        { action: "set", mode: "dark" },
-        { action: "get", user: owner.senderId },
-      ]) {
-        expect(await execute(params)).toMatchObject({ current: { mode: "dark" } });
-      }
+      synthetic.internal = { syntheticClient: true, agentRuntimeIdentity: turn.runtimeIdentity };
+      const current = { mode: "dark" };
+      expect(await execute({ action: "set", mode: "dark" })).toMatchObject({ current });
+      expect(await execute({ action: "get" }, owner.senderId)).toMatchObject({ current });
       for (const action of actions) {
         await expect(execute(action, steerer.senderId)).rejects.toThrow();
       }
@@ -885,9 +882,14 @@ describe("theme RPC", () => {
         "Alice (user: alice-sender)",
       );
       for (const action of actions) {
-        await expect(execute(action)).rejects.toThrow(
-          /Alice \(user: alice-sender\)[\s\S]*Bob \(user: bob-sender\)/,
-        );
+        for (const call of [
+          () => execute(action),
+          () => withoutGatewayToolCallerIdentity(() => execute(action)),
+        ]) {
+          await expect(call()).rejects.toThrow(
+            /Alice \(user: alice-sender\)[\s\S]*Bob \(user: bob-sender\)/,
+          );
+        }
         await expect(execute(action, "nonparticipant")).rejects.toThrow();
       }
       expect(getUserPreferences(requesterProfileId)).toEqual({ "ui.themeMode": "dark" });

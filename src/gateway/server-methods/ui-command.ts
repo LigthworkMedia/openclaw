@@ -16,6 +16,7 @@ import {
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
 import { captureGatewayUiCommandTarget } from "../ui-command-target.js";
+import { assertActiveAgentRuntimeAuthority } from "./agent-runtime-authority.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 import { defineValidatedGatewayMethod } from "./validation.js";
 
@@ -98,9 +99,12 @@ export function dispatchUiCommandToRequester({
 export const uiCommandHandlers: GatewayRequestHandlers = {
   "ui.command": defineValidatedGatewayMethod("ui.command", validateUiCommandParams, (options) => {
     try {
+      assertActiveAgentRuntimeAuthority(options.client, options.context);
       const result = dispatchUiCommandToRequester({
         ...options,
-        participant: resolveGatewayPersonalToolParticipant(),
+        participant: resolveGatewayPersonalToolParticipant(
+          options.client?.internal?.agentRuntimeIdentity,
+        ),
       });
       if (result.ok) {
         options.respond(true, { ok: true });

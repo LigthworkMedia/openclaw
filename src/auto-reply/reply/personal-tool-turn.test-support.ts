@@ -1,14 +1,22 @@
 import {
   createAdmittedRunOperatorAuthority,
   createOperationalRunInstanceRef,
+  getAdmittedRunDelegatedAuthority,
   prepareAgentRunAdmission,
 } from "../../agents/admitted-run-context.js";
+import type { EmbeddedAgentQueueHandle } from "../../agents/embedded-agent-runner/run-state.js";
+import {
+  clearActiveEmbeddedRun,
+  setActiveEmbeddedRun,
+} from "../../agents/embedded-agent-runner/runs.js";
+import { createEmbeddedRunHandle } from "../../agents/embedded-agent-runner/runs.test-support.js";
 import { withPreparedEmbeddedRunToolAuthority } from "../../agents/harness/tool-authority.runtime.js";
 import { prepareOperatorModelPolicy } from "../../agents/operator-model-policy.js";
 import {
   withGatewayToolCallerIdentity,
   withGatewayPersonalToolUser,
 } from "../../agents/tools/gateway-caller-context.js";
+import type { AgentRuntimeIdentity } from "../../gateway/agent-runtime-identity-token.js";
 import type { GatewayClient } from "../../gateway/server-methods/types.js";
 import type { GatewayUiCommandTarget } from "../../gateway/ui-command-target.types.js";
 import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-run-registry.js";
@@ -118,6 +126,7 @@ export async function withPersonalToolTurn<T>(
     revoke(profileId: string): void;
     complete(): void;
     operation: ReturnType<typeof createTestReplyOperation>;
+    runtimeIdentity: AgentRuntimeIdentity;
     releaseCounts: Map<string, number>;
   }) => Promise<T>,
 ): Promise<T> {
@@ -167,8 +176,21 @@ export async function withPersonalToolTurn<T>(
     },
   });
   let reject = false;
+  let registeredHandle: EmbeddedAgentQueueHandle | undefined;
   try {
     const admittedRunContext = await admission.admit("embedded", "personal-tool-test");
+    const delegatedAuthority = getAdmittedRunDelegatedAuthority(admittedRunContext);
+    if (!delegatedAuthority) {
+      throw new Error("The test turn was not admitted");
+    }
+    const runtimeIdentity: AgentRuntimeIdentity = {
+      kind: "agentRuntime",
+      agentId: "main",
+      sessionKey: run.run.sessionKey!,
+      operationalRunInstance: admittedRunContext.operationalRunInstance,
+      delegatedAuthority: { ...delegatedAuthority, kind: "local" },
+      gatewayUiCommandTarget: params.owner.gatewayUiCommandTarget,
+    };
     return await withGatewayToolCallerIdentity(
       {
         agentId: "main",
@@ -192,42 +214,55 @@ export async function withPersonalToolTurn<T>(
           },
           undefined,
           async (prepared) => {
-            operation.attachBackend({
-              kind: params.backendKind ?? "embedded",
+            const handle = createEmbeddedRunHandle({
               runId,
               toolAuthorityFingerprint: prepared.toolAuthorityFingerprint,
-              cancel() {},
-              messageInjectionV2: {
-                version: 2,
-                isAvailable: () => true,
-                ...(params.hiddenQuestion
-                  ? {
-                      claimPendingUserInputAnswer: async (
-                        _text: string,
-                        _options: ReplyBackendQueueMessageOptions | undefined,
-                        assertCurrent: () => void,
-                      ) => {
-                        assertCurrent();
-                        return !reject;
-                      },
-                    }
-                  : {}),
-                queueMessage: async (
-                  _text: string,
-                  options: ReplyBackendQueueMessageOptions | undefined,
-                  assertCurrent: () => void,
-                ) => {
-                  assertCurrent();
-                  if (params.hiddenQuestion) {
-                    throw new Error("Hidden input must claim its pending question");
-                  }
-                  if (reject) {
-                    throw new Error("Runtime declined steering");
-                  }
-                  options?.onQueueAccepted?.(true);
-                },
-              },
             });
+            handle.messageInjectionV2 = {
+              version: 2,
+              isAvailable: () => true,
+              ...(params.hiddenQuestion
+                ? {
+                    claimPendingUserInputAnswer: async (
+                      _text: string,
+                      _options: ReplyBackendQueueMessageOptions | undefined,
+                      assertCurrent: () => void,
+                    ) => {
+                      assertCurrent();
+                      return !reject;
+                    },
+                  }
+                : {}),
+              queueMessage: async (
+                _text: string,
+                options: ReplyBackendQueueMessageOptions | undefined,
+                assertCurrent: () => void,
+              ) => {
+                assertCurrent();
+                if (params.hiddenQuestion) {
+                  throw new Error("Hidden input must claim its pending question");
+                }
+                if (reject) {
+                  throw new Error("Runtime declined steering");
+                }
+                options?.onQueueAccepted?.(true);
+              },
+            };
+            const backend =
+              params.backendKind === "cli"
+                ? { ...handle, kind: "cli" as const, cancel() {} }
+                : { ...handle, kind: "embedded" as const, cancel() {} };
+            operation.attachBackend(backend);
+            if (backend.kind === "embedded") {
+              registeredHandle = backend;
+              setActiveEmbeddedRun(
+                run.run.sessionId,
+                backend,
+                run.run.sessionKey,
+                run.run.sessionFile,
+                "main",
+              );
+            }
             operation.setPhase("running");
             if (params.hiddenQuestion) {
               registerAgentRunContext(runId, {
@@ -237,6 +272,7 @@ export async function withPersonalToolTurn<T>(
             }
             return await test({
               operation,
+              runtimeIdentity,
               releaseCounts,
               complete: () => operation.complete(),
               revoke: (profileId) => {
@@ -263,6 +299,9 @@ export async function withPersonalToolTurn<T>(
         ),
     );
   } finally {
+    if (registeredHandle) {
+      clearActiveEmbeddedRun(run.run.sessionId, registeredHandle, run.run.sessionKey);
+    }
     if (params.hiddenQuestion) {
       clearAgentRunContext(runId);
     }

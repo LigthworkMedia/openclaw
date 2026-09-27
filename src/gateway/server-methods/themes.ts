@@ -48,7 +48,7 @@ function requestOwner(options: ThemeRequest) {
   const { client, context } = options;
   const runtimeIdentity = client?.internal?.agentRuntimeIdentity;
   const caller = getGatewayToolCallerIdentity();
-  const participant = resolveGatewayPersonalToolParticipant();
+  const participant = resolveGatewayPersonalToolParticipant(runtimeIdentity);
   const capturedProfile = participant
     ? participant.profileId
     : runtimeIdentity

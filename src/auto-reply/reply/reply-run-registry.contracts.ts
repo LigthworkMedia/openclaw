@@ -66,6 +66,8 @@ export type ReplyMessageInjectionOptions = ReplyBackendQueueMessageOptions & {
   allowPendingUserInputAnswer?: false;
   /** Consumed by reply ownership and never forwarded to the active backend. */
   toolAuthorityOverlay?: ReplyToolAuthorityOverlay;
+  /** Accepted sender facts when the ingress owner already prepared route-specific authority. */
+  personalToolParticipant?: ReplyTurnParticipantInput;
   /** Composed into V2's final admission assertion after asynchronous preparation. */
   assertCurrent?: () => void;
 };
@@ -108,11 +110,13 @@ export type ReplyToolAuthorityOverlay = Readonly<{
   toolBindings?: Readonly<Record<string, unknown>>;
 }>;
 
+export type ReplyTurnParticipantInput = Pick<
+  ReplyToolAuthorityOverlay,
+  "operatorAuthority" | "senderId" | "senderName" | "gatewayUiCommandTarget"
+>;
+
 export type ReplyToolAuthoritySnapshot = Readonly<{
-  personalToolOwner?: Pick<
-    ReplyToolAuthorityOverlay,
-    "operatorAuthority" | "senderId" | "senderName" | "gatewayUiCommandTarget"
-  >;
+  personalToolOwner?: ReplyTurnParticipantInput;
   /** Selection admitted before runtime fallback or hooks choose a concrete model. */
   requestedRoute?: ReplyToolAuthorityRoute;
   fingerprint(route?: ReplyToolAuthorityRoute): string;
@@ -128,8 +132,8 @@ export type ReplyTurnParticipant = Readonly<{
 }>;
 
 export type ReplyTurnParticipants = {
-  accept(overlay: ReplyToolAuthorityOverlay): void;
-  resolve(user?: string): ReplyTurnParticipant | undefined;
+  accept(participant: ReplyTurnParticipantInput): void;
+  resolve(this: void, user?: string): ReplyTurnParticipant | undefined;
   close(): void;
 };
 
@@ -216,12 +220,11 @@ export type ReplyMessageInjectionResolution =
   | {
       backend: ReplyBackendHandle;
       injection: ReplyBackendMessageInjection;
-      toolAuthorityMatched?: boolean;
     };
 
 /** An adapter over one existing execution owner; it never acquires another run slot. */
 type ReplyMessageInjectionOwner = {
-  acceptParticipant?(overlay: ReplyToolAuthorityOverlay): void;
+  acceptParticipant?(participant: ReplyTurnParticipantInput): void;
   projectToolAuthorityFingerprint(overlay: ReplyToolAuthorityOverlay): string | undefined;
   resolve(params: {
     options?: ReplyBackendQueueMessageOptions;

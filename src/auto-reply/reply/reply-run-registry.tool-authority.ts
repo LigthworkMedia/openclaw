@@ -62,6 +62,38 @@ export function createReplyTurnParticipants(
   if (owner) {
     add(owner);
   }
+  function resolve(user?: string): ReplyTurnParticipant | undefined {
+    if (closed) {
+      throw new Error("This turn has ended; ask again in a new turn.");
+    }
+    const people = [...participants.values()];
+    const choices = people.map((person) => `${person.name} (user: ${person.senderId})`).join(", ");
+    if (user === undefined && people.length > 1) {
+      throw new Error(
+        `Several people have steered this turn: ${choices}. Pass user for the person who asked, or ask them if unclear.`,
+      );
+    }
+    const person =
+      user === undefined ? people[0] : people.find((candidate) => candidate.senderId === user);
+    if (user !== undefined && !person) {
+      throw new Error(
+        `User is not a participant of this turn.${choices ? ` Choose ${choices}.` : " Ask again from your signed-in Control UI."}`,
+      );
+    }
+    person?.assertCurrent();
+    return person
+      ? {
+          ...person,
+          assertCurrent: () => {
+            // A steer can be accepted while a personal read or write awaits preparation.
+            if (user === undefined && participants.size > 1) {
+              resolve(user);
+            }
+            person.assertCurrent();
+          },
+        }
+      : undefined;
+  }
   return {
     accept(overlay) {
       if (
@@ -72,40 +104,7 @@ export function createReplyTurnParticipants(
         add(overlay);
       }
     },
-    resolve(user) {
-      if (closed) {
-        throw new Error("This turn has ended; ask again in a new turn.");
-      }
-      const people = [...participants.values()];
-      const choices = people
-        .map((person) => `${person.name} (user: ${person.senderId})`)
-        .join(", ");
-      if (user === undefined && people.length > 1) {
-        throw new Error(
-          `Several people have steered this turn: ${choices}. Pass user for the person who asked, or ask them if unclear.`,
-        );
-      }
-      const person =
-        user === undefined ? people[0] : people.find((candidate) => candidate.senderId === user);
-      if (user !== undefined && !person) {
-        throw new Error(
-          `User is not a participant of this turn.${choices ? ` Choose ${choices}.` : " Ask again from your signed-in Control UI."}`,
-        );
-      }
-      person?.assertCurrent();
-      return person
-        ? {
-            ...person,
-            assertCurrent: () => {
-              // A steer can be accepted while a personal read or write awaits preparation.
-              if (user === undefined && participants.size > 1) {
-                this.resolve(user);
-              }
-              person.assertCurrent();
-            },
-          }
-        : undefined;
-    },
+    resolve,
     close() {
       if (closed) {
         return;
