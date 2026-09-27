@@ -625,6 +625,51 @@ describe("Slack huddle browser adapter", () => {
     expect(JSON.stringify(browser.transcript())).not.toContain("Unverified huddle line.");
   });
 
+  it("stops collecting captions when both Slack's header and call controls disappear", async () => {
+    const words = new PageNode(
+      "span",
+      {
+        "data-qa": "huddle_closed_caption_event",
+        class: "p-huddle_closed_caption_event__transcription",
+      },
+      "Owned huddle line.",
+    );
+    const caption = new PageNode("div").append(
+      new PageNode("span", { class: "p-huddle_closed_caption_event__member_name" }, "Morgan:"),
+      new PageNode("div", { class: "p-huddle_closed_caption_event__event_text" }).append(words),
+    );
+    const { document, marker } = inCall(undefined, false, false);
+    const header = channelHeader(true);
+    document.body.append(header, caption);
+    const browser = fixture({ document, currentUrl: CLIENT_URL, joined: true });
+    expect(await browser.status({ captureCaptions: true })).toMatchObject({ transcriptLines: 1 });
+    for (const node of [header, marker]) {
+      document.body.children.splice(document.body.children.indexOf(node), 1);
+    }
+    words.textContent = "Unverified huddle line.";
+    browser.mutate();
+    expect(JSON.stringify(browser.transcript())).not.toContain("Unverified huddle line.");
+  });
+
+  it("does not report departure while this session's Join is still settling", async () => {
+    const { document, marker } = inCall(undefined, false, false);
+    document.body.append(channelHeader(false));
+    const browser = fixture({
+      document,
+      currentUrl: CLIENT_URL,
+      window: {
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          joinRequested: true,
+          joinRequestedAt: Date.now(),
+        },
+      },
+    });
+    expect(browser.leave()).toMatchObject({ departed: false });
+    expect(marker.clicks).toBe(0);
+  });
+
   it("stops collecting captions when the account moves to another huddle on the same channel view", async () => {
     const speaker = new PageNode(
       "span",

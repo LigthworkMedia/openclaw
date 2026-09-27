@@ -34,7 +34,11 @@ function pageIdentityFunctionSource(): string {
       const marker = window.__openclawSlackHuddle;
       const settlingJoin = marker?.identity === identity && marker.joinRequested === true &&
         Date.now() - (marker.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
-      return found(hooks.inCall) && !found(hooks.inHuddle) && !settlingJoin
+      if (found(hooks.inHuddle)) return identity;
+      // Live captions always need membership; a live call without it passes only while our Join settles.
+      const captions = window.__openclawSlackHuddleCaptions;
+      const captionsActive = Boolean(captions && captions.finalized !== true);
+      return captionsActive || (found(hooks.inCall) && !settlingJoin)
         ? "slack-huddle-unverified:" + match[1]
         : identity;
     } catch { return undefined; }
@@ -120,8 +124,11 @@ export function slackHuddleLeaveScript(params: {
   const switchPrompt = Boolean(firstMatch(selectors.confirmation) || firstMatch(selectors.multiDevice));
   const leave = member && !switchPrompt ? firstMatch(selectors.leave) : undefined;
   const confirmation = undefined;
-  // Missing call controls can be a re-render; only Slack's header proves the account left.
-  const provenDeparted = Boolean(firstMatch(selectors.channelHeader)) && !member;
+  // Missing call controls can be a re-render, and a settling Join can still land; only Slack's header,
+  // with no Join outstanding, proves the account left.
+  const joinSettling = state?.identity === expectedIdentity && state.joinRequested === true &&
+    Date.now() - (state.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
+  const provenDeparted = Boolean(firstMatch(selectors.channelHeader)) && !member && !joinSettling;
   const currentUrlMatches = Boolean(expectedIdentity && currentIdentity === expectedIdentity);`,
     departedMarkerSource: "provenDeparted",
     expectedIdentity: normalizeSlackHuddleUrlForReuse(params.meetingUrl),
