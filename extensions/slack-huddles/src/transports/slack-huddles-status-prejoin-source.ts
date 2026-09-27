@@ -34,7 +34,7 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const huddleMember = identityVerified && Boolean(firstRaw(selectors.channelHeaderInHuddle));
   const joinSettling = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true &&
     Date.now() - (priorMeeting.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS});
-  const inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
+  let inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
   // Status work awaits permission queries and UI settling, so authority is rechecked right before each
   // click: the in-call membership header, or the same preview with no other call live.
   const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity &&
@@ -168,6 +168,11 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     } else {
       authorityLost = true;
     }
+  }
+  // Everything reported after this point (captions, audio, metadata) reflects the huddle at return time.
+  if (inCall && !authorityHolds()) {
+    inCall = false;
+    authorityLost = true;
   }
   if (authorityLost) {
     notes.push("Slack huddle state changed during status; later controls were left untouched.");

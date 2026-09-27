@@ -814,6 +814,25 @@ it("omits another huddle's title and participants while membership is unverified
   expect(result.participantCount).toBeUndefined();
 });
 
+it("reports the call as unverified when membership is lost during status work", async () => {
+  const { document, mic } = inCall(undefined, true);
+  const header = document.body.children.find((node) =>
+    (node.attributes.class ?? "").includes("p-huddle_channel_header_button--in_huddle"),
+  );
+  document.body.append(qaNode("huddle_window_titlebar_title", "Other team huddle"));
+  const toggleMicrophone = mic.onClick;
+  mic.onClick = () => {
+    toggleMicrophone?.();
+    if (header) {
+      header.attributes.class = "p-huddle_channel_header_button__container";
+    }
+  };
+  const result = await fixture({ document, joined: true }).status({ mode: "transcribe" });
+  expect(mic.clicks).toBe(1);
+  expect(result.inCall).toBe(false);
+  expect(result.meetingTitle).toBeUndefined();
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(
