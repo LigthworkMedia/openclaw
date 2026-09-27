@@ -102,8 +102,8 @@ describe("worker turn execution loading", () => {
         ).toBe("loading");
         expect(load).toHaveBeenCalledOnce();
         expect(unselected).not.toHaveBeenCalled();
-        expect(createOwner).not.toHaveBeenCalled();
-        expect(onAdmitted).not.toHaveBeenCalled();
+        expect(createOwner).toHaveBeenCalledTimes(mode === "worker-turn" ? 1 : 0);
+        expect(onAdmitted).toHaveBeenCalledOnce();
         expect(execute).not.toHaveBeenCalled();
         const placement = fixture.placements.get(fixture.SESSION_ID);
         if (placement?.state !== "active") {
@@ -152,8 +152,8 @@ describe("worker turn execution loading", () => {
           } else {
             await expect(run).rejects.toThrow("placement changed while loading turn execution");
           }
-          expect(createOwner).not.toHaveBeenCalled();
-          expect(onAdmitted).not.toHaveBeenCalled();
+          expect(createOwner).toHaveBeenCalledTimes(mode === "worker-turn" ? 1 : 0);
+          expect(onAdmitted).toHaveBeenCalledOnce();
           expect(execute).not.toHaveBeenCalled();
         }
         expect(runLocal).not.toHaveBeenCalled();
