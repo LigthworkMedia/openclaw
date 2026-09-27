@@ -158,6 +158,11 @@ rings, automatically join occupied channels, or use screen sharing, canvas,
 AI notes, or emoji controls. Use one huddle per dedicated Slack account; another
 device using that account can cause a session conflict.
 
+Slack keeps a huddle running while its client shows other channels, so the
+adapter proves membership only from the huddle channel's own header. Keep the
+OpenClaw Slack tab on that channel: on any other view, status reports the call
+as unverified, and audio, captions, and Leave stay blocked.
+
 Slack does not sanction automated user clients. Web-client DOM changes can
 break the adapter even when Slack's messaging APIs remain unchanged. This
 integration does not create audio or video recordings.

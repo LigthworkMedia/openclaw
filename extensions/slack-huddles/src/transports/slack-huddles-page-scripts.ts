@@ -6,7 +6,10 @@ import {
 } from "openclaw/plugin-sdk/meeting-page-script-runtime";
 import { SLACK_HUDDLE_SELECTORS } from "./slack-huddles-selectors.js";
 import { slackHuddleStatusCallSource } from "./slack-huddles-status-call-source.js";
-import { slackHuddleStatusPreludeSource } from "./slack-huddles-status-prejoin-source.js";
+import {
+  SLACK_HUDDLE_JOIN_SETTLE_MS,
+  slackHuddleStatusPreludeSource,
+} from "./slack-huddles-status-prejoin-source.js";
 import { normalizeSlackHuddleUrlForReuse } from "./slack-huddles-urls.js";
 
 function pageIdentityFunctionSource(): string {
@@ -30,7 +33,8 @@ function pageIdentityFunctionSource(): string {
       const hooks = ${ownershipHooks};
       const found = (list) => list.some((selector) => document.querySelector(selector));
       const marker = window.__openclawSlackHuddle;
-      const settlingJoin = marker?.identity === identity && marker.joinRequested === true;
+      const settlingJoin = marker?.identity === identity && marker.joinRequested === true &&
+        Date.now() - (marker.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
       return found(hooks.header) && !found(hooks.inHuddle) && found(hooks.inCall) && !settlingJoin
         ? "slack-huddle-foreign:" + match[1]
         : identity;
@@ -46,9 +50,12 @@ export function slackHuddleAudioCaptureScript(params: MeetingBrowserAudioCapture
       ${pageIdentityFunctionSource()}
       const expectedIdentity = ${JSON.stringify(normalizeSlackHuddleUrlForReuse(params.meetingUrl))};
       const state = window.__openclawSlackHuddle;
+      // Audio never rides on the join-settle exception: Slack's header must show membership.
+      const member = ${JSON.stringify(SLACK_HUDDLE_SELECTORS.channelHeaderInHuddle)}
+        .some((selector) => document.querySelector(selector));
       return Boolean(expectedIdentity && state?.sessionId === sessionId &&
         state.identity === expectedIdentity && !state.leavePending &&
-        meetingIdentity(location.href) === expectedIdentity);
+        meetingIdentity(location.href) === expectedIdentity && member);
     `,
   });
 }
@@ -106,20 +113,16 @@ export function slackHuddleLeaveScript(params: {
   meetingUrl: string;
 }) {
   return createMeetingLeaveSource({
-    // Leave buttons are global; only Slack's header state or this session's join marker authorizes them.
+    // Leave buttons are global: only Slack's membership header for the requested channel authorizes
+    // them, and departure needs proof too, so a view without that header keeps the session in the call.
     controlSource: `const firstMatch = (list) => list.map((selector) => document.querySelector(selector)).find(Boolean);
-  const viewingExpectedChannel = Boolean(expectedIdentity && currentIdentity === expectedIdentity &&
-    /^\\/client\\//.test(location.pathname));
-  const headerInHuddle = viewingExpectedChannel && Boolean(firstMatch(selectors.channelHeaderInHuddle));
-  const headerForeign = viewingExpectedChannel && !headerInHuddle && Boolean(firstMatch(selectors.channelHeader));
+  const member = Boolean(expectedIdentity && currentIdentity === expectedIdentity &&
+    firstMatch(selectors.channelHeaderInHuddle));
   const switchPrompt = Boolean(firstMatch(selectors.confirmation) || firstMatch(selectors.multiDevice));
-  // Only an established call authorizes Leave: Slack's header state or the live control this session recorded.
-  const ownsHuddle = !switchPrompt && (headerInHuddle || (!headerForeign && state?.identity === expectedIdentity &&
-    Boolean(state.inCallControl && state.inCallControl.isConnected !== false &&
-      selectors.inCall.some((selector) => document.querySelector(selector) === state.inCallControl))));
-  const leave = ownsHuddle ? firstMatch(selectors.leave) : undefined;
+  const leave = member && !switchPrompt ? firstMatch(selectors.leave) : undefined;
   const confirmation = undefined;
-  const inCallMarker = selectors.inCall.some((selector) => document.querySelector(selector)) && !headerForeign;
+  const callLive = selectors.inCall.some((selector) => document.querySelector(selector));
+  const inCallMarker = callLive && (member || !firstMatch(selectors.channelHeader));
   const currentUrlMatches = Boolean(expectedIdentity && currentIdentity === expectedIdentity);`,
     departedMarkerSource: "!inCallMarker",
     expectedIdentity: normalizeSlackHuddleUrlForReuse(params.meetingUrl),

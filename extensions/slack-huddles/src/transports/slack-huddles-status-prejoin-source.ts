@@ -4,6 +4,9 @@ type MeetingStatusPreludeParams = Parameters<
   typeof MeetingPlatformAdapter.createStatusPreludeSource
 >[0];
 
+// Slack updates the channel header shortly after a Join click; until then the new call cannot be proven.
+export const SLACK_HUDDLE_JOIN_SETTLE_MS = 30_000;
+
 export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParams): string {
   return MeetingPlatformAdapter.createStatusPreludeSource(params, {
     controlLookupSource: `const findTextButton = (root, pattern) => [...(root?.querySelectorAll("button") || [])]
@@ -21,36 +24,17 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const lobbyWaiting = huddleSurfaces.some((root) => findTextButton(root, /^request to join$/i)) ||
     /waiting (?:for .* )?(?:to (?:join|let you in)|for approval)|request (?:has been )?sent/i.test(huddleText);
   const sameRecordedIdentity = priorMeeting?.identity === expectedIdentity;
-  let slackClientPage = false;
-  try {
-    const currentUrl = new URL(location.href);
-    slackClientPage = currentUrl.protocol === "https:" && currentUrl.hostname === "app.slack.com" &&
-      /^\\/client\\//.test(currentUrl.pathname);
-  } catch {}
-  // Channel-qualified routes verify themselves; channel-less routes retain only a live recorded control.
-  const identityPreservedInCall = Boolean(!currentIdentity && slackClientPage && sameRecordedIdentity &&
-    inCallControl && inCallControl.isConnected !== false && (
-      priorMeeting.inCallControl === inCallControl &&
-        (priorMeeting.inCallUrl === location.href || meetingIdentity(priorMeeting.inCallUrl) === expectedIdentity)
-    ));
   const identityAwaitingRerender = false;
-  const identityVerified = identityVerifiedBeforeCall || identityPreservedInCall;
+  const identityVerified = identityVerifiedBeforeCall;
   const confirmation = firstRaw(selectors.confirmation);
   const multiDevice = firstRaw(selectors.multiDevice);
-  // Slack keeps a huddle running while the client shows other channels, so the URL names the viewed
-  // channel, not the huddle behind the toolbar. The viewed channel's header carries Slack's own
-  // in-this-huddle state; the join marker only covers views that do not render that header.
-  const viewingExpectedChannel = Boolean(slackClientPage && currentIdentity === expectedIdentity);
-  const channelHeaderInHuddle = viewingExpectedChannel && Boolean(firstRaw(selectors.channelHeaderInHuddle));
-  const channelHeaderForeign = viewingExpectedChannel && !channelHeaderInHuddle &&
-    Boolean(firstRaw(selectors.channelHeader));
-  const pendingJoin = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true);
-  // A recorded control vouches only for itself; a re-rendered replacement needs the header state.
-  const ownsActiveHuddle = channelHeaderInHuddle || (!channelHeaderForeign && sameRecordedIdentity && Boolean(
-    (priorMeeting.inCallControl && priorMeeting.inCallControl === inCallControl) ||
-    pendingJoin || priorMeeting.awaitingAdmission === true));
-  const inCall = Boolean(identityVerified && inCallControl && !preview && !confirmation && !multiDevice &&
-    ownsActiveHuddle);
+  // Slack keeps a huddle running while the client shows other channels and may reuse its global
+  // toolbar, so neither URLs nor call controls prove which huddle is live. Only the viewed channel's
+  // header state establishes membership; without it the adapter fails closed.
+  const huddleMember = identityVerified && Boolean(firstRaw(selectors.channelHeaderInHuddle));
+  const joinSettling = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true &&
+    Date.now() - (priorMeeting.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS});
+  const inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
   if (canMutateSession && identityVerified && meetingOwnerConflict) adoptAudioBridgeSourcesForSession();
   if (canMutateSession && !inCall) retireOwnedAudioBridges();
   if (canMutateSession && identityVerified) {
@@ -59,14 +43,8 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
       identity: expectedIdentity,
       sessionId: sessionId || priorMeeting?.sessionId,
       verifiedAt: Date.now(),
-      // A confirmed call retires join/admission evidence; later ownership rests on the recorded call.
-      ...(inCall
-        ? { inCallControl, inCallUrl: location.href, joinRequested: false, awaitingAdmission: false }
-        : {}),
-      ...(!inCall && lobbyWaiting && !inCallControl ? { awaitingAdmission: true } : {}),
-      ...(!inCall && inCallControl && (confirmation || multiDevice)
-        ? { joinRequested: false, inCallControl: undefined, awaitingAdmission: false }
-        : {}),
+      ...(inCall ? { inCallControl, inCallUrl: location.href, joinRequested: false } : {}),
+      ...(!inCall && inCallControl && (confirmation || multiDevice) ? { joinRequested: false } : {}),
     };
   } else if (canMutateSession && priorMeeting && !currentIdentity && !lobbyWaiting) {
     delete window.__openclawSlackHuddle;
@@ -102,8 +80,8 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     manualAction = manualActionFor("slack-session-conflict", "This Slack tab is owned by another active huddle session.");
   } else if (!inCall && (loginPage || firstRaw(selectors.signIn))) {
     manualAction = manualActionFor("slack-login-required", "Sign the OpenClaw Chrome profile into Slack as the claw's Slack account, then retry.");
-  } else if (!inCall && inCallControl && !confirmation && !multiDevice && !pendingJoin) {
-    manualAction = manualActionFor("slack-session-conflict", "This Slack account is already in another huddle in this browser. Leave that huddle, then retry.");
+  } else if (!inCall && inCallControl && !confirmation && !multiDevice && !joinSettling) {
+    manualAction = manualActionFor("slack-session-conflict", "Slack does not show this account in the requested huddle while another call is live. Leave that huddle or reopen the requested channel, then retry.");
   } else if (multiDevice) {
     manualAction = manualActionFor("slack-session-conflict", "This Slack account is already in a huddle on another device. Resolve the Slack device prompt, then retry.");
   } else if (confirmation) {
@@ -165,6 +143,7 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   if (canMutateSession && identityVerified && autoJoin && !inCall && !manualAction &&
       !unavailable(join) && /^join huddle$/i.test(text(join))) {
     window.__openclawSlackHuddle.joinRequested = true;
+    window.__openclawSlackHuddle.joinRequestedAt = Date.now();
     join.click();
     clickedJoin = true;
     notes.push("Clicked Join Huddle for an active Slack huddle.");
