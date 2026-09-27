@@ -268,7 +268,8 @@ describe("Slack huddle browser adapter", () => {
       const leave = qaNode(qa, "Leave Huddle");
       const audio = qaNode("p-huddle_audio", "", "audio");
       const endAll = qaNode("huddle_toolbar__end_huddle_for_all_menu_item", "End huddle for all");
-      const document = page(leave, audio, endAll, microphone(false), channelHeader(true));
+      const header = channelHeader(true);
+      const document = page(leave, audio, endAll, microphone(false), header);
       const browser = fixture({ document, joined: true });
       await browser.status();
       browser.location.href = CLIENT_URL;
@@ -278,6 +279,8 @@ describe("Slack huddle browser adapter", () => {
       expect(endAll.clicks).toBe(0);
       leave.isConnected = false;
       document.body.children.splice(document.body.children.indexOf(leave), 1);
+      expect(browser.leave(true)).toMatchObject({ departed: false });
+      header.attributes.class = "p-huddle_channel_header_button__container";
       expect(browser.leave(true)).toMatchObject({ departed: true });
       expect(endAll.clicks).toBe(0);
     },
@@ -335,10 +338,8 @@ describe("Slack huddle browser adapter", () => {
     });
     active.document.body.append(qaNode("huddle_toolbar__leave_button", "Leave Huddle"), camera);
     const result = await fixture({ document: active.document }).status();
-    expect(result).toMatchObject({
-      clickedJoin: false,
-      manualAction: { reason: "slack-session-conflict" },
-    });
+    expect(result).toMatchObject({ manualAction: { reason: "slack-session-conflict" } });
+    expect(result.clickedJoin).not.toBe(true);
     expect(active.join.clicks).toBe(0);
     expect(camera.clicks).toBe(0);
   });
@@ -593,6 +594,35 @@ describe("Slack huddle browser adapter", () => {
     expect(browser.leave()).toMatchObject({ departed: false });
     expect(marker.clicks).toBe(0);
     await expect(browser.startAudioCapture()).rejects.toThrow("no longer owns");
+  });
+
+  it("stops collecting captions when Slack's membership header disappears during a call", async () => {
+    const speaker = new PageNode(
+      "span",
+      { class: "p-huddle_closed_caption_event__member_name" },
+      "Morgan:",
+    );
+    const words = new PageNode(
+      "span",
+      {
+        "data-qa": "huddle_closed_caption_event",
+        class: "p-huddle_closed_caption_event__transcription",
+      },
+      "Owned huddle line.",
+    );
+    const caption = new PageNode("div").append(
+      speaker,
+      new PageNode("div", { class: "p-huddle_closed_caption_event__event_text" }).append(words),
+    );
+    const { document } = inCall(undefined, false, false);
+    const header = channelHeader(true);
+    document.body.append(header, caption);
+    const browser = fixture({ document, currentUrl: CLIENT_URL, joined: true });
+    expect(await browser.status({ captureCaptions: true })).toMatchObject({ transcriptLines: 1 });
+    document.body.children.splice(document.body.children.indexOf(header), 1);
+    words.textContent = "Unverified huddle line.";
+    browser.mutate();
+    expect(JSON.stringify(browser.transcript())).not.toContain("Unverified huddle line.");
   });
 
   it("stops collecting captions when the account moves to another huddle on the same channel view", async () => {

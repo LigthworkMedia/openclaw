@@ -14,7 +14,6 @@ import { normalizeSlackHuddleUrlForReuse } from "./slack-huddles-urls.js";
 
 function pageIdentityFunctionSource(): string {
   const ownershipHooks = JSON.stringify({
-    header: SLACK_HUDDLE_SELECTORS.channelHeader,
     inHuddle: SLACK_HUDDLE_SELECTORS.channelHeaderInHuddle,
     inCall: SLACK_HUDDLE_SELECTORS.inCall,
   });
@@ -28,15 +27,15 @@ function pageIdentityFunctionSource(): string {
         (url.hostname === "app.slack.com" && url.pathname.match(/^\\/client\\/[TE][A-Z0-9]{8,}\\/([CGD][A-Z0-9]{8,})(?:\\/.*)?$/));
       const identity = match ? "slack-huddle:" + match[1] : undefined;
       if (!identity || rawUrl !== location.href) return identity;
-      // The URL names only the viewed channel. A live call while that channel's header says this device
-      // is outside its huddle belongs to another huddle, unless this session's Join is still settling.
+      // The URL names only the viewed channel. While a call is live, only Slack's membership header for
+      // that channel (or this session's own settling Join) vouches for it; anything else fails closed.
       const hooks = ${ownershipHooks};
       const found = (list) => list.some((selector) => document.querySelector(selector));
       const marker = window.__openclawSlackHuddle;
       const settlingJoin = marker?.identity === identity && marker.joinRequested === true &&
         Date.now() - (marker.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
-      return found(hooks.header) && !found(hooks.inHuddle) && found(hooks.inCall) && !settlingJoin
-        ? "slack-huddle-foreign:" + match[1]
+      return found(hooks.inCall) && !found(hooks.inHuddle) && !settlingJoin
+        ? "slack-huddle-unverified:" + match[1]
         : identity;
     } catch { return undefined; }
   };`;
@@ -121,10 +120,10 @@ export function slackHuddleLeaveScript(params: {
   const switchPrompt = Boolean(firstMatch(selectors.confirmation) || firstMatch(selectors.multiDevice));
   const leave = member && !switchPrompt ? firstMatch(selectors.leave) : undefined;
   const confirmation = undefined;
-  const callLive = selectors.inCall.some((selector) => document.querySelector(selector));
-  const inCallMarker = callLive && (member || !firstMatch(selectors.channelHeader));
+  // Missing call controls can be a re-render; only Slack's header proves the account left.
+  const provenDeparted = Boolean(firstMatch(selectors.channelHeader)) && !member;
   const currentUrlMatches = Boolean(expectedIdentity && currentIdentity === expectedIdentity);`,
-    departedMarkerSource: "!inCallMarker",
+    departedMarkerSource: "provenDeparted",
     expectedIdentity: normalizeSlackHuddleUrlForReuse(params.meetingUrl),
     leaveInitiated: params.leaveInitiated,
     meetingSessionId: params.meetingSessionId,
