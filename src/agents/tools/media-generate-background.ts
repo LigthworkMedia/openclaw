@@ -233,7 +233,6 @@ export async function runMediaGenerationTask<T extends MediaGenerationExecutionR
   prompt: string;
   requestKey: string;
   providerId?: string;
-  config?: OpenClawConfig;
   scheduleBackgroundWork: MediaGenerateBackgroundScheduler;
   onAsyncTaskStarted?: MediaGenerateAsyncStartCallback;
   onFailure: (message: string, meta?: Record<string, unknown>) => void;
@@ -303,7 +302,6 @@ export async function runMediaGenerationTask<T extends MediaGenerationExecutionR
         handle,
         scheduleBackgroundWork: params.scheduleBackgroundWork,
         progressSummary,
-        config: params.config,
         toolName: `${title} generation`,
         onWakeFailure: params.onFailure,
         run: () => run(handle),
