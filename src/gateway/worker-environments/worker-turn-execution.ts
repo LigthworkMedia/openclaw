@@ -17,7 +17,6 @@ import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller
 import { createLibrarySkillWorkshopTool } from "../../agents/tools/skill-workshop-tool-library.js";
 import { buildProactiveSubagentOrchestrationSection } from "../../agents/ultra-orchestration.js";
 import { resolveProviderThinkingLevel } from "../../auto-reply/thinking.js";
-import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import {
   buildActiveNodeContextText,
   prepareActiveNodeContext,
@@ -34,6 +33,7 @@ import {
   supportsCurrentWorkerLaunch,
 } from "./admission.js";
 import { workerInferencePlacement } from "./inference-placement.js";
+import { raceNodeWorkerOperation } from "./node-worker-abort.js";
 import { sameWorkerSessionTurnClaim } from "./placement-record.js";
 import { prepareWorkerDesktopLaunchPlan } from "./worker-desktop-launch-plan.js";
 import { prepareWorkerGitHubBinding } from "./worker-github-binding.js";
@@ -117,7 +117,7 @@ export async function executeWorkerTurn(
   turn.abortSignal?.throwIfAborted();
   // Shared account refresh and repository lookup own their own lifetime. A
   // cancelled turn may stop waiting, but cannot consume a late binding.
-  const github = await racePromiseWithAbortSignal(
+  const github = await raceNodeWorkerOperation(
     prepareWorkerGitHubBinding({
       sessionId: placement.sessionId,
       sessionKey: placement.sessionKey,
