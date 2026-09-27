@@ -217,6 +217,12 @@ export function fixture(params: {
     location,
     window,
     crypto: { randomUUID: () => "slack-caption-epoch" },
+    // Capture setup past the ownership check is the shared runtime's concern; stop there.
+    AudioContext: class {
+      constructor() {
+        throw new Error("audio capture passed ownership");
+      }
+    },
     navigator: { mediaDevices: { enumerateDevices: async () => [] } },
     MutationObserver: class {
       constructor(callback: () => void) {
@@ -274,6 +280,15 @@ export function fixture(params: {
         throw new Error("Missing session-owned leave script");
       }
       return JSON.parse(runInNewContext(`(${source})()`, sandbox)) as Record<string, unknown>;
+    },
+    startAudioCapture() {
+      const source = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildAudioCaptureScript({
+        action: "start",
+        captureId: "capture-1",
+        meetingSessionId: "session-1",
+        meetingUrl: HUDDLE_URL,
+      });
+      return runInNewContext(`(${source})()`, sandbox) as Promise<string>;
     },
     transcript(finalize = false) {
       const source = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.captions.buildTranscriptScript({

@@ -357,7 +357,7 @@ describe("Slack huddle browser adapter", () => {
       inCall: false,
       manualAction: { reason: "slack-session-conflict" },
     });
-    expect(browser.leave()).toMatchObject({ departed: true });
+    expect(browser.leave()).toMatchObject({ departed: false, sessionMatched: false });
     expect(marker.clicks).toBe(0);
   });
 
@@ -532,6 +532,47 @@ describe("Slack huddle browser adapter", () => {
       sessionMatched: true,
       urlMatched: true,
     });
+  });
+
+  it("captures audio only while Slack's header shows this device in the requested huddle", async () => {
+    const { document } = inCall();
+    const header = channelHeader(true);
+    document.body.append(header);
+    const browser = fixture({ document, currentUrl: CLIENT_URL, joined: true });
+    expect(await browser.status()).toMatchObject({ inCall: true });
+    await expect(browser.startAudioCapture()).rejects.toThrow("audio capture passed ownership");
+    header.attributes.class = "p-huddle_channel_header_button__container";
+    await expect(browser.startAudioCapture()).rejects.toThrow("no longer owns");
+  });
+
+  it("stops collecting captions when the account moves to another huddle on the same channel view", async () => {
+    const speaker = new PageNode(
+      "span",
+      { class: "p-huddle_closed_caption_event__member_name" },
+      "Morgan:",
+    );
+    const words = new PageNode(
+      "span",
+      {
+        "data-qa": "huddle_closed_caption_event",
+        class: "p-huddle_closed_caption_event__transcription",
+      },
+      "Owned huddle line.",
+    );
+    const caption = new PageNode("div").append(
+      speaker,
+      new PageNode("div", { class: "p-huddle_closed_caption_event__event_text" }).append(words),
+    );
+    const { document } = inCall();
+    const header = channelHeader(true);
+    document.body.append(header, caption);
+    const browser = fixture({ document, currentUrl: CLIENT_URL, joined: true });
+    expect(await browser.status({ captureCaptions: true })).toMatchObject({ transcriptLines: 1 });
+    header.attributes.class = "p-huddle_channel_header_button__container";
+    words.textContent = "Foreign huddle line.";
+    browser.mutate();
+    const transcript = browser.transcript();
+    expect(JSON.stringify(transcript)).not.toContain("Foreign huddle line.");
   });
 
   it("captures huddle_transcribe_event and reports unavailable captions without clicking menus", async () => {
