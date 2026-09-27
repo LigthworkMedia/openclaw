@@ -645,7 +645,7 @@ extension MacGatewayChatTransportMappingTests {
                 elements.first {
                     let value: Any? = $0.accessibilityValue?()
                     return $0.accessibilityIdentifier?() == "chat-composer-inline-model" &&
-                        $0.accessibilityTitle?() == "Model" && value as? String == "model-a" &&
+                        AppKitTestSupport.accessibilityName(of: $0) == "Model" && value as? String == "model-a" &&
                         $0.isAccessibilityEnabled?() == true
                 }
             }
