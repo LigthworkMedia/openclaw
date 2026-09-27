@@ -104,6 +104,9 @@ guidance and restarted through that same Startup entry; updating the selected
 service cannot stop that sibling. Start services only after the build succeeds.
 If this checkout's built runtime is missing and the CLI cannot run, use those
 native controls before rebuilding.
+By default, source-runner `gateway stop` and `gateway restart` use the existing
+built CLI so recovery does not rebuild first. To apply source changes, use the
+stop, build, and start sequence above.
 `openclaw update` can apply an available update, but `skipped` / `already-current`
 does not rebuild stale `dist`; use the external stop, rebuild, and start sequence
 for that case.
