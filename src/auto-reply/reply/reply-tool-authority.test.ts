@@ -399,16 +399,24 @@ describe("reply tool authority", () => {
         withModelPolicy,
         grantKind: "bound",
         grant: { pluginId: "access-policy", grantId: "original-grant" },
+        toolsAllow: undefined,
       },
-      { withModelPolicy, grantKind: "independent", grant: null },
-      { withModelPolicy, grantKind: "unclassified", grant: undefined },
+      {
+        withModelPolicy,
+        grantKind: "independent",
+        grant: null,
+        toolsAllow: [withModelPolicy ? "theme" : "screen"],
+      },
+      { withModelPolicy, grantKind: "unclassified", grant: undefined, toolsAllow: undefined },
     ]),
   )(
-    "preserves reconnect steering authority (model policy: $withModelPolicy, grant: $grantKind)",
-    async ({ withModelPolicy, grant }) =>
+    "preserves steering across profiles and reconnects (model policy: $withModelPolicy, grant: $grantKind)",
+    async ({ withModelPolicy, grant, toolsAllow }) =>
       withOpenClawTestState({ scenario: "minimal" }, async () => {
         const profileId = ensureProfileForEmail("steering-operator@example.test").id;
+        const otherProfileId = ensureProfileForEmail("another-steering-operator@example.test").id;
         setUserProfileRole(profileId, withModelPolicy ? "writer" : null);
+        setUserProfileRole(otherProfileId, withModelPolicy ? "writer" : null);
         const scopes: GatewayOperatorRoleDefinition["scopes"] = [
           "operator.admin",
           "operator.read",
@@ -485,6 +493,7 @@ describe("reply tool authority", () => {
         };
         try {
           const run = createQueueTestRun({ prompt: "keep playing" });
+          run.toolsAllow = toolsAllow;
           run.operatorAuthority = await capture(originalClient, originalRevocation.signal, grant);
           run.run.gatewayUiCommandTarget = { connId: originalClient.connId!, profileId };
           run.run.approvalReviewerDeviceId = "original-reviewer";
@@ -532,7 +541,22 @@ describe("reply tool authority", () => {
               ? { status: "rejected", reason: "tool_authority_mismatch" }
               : { status: "accepted" },
           );
-          const acceptedMessages = grant === undefined ? 1 : 2;
+          const otherAuthority = await capture(
+            createOperatorClient({ profileId: otherProfileId, scopes, caps: ["ui-commands"] }),
+            new AbortController().signal,
+            grant,
+          );
+          await expect(
+            inject({
+              operatorAuthority: otherAuthority,
+              gatewayUiCommandTarget: { connId: "other-browser", profileId: otherProfileId },
+            }),
+          ).resolves.toEqual(
+            grant === undefined
+              ? { status: "rejected", reason: "tool_authority_mismatch" }
+              : { status: "accepted" },
+          );
+          const acceptedMessages = grant === undefined ? 1 : 3;
           expect(queueMessage).toHaveBeenLastCalledWith(
             "change strategy",
             expect.objectContaining({
@@ -584,11 +608,11 @@ describe("reply tool authority", () => {
               }),
             },
             {
-              operatorAuthority: createAdmittedRunOperatorAuthority({
-                ...reconnectedAuthority,
-                profileId: "another-operator",
-              }),
+              operatorAuthority: otherAuthority,
+              gatewayUiCommandTarget: { connId: "other-browser", profileId },
             },
+            { gatewayUiCommandTarget: { connId: "other-browser", profileId: otherProfileId } },
+            { gatewayUiCommandTarget: undefined },
             {
               operatorAuthority: createAdmittedRunOperatorAuthority({
                 ...reconnectedAuthority,

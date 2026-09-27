@@ -78,13 +78,13 @@ Visible user turns started through the `agent` RPC can also receive compatible
 steering. Direct background turns with optional replies leave new human messages
 queued for a followup turn that can provide the required answer.
 
-Authorized participants with matching tool permissions can steer from different
-browsers. The running turn keeps its original approval destination. A different
-browser identity alone does not defer the message, but changes to permissions,
-execution policy, workspace, or bound tools can require a followup turn.
-Reconnecting as the same authenticated user preserves steering when permissions
-and model access remain unchanged. The active turn keeps its original browser,
-tool, and approval bindings; steering does not transfer them to the new connection.
+Different signed-in people with the same permissions can steer each other's
+active turn, including from different browsers or after reconnecting. The turn
+keeps its original owner's authority, browser, screen/theme target, tool bindings,
+and approval destination. A steer can therefore drive that owner's pane layout
+or personal theme within the turn. Different permissions (role scopes, model
+access, access grant, or tool policy) queue the message as a followup; changes to
+execution policy, workspace, or bound tools can also require a followup.
 
 Automatic credential rotation and model fallback also retain the active turn.
 New input can steer that turn while the selected model remains unchanged, fallback
@@ -94,8 +94,8 @@ turn. Answers to a pending question still go to the question's original owner.
 
 [Personal `USER.md` context](/concepts/user-model#personal-user-files-on-a-shared-gateway)
 follows the session's assigned human owner, otherwise its authenticated human
-creator. Another participant can steer normally without switching that personal
-context, and collected messages keep the same session selection. Reassignment
+creator. Another participant with the same permissions can steer without switching
+that personal context, and collected messages keep the same session selection. Reassignment
 takes effect on the next new turn; it does not replace the running turn's personal
 instructions. Personal context selection does not grant tool permissions or
 change the approval destination.

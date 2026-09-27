@@ -345,6 +345,7 @@ function resolveReplyToolAuthorityInputFingerprint(
   const authority = snapshot.operatorAuthority;
   assertCurrentOperatorAuthority(authority);
   const screenTarget = resolveReplyScreenToolTarget(snapshot, capabilityProfile);
+  const themeProfileId = resolveReplyThemeProfileId(snapshot, capabilityProfile);
   return createHash("sha256")
     .update(
       stableStringify({
@@ -353,7 +354,6 @@ function resolveReplyToolAuthorityInputFingerprint(
         policy: capabilityProfile.policy,
         operatorAuthority: authority
           ? {
-              profileId: authority.profileId,
               scopes: [...new Set(authority.scopes)].toSorted(),
               gatewayAccessGrant:
                 authority.gatewayAccessGrant === undefined
@@ -385,11 +385,15 @@ function resolveReplyToolAuthorityInputFingerprint(
             ? { source: "auto" }
             : { id: execution.authProfileId },
         clientCaps: [...new Set(execution.clientCaps ?? [])].toSorted(),
+        // Own-profile targets retain the running turn's original bindings.
         gatewayUiCommandTarget:
           authority && screenTarget?.profileId === authority.profileId
-            ? { profileId: screenTarget.profileId }
+            ? { ownProfile: true }
             : screenTarget,
-        themeProfileId: resolveReplyThemeProfileId(snapshot, capabilityProfile),
+        themeProfileId:
+          authority && themeProfileId === authority.profileId
+            ? { ownProfile: true }
+            : themeProfileId,
         toolBindings: execution.toolBindings,
       }),
     )

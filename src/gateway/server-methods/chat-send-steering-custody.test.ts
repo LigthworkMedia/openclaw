@@ -34,6 +34,7 @@ import {
   createDispatchTestHarness,
   createOperatorWsClient,
 } from "../server/ws-connection/authenticated-request-dispatch.test-support.js";
+import { prepareGatewayConnectOperatorAccess } from "../server/ws-connection/connect-operator-access.js";
 import { dispatchInboundMessageMock, installGatewayTestHooks } from "../test-helpers.js";
 import { handleChatSend } from "./chat-send-handler.js";
 import { useBrowserFollowupFixture } from "./chat-send-pending-inputs.test-support.js";
@@ -45,11 +46,26 @@ registerAgentSessionLoopTestLifecycle();
 const createBrowserFollowupFixture = useBrowserFollowupFixture();
 
 describe("steering input custody", () => {
-  it.each(["same grant", "changed grant", "revoked grant"] as const)(
-    "preserves authenticated chat.send steering authority after reconnect (%s)",
+  it.each([
+    "same grant",
+    "changed grant",
+    "revoked grant",
+    "same permissions across profiles",
+    "different scopes across profiles",
+  ] as const)(
+    "preserves authenticated chat.send steering authority across callers (%s)",
     async (scenario) => {
       const fixture = await createBrowserFollowupFixture({ preserveContent: true });
       const profile = ensureProfileForEmail("reconnect-steering@example.test");
+      const acrossProfiles =
+        scenario === "same permissions across profiles" ||
+        scenario === "different scopes across profiles";
+      const incomingProfile = acrossProfiles
+        ? ensureProfileForEmail("other-steering@example.test")
+        : profile;
+      const accepted = scenario === "same grant" || scenario === "same permissions across profiles";
+      const queued =
+        scenario === "changed grant" || scenario === "different scopes across profiles";
       const originalGrant = new AbortController();
       const incomingGrant = new AbortController();
       const client = (connId: string, controller: AbortController, grantId: string) => ({
@@ -77,6 +93,21 @@ describe("steering input custody", () => {
         incomingGrant,
         scenario === "changed grant" ? "replacement-grant" : "original-grant",
       );
+      if (acrossProfiles) {
+        reconnectedClient.authenticatedUserId = "other-steering@example.test";
+        reconnectedClient.authenticatedUserProfile = {
+          ...reconnectedClient.authenticatedUserProfile,
+          profileId: incomingProfile.id,
+          updatedAt: incomingProfile.updatedAt,
+        };
+        if (scenario === "different scopes across profiles") {
+          reconnectedClient.connect.scopes = ["operator.read", "operator.write"];
+        }
+        prepareGatewayConnectOperatorAccess(originalClient);
+        prepareGatewayConnectOperatorAccess(reconnectedClient);
+        expect(originalClient.internal.operatorAccessAuthority).toBeNull();
+        expect(reconnectedClient.internal.operatorAccessAuthority).toBeNull();
+      }
       let captured: Awaited<ReturnType<typeof captureGatewayOperatorRunAuthority>>;
       let backingRun: Promise<void> | undefined;
       let releaseProvider = () => {};
@@ -87,6 +118,10 @@ describe("steering input custody", () => {
         });
         if (!captured || !fixture.activeRun) {
           throw new Error("Expected original operator and active run ownership");
+        }
+        if (acrossProfiles) {
+          expect(captured.authority.gatewayAccessGrant).toBeNull();
+          expect(incomingProfile.id).not.toBe(captured.authority.profileId);
         }
         const operation = fixture.activeRun;
         const run = createQueueTestRun({
@@ -187,17 +222,21 @@ describe("steering input custody", () => {
           },
           reconnectedClient,
         );
-        if (scenario === "same grant") {
+        if (accepted) {
           expect(session.getSteeringMessages()).toEqual([fixture.params.message]);
           expect(queueMessage).toHaveBeenCalledOnce();
           expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
         } else {
           expect(session.getSteeringMessages()).toEqual([]);
           expect(queueMessage).not.toHaveBeenCalled();
-          if (scenario === "changed grant") {
+          if (queued) {
             expect(dispatchInboundMessageMock).toHaveBeenCalledOnce();
             expect(dispatchInboundMessageMock.mock.calls[0]?.[0]).toMatchObject({
               replyOptions: { messageInjectionDisposition: "rejected" },
+            });
+            expect(listSessionPendingInputs(fixture.scope)).toMatchObject({
+              total: 1,
+              items: [{ runId: fixture.params.idempotencyKey, state: "queued" }],
             });
           } else {
             expect(fixture.beforeApprove).toHaveBeenCalledOnce();
@@ -213,7 +252,7 @@ describe("steering input custody", () => {
             isRecord(event.message) &&
             event.message.idempotencyKey === `${fixture.params.idempotencyKey}:user`,
         );
-        if (scenario === "same grant") {
+        if (accepted) {
           expect(input).toMatchObject({
             message: {
               content: fixture.params.message,
@@ -221,7 +260,7 @@ describe("steering input custody", () => {
             },
           });
           expect(streamMocks.streamSimple).toHaveBeenCalledTimes(2);
-        } else if (scenario === "changed grant") {
+        } else if (queued) {
           expect(input).toMatchObject({ message: { content: fixture.params.message } });
           expect(input).not.toHaveProperty("message.__openclaw.steerTargetRunId");
           expect(streamMocks.streamSimple).toHaveBeenCalledOnce();
