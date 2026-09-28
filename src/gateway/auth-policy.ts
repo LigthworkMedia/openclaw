@@ -2,14 +2,9 @@ import { stableStringify } from "@openclaw/normalization-core/stable-stringify";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { getRuntimeConfig } from "../config/io.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { GatewayAuthPolicy } from "./auth-policy.types.js";
 import { resolveIdentityOperatorScopes } from "./operator-identity-scopes.js";
 import { sourceRolePolicies } from "./operator-role-source-policy.js";
-
-export type GatewayAuthPolicy = Readonly<{
-  generation: string;
-  /** Only operator WebSocket admission consumes identity grants. */
-  verifiedIdentity?: string;
-}>;
 
 const policies = new WeakMap<
   OpenClawConfig,
