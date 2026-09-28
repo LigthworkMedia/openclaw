@@ -76,6 +76,8 @@ type WorkerComputerOwnerOptions = {
 
 /** Captures one environment's desktop under its placement or conversation attachment owner. */
 export function createEnvironmentComputerTransportOwner(options: WorkerComputerOwnerOptions) {
+  // Retries can rebuild bindings and attachment preparations within one admitted run.
+  const takeoversByRun = new WeakMap<AgentRunDelegatedAuthority, Set<string>>();
   return async (
     source: WorkerEnvironmentComputerAuthority,
   ): Promise<PreparedWorkerComputer | undefined> => {
@@ -290,10 +292,10 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
       bind(operationalRunInstance, workerSource) {
         const worker = source.turnClaim?.owner.kind === "worker";
         workerSource?.assertCurrent();
-        const authority = worker
-          ? workerSource?.authority
-          : getActiveAgentRunDelegatedAuthority(operationalRunInstance);
+        const runAuthority = getActiveAgentRunDelegatedAuthority(operationalRunInstance);
+        const authority = worker ? workerSource?.authority : runAuthority;
         if (
+          !runAuthority ||
           !authority ||
           !validateAgentRunDelegatedAuthority(authority) ||
           authority.operationalRunInstance.instanceId !== operationalRunInstance.instanceId ||
@@ -319,7 +321,8 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
         let bindingClosing: Promise<unknown> | undefined;
         const inFlight = new Set<Promise<unknown>>();
         const inputControllers = new Set<AbortController>();
-        const completedTakeovers = new Set<string>();
+        const completedTakeovers = takeoversByRun.get(runAuthority) ?? new Set<string>();
+        takeoversByRun.set(runAuthority, completedTakeovers);
         let releaseControlListener: (() => void) | undefined;
         let inputNeedsObservation = false;
         let controlGeneration = 0;
@@ -553,7 +556,14 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
                 throw new Error("Session computer command has no active policy or permission");
               }
               // A replay must not evict a human who took control after the original request.
-              if (!request.idempotencyKey || !completedTakeovers.has(request.idempotencyKey)) {
+              const takeoverKey = request.idempotencyKey
+                ? JSON.stringify([
+                    environment.environmentId,
+                    environment.ownerEpoch,
+                    request.idempotencyKey,
+                  ])
+                : undefined;
+              if (!takeoverKey || !completedTakeovers.has(takeoverKey)) {
                 // Even without a controller, retire observations started before takeover.
                 inputNeedsObservation = true;
                 controlGeneration += 1;
@@ -561,8 +571,8 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
                   environment.environmentId,
                   environment.ownerEpoch,
                 );
-                if (request.idempotencyKey) {
-                  completedTakeovers.add(request.idempotencyKey);
+                if (takeoverKey) {
+                  completedTakeovers.add(takeoverKey);
                 }
               }
               assertCurrent();

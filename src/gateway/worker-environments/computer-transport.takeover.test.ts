@@ -116,17 +116,22 @@ describe("agent desktop takeover", () => {
       expect(result.content.some((block) => block.type === "image")).toBe(true);
       expect(f.close).toHaveBeenCalledExactlyOnceWith(4000, "control-taken:Agent");
       expect(f.desktopRegistry.hasController("environment-1", 7)).toBe(false);
+      const reclaimedClose = vi.fn();
       f.desktopRegistry.attachObserver("environment-1", {
         control: true,
         ownerEpoch: 7,
-        close: vi.fn(),
+        close: reclaimedClose,
       });
+      f.prepared.bind(f.h.run, f.h.workerSource);
       await expect(tool.execute("resume", { action: "take_control" })).rejects.toThrow(
         "operator took control again",
       );
       await expect(
         tool.execute("still-human", { action: "type", text: "must not type" }),
       ).rejects.toThrow("operator has control");
+      expect(reclaimedClose).not.toHaveBeenCalled();
+      await tool.execute("resume-again", { action: "take_control" });
+      expect(reclaimedClose).toHaveBeenCalledExactlyOnceWith(4000, "control-taken:Agent");
     } finally {
       await Promise.all(cleanups.map((cleanup) => cleanup("test-complete")));
       await f.service.close();

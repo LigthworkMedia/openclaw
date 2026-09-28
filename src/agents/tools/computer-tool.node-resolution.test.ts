@@ -130,23 +130,26 @@ describe("createComputerTool node resolution", () => {
         ? { ...result, payload: screenshotPayload().payload }
         : result;
     });
-    let cleanup: ((reason: string) => Promise<void>) | undefined;
-    const tool = wrapToolWithGatewayCallerIdentity(
-      createComputerTool({
-        modelHasVision: true,
-        registerRunCleanup: (registered) => {
-          cleanup = registered;
+    const cleanups: Array<(reason: string) => Promise<void>> = [];
+    const createTool = () =>
+      wrapToolWithGatewayCallerIdentity(
+        createComputerTool({
+          modelHasVision: true,
+          idempotencyScope: h.run.runId,
+          registerRunCleanup: (registered) => {
+            cleanups.push(registered);
+          },
+        }),
+        {
+          agentId: attachment.agentId,
+          sessionKey: attachment.sessionKey,
+          operationalRunInstance: h.run,
+          approvalAuthority: h.authority,
+          gatewayContextResolver: () => context,
+          receiptAuthority: () => validateAgentRunDelegatedAuthority(h.authority),
         },
-      }),
-      {
-        agentId: attachment.agentId,
-        sessionKey: attachment.sessionKey,
-        operationalRunInstance: h.run,
-        approvalAuthority: h.authority,
-        gatewayContextResolver: () => context,
-        receiptAuthority: () => validateAgentRunDelegatedAuthority(h.authority),
-      },
-    );
+      );
+    const tool = createTool();
     try {
       await expect(
         tool.execute("paused", {
@@ -166,10 +169,23 @@ describe("createComputerTool node resolution", () => {
         frameId: expect.any(String),
       });
       await tool.execute("continue", { action: "type", text: "resumed" });
+      const reclaimedClose = vi.fn();
+      desktopRegistry.attachObserver(attachment.environmentId, {
+        control: true,
+        ownerEpoch: attachment.ownerEpoch,
+        close: reclaimedClose,
+      });
+      await expect(
+        createTool().execute("resume", {
+          action: "take_control",
+          environmentId: attachment.environmentId,
+        }),
+      ).rejects.toThrow("operator took control again");
+      expect(reclaimedClose).not.toHaveBeenCalled();
       expect(listNodesMock).not.toHaveBeenCalled();
       expect(callGatewayToolMock).not.toHaveBeenCalled();
     } finally {
-      await cleanup?.("test-complete");
+      await Promise.all(cleanups.map((cleanup) => cleanup("test-complete")));
       await computers.close();
       await desktopRegistry.stopAll();
       releaseAgentRunDelegatedAuthority(h.authority);
