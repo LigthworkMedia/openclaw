@@ -22,7 +22,6 @@ import {
 import { extractAssistantPhaseText } from "../../../src/shared/chat-message-content.js";
 import { stripInlineDirectiveTagsForDisplay } from "../../../src/utils/directive-tags.js";
 import type { GatewayEventFrame } from "../api/gateway.ts";
-import { t } from "../i18n/index.ts";
 import { stripHeartbeatTokenForDisplay } from "../lib/chat/heartbeat-display.ts";
 import { pickFreshestObserverDigest } from "../lib/observer-digest.ts";
 import type { SessionCapability } from "../lib/sessions/index.ts";
@@ -64,7 +63,7 @@ function createNarrationRetry(): NarrationRetry {
   return { retryWindowMs: SIDEBAR_NARRATION_RETRY_INITIAL_MS, retryAt: 0, timer: null };
 }
 
-type NarrationActivity = { kind: "text"; text: string } | { kind: "line"; line: string };
+type NarrationActivity = { text: string };
 
 type ThrottledLine = {
   lastPublishedAt: number;
@@ -160,12 +159,14 @@ export class SidebarSessionNarrationController {
   private throttles = new Map<string, ThrottledLine>();
   private lines = new Map<string, string>();
   private observerDigests = new Map<string, SessionObserverDigest>();
+  private tools = new Map<string, string>();
 
   constructor(
     private readonly onLinesChanged: (lines: ReadonlyMap<string, string>) => void,
     private readonly onObserverDigestsChanged: (
       digests: ReadonlyMap<string, SessionObserverDigest>,
     ) => void = () => undefined,
+    private readonly onToolsChanged: (tools: ReadonlyMap<string, string>) => void = () => undefined,
   ) {}
 
   sync(input: SidebarNarrationSyncInput): void {
@@ -519,7 +520,7 @@ export class SidebarSessionNarrationController {
       if (update.reset) {
         // An empty replacement retracts prior content; a stale line must not
         // outlive it (the draft it showed may have been withdrawn).
-        this.clearLine(key);
+        this.clearNarration(key);
       }
       return;
     }
@@ -554,7 +555,7 @@ export class SidebarSessionNarrationController {
       nextVisibleText.length > SIDEBAR_NARRATION_BUFFER_CHARS
         ? sliceUtf16Safe(nextVisibleText, -SIDEBAR_NARRATION_BUFFER_CHARS)
         : nextVisibleText;
-    this.publishThrottled(key, { kind: "text", text: stream.visibleText });
+    this.publishThrottled(key, { text: stream.visibleText });
   }
 
   private stripInternalRuntimeFragment(stream: NarrationStream, fragment: string): string {
@@ -619,16 +620,11 @@ export class SidebarSessionNarrationController {
       return;
     }
     this.observeRun(key, record.runId);
-    if (this.observerDigests.has(key)) {
-      return;
-    }
     const data = record.data as Record<string, unknown> | undefined;
     const name = typeof data?.name === "string" ? data.name.trim() : "";
-    if (name) {
-      this.publishThrottled(key, {
-        kind: "line",
-        line: t("chat.sidebar.toolActivity", { tool: name }),
-      });
+    if (name && this.tools.get(key) !== name) {
+      this.tools.set(key, name);
+      this.onToolsChanged(new Map(this.tools));
     }
   }
 
@@ -699,12 +695,8 @@ export class SidebarSessionNarrationController {
   }
 
   private publishActivity(key: string, activity: NarrationActivity): void {
-    const safeText = activity.kind === "text" ? normalizeSidebarNarrationText(activity.text) : null;
-    const line = safeText
-      ? deriveSidebarNarrationLine(safeText)
-      : activity.kind === "line"
-        ? activity.line
-        : "";
+    const safeText = normalizeSidebarNarrationText(activity.text);
+    const line = safeText ? deriveSidebarNarrationLine(safeText) : "";
     if (line) {
       if (this.lines.get(key) !== line) {
         this.lines.set(key, line);
@@ -715,7 +707,7 @@ export class SidebarSessionNarrationController {
     // The activity text is the full visible buffer: normalizing it to nothing
     // means only suppressed content remains (e.g. a replacement that reduced
     // to REPLY_SKIP or a heartbeat), so retract any previously shown line.
-    if (activity.kind === "text" && this.lines.delete(key)) {
+    if (this.lines.delete(key)) {
       this.onLinesChanged(new Map(this.lines));
     }
   }
@@ -723,6 +715,9 @@ export class SidebarSessionNarrationController {
   private clearLine(key: string): void {
     this.clearNarration(key);
     this.runIds.delete(key);
+    if (this.tools.delete(key)) {
+      this.onToolsChanged(new Map(this.tools));
+    }
     if (this.observerDigests.delete(key)) {
       this.onObserverDigestsChanged(new Map(this.observerDigests));
     }
@@ -749,6 +744,10 @@ export class SidebarSessionNarrationController {
     this.streams.clear();
     this.runIds.clear();
     this.throttles.clear();
+    if (this.tools.size > 0) {
+      this.tools.clear();
+      this.onToolsChanged(new Map());
+    }
     if (this.lines.size > 0) {
       this.lines.clear();
       this.onLinesChanged(new Map());

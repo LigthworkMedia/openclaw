@@ -32,6 +32,8 @@ Sidebar pull-request indicators reuse the last known snapshot. Opening a session
 
 Sidebar live narration pauses while the browser tab is hidden and resumes from current activity when you return. The selected chat and pending outbox keep their separately owned subscriptions.
 
+Running sessions show the latest observed tool as a small, static icon between the leading session indicator and the title. Hover the tool icon for its exact name, which is also available to screen readers. Tool updates do not replace assistant narration or observer summaries, and the existing session indicator remains the only activity animation. The tool icon clears when its live subscription ends.
+
 Live narration retains up to six visible running background sessions, plus the open session. Recency changes keep that window stable; when a session finishes or leaves the visible rows, the most recent eligible session fills its slot. Reconnecting selects a fresh window.
 
 If a narration subscription encounters a retryable failure or times out, it retries automatically with randomized exponential backoff, honoring the server's retry delay. Sidebar updates share the pending retry instead of sending more requests. Retries stop when that session leaves the narration window, the tab is hidden, or the connection closes; non-retryable errors wait for a new subscription intent or connection.

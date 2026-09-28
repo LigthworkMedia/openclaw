@@ -356,9 +356,11 @@ describe("SidebarSessionNarrationController", () => {
     };
     const lines: Array<ReadonlyMap<string, string>> = [];
     const digests: Array<ReadonlyMap<string, { headline: string }>> = [];
+    const tools: Array<ReadonlyMap<string, string>> = [];
     const controller = new SidebarSessionNarrationController(
       (next) => lines.push(next),
       (next) => digests.push(next),
+      (next) => tools.push(next),
     );
     controller.sync({
       enabled: true,
@@ -370,6 +372,7 @@ describe("SidebarSessionNarrationController", () => {
       agentId: "main",
     });
 
+    controller.handleEvent(chatDelta("Reading source"));
     controller.handleEvent(
       gatewayEvent("agent", {
         sessionKey: "agent:main:run",
@@ -378,7 +381,8 @@ describe("SidebarSessionNarrationController", () => {
         data: { name: "read" },
       }),
     );
-    expect(lines.at(-1)?.get("agent:main:run")).toBe("Using read");
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("read");
+    expect(lines.at(-1)?.get("agent:main:run")).toBe("Reading source");
 
     controller.handleEvent(
       gatewayEvent("session.observer", {
@@ -399,7 +403,8 @@ describe("SidebarSessionNarrationController", () => {
         data: { name: "list" },
       }),
     );
-    expect(lines.at(-1)?.get("agent:main:run")).toBe("Using list");
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("list");
+    expect(lines.at(-1)?.get("agent:main:run")).toBe("Reading source");
 
     controller.handleEvent(
       gatewayEvent("session.observer", {
@@ -451,17 +456,23 @@ describe("SidebarSessionNarrationController", () => {
       }),
     );
     expect(digests.at(-1)?.has("agent:main:run")).toBe(false);
-    expect(lines.at(-1)?.get("agent:main:run")).toBe("Using test");
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("test");
+    expect(lines.at(-1)?.get("agent:main:run")).toBeUndefined();
   });
 
-  it("publishes assistant commentary and throttles a newer tool signal", async () => {
+  it("keeps tool identity separate from commentary and clears it with its run", async () => {
     const subscribeMessages = vi.fn(() =>
       Promise.resolve({ key: "agent:main:run", agentId: null }),
     );
     const unsubscribeMessages = vi.fn(() => Promise.resolve());
     const source = { subscribeMessages, unsubscribeMessages };
     const updates: Array<ReadonlyMap<string, string>> = [];
-    const controller = new SidebarSessionNarrationController((lines) => updates.push(lines));
+    const tools: Array<ReadonlyMap<string, string>> = [];
+    const controller = new SidebarSessionNarrationController(
+      (lines) => updates.push(lines),
+      undefined,
+      (next) => tools.push(next),
+    );
     const connectionIdentity = {};
     controller.sync({
       enabled: true,
@@ -488,7 +499,31 @@ describe("SidebarSessionNarrationController", () => {
     await vi.advanceTimersByTimeAsync(SIDEBAR_NARRATION_THROTTLE_MS - 1);
     expect(updates.at(-1)?.get("agent:main:run")).toBe("Reading files.");
     await vi.advanceTimersByTimeAsync(1);
-    expect(updates.at(-1)?.get("agent:main:run")).toBe("Using read");
+    expect(updates.at(-1)?.get("agent:main:run")).toBe("Reading files.");
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("read");
+
+    controller.handleEvent(chatDelta("", undefined, true));
+    expect(updates.at(-1)?.size).toBe(0);
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("read");
+
+    controller.handleEvent(
+      gatewayEvent("chat", {
+        sessionKey: "agent:main:run",
+        runId: "run-2",
+        state: "delta",
+        message: { role: "assistant", content: "A new run" },
+      }),
+    );
+    expect(tools.at(-1)?.size).toBe(0);
+    controller.handleEvent(
+      gatewayEvent("session.tool", {
+        sessionKey: "agent:main:run",
+        runId: "run-2",
+        stream: "tool",
+        data: { name: "plugin.custom_tool" },
+      }),
+    );
+    expect(tools.at(-1)?.get("agent:main:run")).toBe("plugin.custom_tool");
 
     controller.disconnect();
     expect(unsubscribeMessages).toHaveBeenCalledWith({
@@ -496,6 +531,7 @@ describe("SidebarSessionNarrationController", () => {
       agentId: null,
     });
     expect(updates.at(-1)?.size).toBe(0);
+    expect(tools.at(-1)?.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
   });
 

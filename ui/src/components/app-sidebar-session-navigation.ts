@@ -221,6 +221,7 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
   private readonly attention = new SessionAttentionController(this);
 
   declare readonly sidebarNarrationLines: ReadonlyMap<string, string>;
+  declare readonly sidebarTools: ReadonlyMap<string, string>;
   declare readonly sidebarObserverDigests: ReadonlyMap<string, SessionObserverDigest>;
   declare readonly sessionOrganizer: SessionOrganizerController;
   declare readonly sidebarMenus: SidebarMenusController;
