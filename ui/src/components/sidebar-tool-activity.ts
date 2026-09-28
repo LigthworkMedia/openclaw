@@ -4,12 +4,12 @@ import { AgentActivityItemSchema } from "../../../packages/gateway-protocol/src/
 import type { SidebarToolActivity } from "./app-sidebar-session-types.ts";
 import { deriveSidebarNarrationLine } from "./sidebar-narration-line.ts";
 
-/** Read only prepared display metadata, never raw arguments or tool output. */
+/** Read public progress only. Null withdraws the previous matching call; undefined ignores an event. */
 export function readSidebarToolActivity(
   stream: unknown,
   value: unknown,
   previous?: SidebarToolActivity,
-): SidebarToolActivity | undefined {
+): SidebarToolActivity | null | undefined {
   if (stream !== "tool" && stream !== "item") {
     return undefined;
   }
@@ -18,14 +18,19 @@ export function readSidebarToolActivity(
   if (stream === "item" && (!Value.Check(AgentActivityItemSchema, item) || item.kind !== "tool")) {
     return undefined;
   }
+  const toolCallId = typeof data?.toolCallId === "string" ? data.toolCallId : undefined;
+  if (data?.hideFromChannelProgress === true || data?.suppressChannelProgress === true) {
+    // Later tool frames may omit or contradict descriptive metadata; the
+    // started call ID owns identity. The controller separately fences its run.
+    return toolCallId && previous?.toolCallId === toolCallId ? null : undefined;
+  }
   const name = typeof data?.name === "string" ? data.name.trim() : "";
-  if (!name || data?.hideFromChannelProgress === true || data?.suppressChannelProgress === true) {
+  if (!name) {
     return undefined;
   }
-  const toolCallId = typeof data?.toolCallId === "string" ? data.toolCallId : undefined;
   const sameCall = previous?.name === name && previous.toolCallId === toolCallId;
   const text = Value.Check(AgentActivityItemSchema, item)
-    ? deriveSidebarNarrationLine(item.progressText?.trim() || item.meta?.trim() || "") || undefined
+    ? deriveSidebarNarrationLine(item.progressText?.trim() || "") || undefined
     : sameCall
       ? previous.text
       : undefined;

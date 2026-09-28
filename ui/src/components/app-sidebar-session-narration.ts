@@ -32,7 +32,10 @@ import {
 } from "../lib/sessions/session-key.ts";
 import { stripThinkingTags } from "../lib/strip-thinking-tags.ts";
 import type { SidebarRecentSession, SidebarToolActivity } from "./app-sidebar-session-types.ts";
-import { deriveSidebarNarrationLine } from "./sidebar-narration-line.ts";
+import {
+  deriveSidebarNarrationLine,
+  trailingInternalDelimiterPrefix,
+} from "./sidebar-narration-line.ts";
 import { readSidebarToolActivity } from "./sidebar-tool-activity.ts";
 
 const SIDEBAR_NARRATION_SUBSCRIPTION_LIMIT = 6;
@@ -108,21 +111,6 @@ function normalizeSidebarNarrationText(text: string): string | null {
     return null;
   }
   return heartbeat.text;
-}
-
-function trailingInternalDelimiterPrefix(text: string): string {
-  const tokens = [INTERNAL_RUNTIME_CONTEXT_BEGIN, INTERNAL_RUNTIME_CONTEXT_END];
-  for (
-    let length = Math.min(text.length, ...tokens.map((token) => token.length - 1));
-    length >= 1;
-    length -= 1
-  ) {
-    const suffix = text.slice(-length);
-    if (tokens.some((token) => token.startsWith(suffix))) {
-      return suffix;
-    }
-  }
-  return "";
 }
 
 function rowRecency(row: SidebarRecentSession): number {
@@ -620,11 +608,19 @@ export class SidebarSessionNarrationController {
       return;
     }
     const runId = typeof record.runId === "string" ? record.runId.trim() : "";
+    const sameRun = runId !== "" && this.runIds.get(key) === runId;
     const activity = readSidebarToolActivity(
       record.stream,
       record.data,
-      !runId || this.runIds.get(key) === runId ? this.tools.get(key) : undefined,
+      !runId || sameRun ? this.tools.get(key) : undefined,
     );
+    if (activity === null) {
+      // A visibility change withdraws only the identified call in the current run.
+      if (sameRun && this.tools.delete(key)) {
+        this.onToolsChanged(new Map(this.tools));
+      }
+      return;
+    }
     if (!activity) {
       return;
     }
