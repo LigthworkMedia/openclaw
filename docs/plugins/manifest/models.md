@@ -146,6 +146,8 @@ is no automatic rollback or replay that could overwrite another writer's replace
 Identity checks detect observed changes but are not filesystem compare-and-swap;
 this protocol does not promise power-loss durability. After successful publication,
 cleanup failures warn with retained paths without reporting the pair as unpublished.
+Cleanup retains recovery entries when their device or inode is unknown (zero)
+or differs from the captured identity.
 
 Model fields:
 

@@ -307,6 +307,63 @@ describe("publish model catalog v2", () => {
     );
   });
 
+  it.each([
+    ["directory", "dev"],
+    ["directory", "ino"],
+    ["directory", "changed"],
+    ["file", "dev"],
+    ["file", "ino"],
+    ["file", "changed"],
+  ] as const)("retains a substituted recovery %s with %s identity", async (entry, identity) => {
+    const fixture = pairFixture();
+    const rename = fs.promises.rename;
+    const lstat = fs.lstatSync;
+    let replacement = "";
+    vi.spyOn(fs.promises, "rename").mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (destination !== fixture.outputs[1]) {
+        return;
+      }
+      const [dir] = fixture.recovery(0);
+      if (!dir) {
+        throw new Error("fixture recovery is missing");
+      }
+      const target = entry === "directory" ? dir : path.join(dir, "next.json");
+      const previous = lstat(target);
+      fs.renameSync(target, `${target}.original`);
+      if (entry === "directory") {
+        fs.mkdirSync(target);
+        for (const name of ["next.json", "previous.json", "RECOVERY.txt"]) {
+          fs.renameSync(path.join(`${target}.original`, name), path.join(target, name));
+          fs.writeFileSync(path.join(target, name), "foreign replacement");
+        }
+      } else {
+        fs.writeFileSync(target, "foreign replacement");
+      }
+      replacement = entry === "directory" ? path.join(target, "next.json") : target;
+      vi.spyOn(fs, "lstatSync").mockImplementation((file, options) => {
+        const current = lstat(file, options);
+        if (file === target && current) {
+          // Only cleanup sees Windows' unknown path-stat identity; publication uses the host.
+          vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+          return Object.assign(current, {
+            dev: identity === "dev" ? 0 : previous.dev,
+            ino: identity === "ino" ? 0 : previous.ino + (identity === "changed" ? 1 : 0),
+          });
+        }
+        return current;
+      });
+    });
+    await expect(fixture.run()).resolves.toMatchObject({ wrote: true });
+    expect(fs.readFileSync(replacement, "utf8")).toBe("foreign replacement");
+    fixture.outputs.forEach((file, index) => {
+      expect(JSON.parse(fs.readFileSync(file, "utf8")).schemaVersion).toBe(index + 1);
+    });
+    expect(fixture.warnings.mock.calls.flat().join("")).toContain(
+      "pair published; recovery cleanup failed; retained",
+    );
+  });
+
   it("replaces an existing pair and removes only its recovery artifacts", async () => {
     const fixture = pairFixture();
     const parent = path.dirname(fixture.outputs[0]);

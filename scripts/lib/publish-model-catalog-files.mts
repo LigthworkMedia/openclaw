@@ -46,17 +46,27 @@ function saveRecoveryFile(recovery: Recovery, name: string, content: string | Bu
   }
 }
 
+function sameRecoveryIdentity(previous: fs.Stats, current: fs.Stats): boolean {
+  // Unknown Windows identities are tolerated for reads, never for deletion.
+  return (
+    previous.dev !== 0 &&
+    previous.ino !== 0 &&
+    previous.dev === current.dev &&
+    previous.ino === current.ino
+  );
+}
+
 function cleanupRecovery(recovery: Recovery): void {
-  if (!sameFileIdentity(recovery.identity, fs.lstatSync(recovery.dir))) {
-    throw new Error("recovery directory was replaced");
+  if (!sameRecoveryIdentity(recovery.identity, fs.lstatSync(recovery.dir))) {
+    throw new Error("recovery directory identity is unknown or changed");
   }
   // No recursive removal and no exit hook: interrupted publication must retain
   // its backups. Preserve observed substitutes and unknown children.
   for (const [file, identity] of recovery.files) {
     const current = fs.lstatSync(file, { throwIfNoEntry: false });
     if (current) {
-      if (!sameFileIdentity(identity, current)) {
-        throw new Error("recovery file was replaced");
+      if (!sameRecoveryIdentity(identity, current)) {
+        throw new Error("recovery file identity is unknown or changed");
       }
       fs.unlinkSync(file);
     }
