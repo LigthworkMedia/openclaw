@@ -172,12 +172,30 @@ export async function runGitRollbackSteps({
       : undefined,
   );
   if (attached && checkedOut) {
-    restored =
-      (await restore(
-        "git-rollback-reset",
-        ["reset", source ? "--keep" : "--hard", beforeSha],
-        source ? { sha: beforeSha, branch } : undefined,
-      )) && restored;
+    if (source) {
+      const branchSha = source.sha;
+      // Unlike reset --keep, checkout preserves staged content in unchanged files.
+      await restore(
+        "git-rollback-source",
+        ["checkout", "--detach", "--no-overwrite-ignore", beforeSha],
+        {
+          sha: beforeSha,
+          branch: "HEAD",
+        },
+      );
+      await restore("git-rollback-ref", [
+        "update-ref",
+        `refs/heads/${branch}`,
+        beforeSha,
+        branchSha,
+      ]);
+      await restore("git-rollback-attach", ["checkout", "--no-overwrite-ignore", branch], {
+        sha: beforeSha,
+        branch,
+      });
+    } else {
+      restored = (await restore("git-rollback-reset", ["reset", "--hard", beforeSha])) && restored;
+    }
   }
   if (createdDevBranchDuringUpdate && (!attached || checkedOut)) {
     await restore(

@@ -226,18 +226,19 @@ function registerGitRetainedTransactionTests(
     ["source check", "untracked"],
     ["checkout", "tracked"],
     ["checkout", "untracked"],
-    ["reset", "tracked"],
-    ["reset", "untracked"],
+    ["source restore", "tracked"],
+    ["source restore", "untracked"],
     ["before checkout", "tracked"],
-    ["before reset", "tracked"],
-    ["before reset", "staged"],
+    ["before source restore", "tracked"],
+    ["before source restore", "staged"],
+    ["before source restore", "staged-unrelated"],
   ] as const)("retained rollback preserves %s await edits (%s)", async (phase, kind) => {
     const { root, beforeSha, advanceRemote, update, runCommand, setRunCommand } = getFixture();
     const targetSha = await advanceRemote();
     const relative =
       kind === "untracked"
         ? "operator-edit.txt"
-        : phase === "reset"
+        : phase === "source restore" || kind === "staged-unrelated"
           ? "openclaw.mjs"
           : "candidate.txt";
     const file = path.join(root, relative);
@@ -253,13 +254,16 @@ function registerGitRetainedTransactionTests(
         argv[2] === root &&
         ((phase === "source check" && argv.includes("--abbrev-ref")) ||
           ((phase === "checkout" || phase === "before checkout") && argv.includes("checkout")) ||
-          ((phase === "reset" || phase === "before reset") &&
-            argv.includes("reset") &&
+          ((phase === "source restore" || phase === "before source restore") &&
+            (argv.includes("reset") || (argv.includes("checkout") && argv.includes("--detach"))) &&
             argv.at(-1) === beforeSha));
       if (matches && phase.startsWith("before ")) {
         await fs.writeFile(file, edit);
-        if (kind === "staged") {
+        if (kind === "staged" || kind === "staged-unrelated") {
           await runFixtureGit(root, "add", relative);
+          if (kind === "staged-unrelated") {
+            await fs.writeFile(file, `${edit}unstaged content\n`);
+          }
         }
         edited = true;
       }
@@ -290,16 +294,20 @@ function registerGitRetainedTransactionTests(
         (error: unknown) => error,
       );
     expect(edited).toBe(true);
-    expect(await fs.readFile(file, "utf8").catch(() => undefined)).toBe(edit);
-    if (kind === "staged") {
+    expect(await fs.readFile(file, "utf8").catch(() => undefined)).toBe(
+      kind === "staged-unrelated" ? `${edit}unstaged content\n` : edit,
+    );
+    if (kind === "staged" || kind === "staged-unrelated") {
       expect(await runFixtureGit(root, "show", `:${relative}`)).toBe(edit.trim());
     }
     expect(failure).toBeInstanceOf(Error);
     await expect(retained.complete({ activationVerified: false }, () => {})).rejects.toThrow();
     expect(await runFixtureGit(root, "rev-parse", "HEAD")).toBe(
-      phase === "reset" ? beforeSha : targetSha,
+      phase === "source restore" || kind === "staged-unrelated" ? beforeSha : targetSha,
     );
-    expect(await runFixtureGit(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(await runFixtureGit(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      phase === "source restore" || kind === "staged-unrelated" ? "HEAD" : "main",
+    );
     await expectRuntime(root, targetSha);
     await expect(fs.stat(retained.backupRoot)).resolves.toBeDefined();
     const distBackup = (await fs.readdir(root)).find(
