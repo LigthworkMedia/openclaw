@@ -44,7 +44,6 @@ import {
   prepareGatewayReplyRuntimeForTest,
   rpcReq,
   testState,
-  writeSessionStore,
 } from "./test-helpers.js";
 
 let gateway: Awaited<ReturnType<typeof createGatewaySuiteHarness>>;
@@ -106,8 +105,12 @@ for (const { name, fault, replaceParent } of [
     let replacementBefore: Awaited<ReturnType<typeof loadTranscriptEvents>> | undefined;
     testState.sessionStorePath = storePath;
     if (fault || replaceParent) {
-      await writeSessionStore({
-        entries: { [parentKey]: { sessionId: parentSessionId, updatedAt: Date.now() } },
+      // Prior cases still have Gateway-owned monitors; preserve their rows.
+      await writeSubagentSessionEntry({
+        stateDir,
+        agentId: "main",
+        sessionKey: parentKey,
+        defaultSessionId: parentSessionId,
       });
     }
 
