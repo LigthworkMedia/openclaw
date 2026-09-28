@@ -768,7 +768,8 @@ describe("heartbeat runner skips when target session lane is busy", () => {
         }
         runState.admission = { status: "owned" };
         replyOptions.replyOperation.complete();
-        expect((await waitForReplyRunSuccessorAdmission(sessionKey, null)).settled).toBe(true);
+        // Clearing the slot starts asynchronous database-claim release.
+        await waitForReplyRunSuccessorAdmission(sessionKey, null);
         operation = createReplyOperation({
           sessionKey,
           sessionId: "racing-visible-session",
@@ -781,7 +782,7 @@ describe("heartbeat runner skips when target session lane is busy", () => {
       try {
         const result = await runHeartbeat(cfg, replySpy);
 
-        expect(result.status, JSON.stringify(result)).toBe("ran");
+        expect(result.status).toBe("ran");
         expect(replySpy).toHaveBeenCalledOnce();
       } finally {
         operation?.complete();
