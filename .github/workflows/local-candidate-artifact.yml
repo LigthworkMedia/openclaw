@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          corepack pnpm pack --pack-destination artifacts
+          node scripts/package-openclaw-for-docker.mjs --output-dir "$GITHUB_WORKSPACE/artifacts"
           corepack pnpm --dir extensions/codex pack --pack-destination "$GITHUB_WORKSPACE/artifacts"
           cd artifacts
           test "$(find . -maxdepth 1 -name '*.tgz' | wc -l)" -eq 2
