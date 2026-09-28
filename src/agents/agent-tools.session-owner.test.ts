@@ -13,7 +13,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("session responsibility assignment in non-owner turns", () => {
   it.each([false, undefined])(
-    "exposes only assignment with owner posture %s",
+    "limits non-owner assignment without restricting senderless management (%s)",
     async (senderIsOwner) => {
       const gateway = vi.spyOn(inProcessGateway, "callAgentToolGatewayRequest").mockResolvedValue({
         ok: true,
@@ -23,7 +23,7 @@ describe("session responsibility assignment in non-owner turns", () => {
       const tools = createOpenClawCodingTools({
         config: { tools: { allow: ["sessions"] } },
         sessionKey: "agent:main:main",
-        messageProvider: "webchat",
+        messageProvider: senderIsOwner === false ? "webchat" : undefined,
         senderIsOwner,
         workspaceDir: process.cwd(),
       });
@@ -35,29 +35,49 @@ describe("session responsibility assignment in non-owner turns", () => {
       if (!tool) {
         throw new Error("sessions tool missing");
       }
-      expect(tool.parameters).toHaveProperty("properties.action.enum", ["assign_owner"]);
-      expect(tool.parameters).not.toHaveProperty("properties.model");
-      expect(tool.parameters).toHaveProperty(
-        "required",
-        expect.arrayContaining(["ownerType", "ownerId", "action"]),
-      );
+      const assignmentOnly = senderIsOwner === false;
+      if (assignmentOnly) {
+        expect(tool.parameters).toHaveProperty("properties.action.enum", ["assign_owner"]);
+        expect(tool.parameters).not.toHaveProperty("properties.model");
+        expect(tool.parameters).toHaveProperty(
+          "required",
+          expect.arrayContaining(["ownerType", "ownerId", "action"]),
+        );
+      } else {
+        expect(tool.parameters).toHaveProperty(
+          "properties.action.enum",
+          expect.arrayContaining(["patch", "group_set"]),
+        );
+      }
       const result = await withSessionToolTestCaller(() =>
-        tool.execute("assign-requester", {
-          action: "assign_owner",
-          ownerType: "human",
-          ownerId: "profile-requester",
-        }),
+        tool.execute(
+          "manage-session",
+          assignmentOnly
+            ? {
+                action: "assign_owner",
+                ownerType: "human",
+                ownerId: "profile-requester",
+              }
+            : { action: "patch", label: "Scheduled session" },
+        ),
       );
       expect(result.details).toMatchObject({
         status: "updated",
-        owner: { type: "human", id: "profile-requester" },
+        ...(assignmentOnly ? { owner: { type: "human", id: "profile-requester" } } : {}),
       });
-      expect(gateway).toHaveBeenCalledWith({
-        method: "sessions.assignOwner",
-        params: { key: "agent:main:main", owner: { type: "human", id: "profile-requester" } },
-        agentToolCaller: { agentId: "main", sessionKey: "agent:main:main" },
-        assertDispatchCurrent: expect.any(Function),
-      });
+      expect(gateway).toHaveBeenCalledWith(
+        assignmentOnly
+          ? {
+              method: "sessions.assignOwner",
+              params: { key: "agent:main:main", owner: { type: "human", id: "profile-requester" } },
+              agentToolCaller: { agentId: "main", sessionKey: "agent:main:main" },
+              assertDispatchCurrent: expect.any(Function),
+            }
+          : {
+              method: "sessions.patch",
+              params: { key: "agent:main:main", label: "Scheduled session" },
+            },
+      );
       const denied = createOpenClawCodingTools({
         config: { tools: { allow: ["sessions"], deny: ["sessions"] } },
         sessionKey: "agent:main:main",

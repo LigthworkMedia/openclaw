@@ -69,7 +69,6 @@ describe("sessions tool", () => {
   it("carries the persisted fixed-store owner for a bare patch key", async () => {
     const callGateway = vi.fn().mockResolvedValue({});
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "global",
       config: {
         session: { store: "/tmp/shared-sessions.sqlite", scope: "global" },
@@ -99,7 +98,6 @@ describe("sessions tool", () => {
       return { ok: true } as T;
     };
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:research:main",
       requesterAgentIdOverride: "research",
       config: {
@@ -140,7 +138,6 @@ describe("sessions tool", () => {
         throw new Error(`unexpected gateway mutation: ${request.method}`);
       };
       const tool = createSessionsTool({
-        senderIsOwner: true,
         agentSessionKey: "global",
         requesterAgentIdOverride: "research",
         config: {
@@ -175,7 +172,6 @@ describe("sessions tool", () => {
     const sessionKey = "agent:main:dashboard:incognito-private";
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: sessionKey,
       config: {},
       callGateway,
@@ -189,7 +185,6 @@ describe("sessions tool", () => {
 
   it("advertises the full model-visible sidebar presence contract", () => {
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       callGateway: vi.fn(),
     });
@@ -237,7 +232,6 @@ describe("sessions tool", () => {
   it("does not expose direct session creation outside controlled spawning", async () => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
       callGateway,
@@ -262,7 +256,6 @@ describe("sessions tool", () => {
         : { ok: true, deleted: true },
     );
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway: callGateway as never,
@@ -311,7 +304,6 @@ describe("sessions tool", () => {
   it("does not discover a lifecycle identity while deleting another session", async () => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway,
@@ -335,7 +327,6 @@ describe("sessions tool", () => {
         : { ok: true, deleted: false },
     );
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway: callGateway as never,
@@ -371,7 +362,6 @@ describe("sessions tool", () => {
     const sessionId = "finished-session";
     const callGateway = vi.fn(async () => ({ ok: true }));
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway: callGateway as never,
@@ -400,7 +390,6 @@ describe("sessions tool", () => {
     const sessionKey = "agent:main:dashboard:reset-me";
     const callGateway = vi.fn(async () => ({ ok: true }));
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway: callGateway as never,
@@ -435,7 +424,6 @@ describe("sessions tool", () => {
       });
     });
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: { tools: { sessions: { visibility: "agent" } } },
       callGateway,
@@ -465,7 +453,6 @@ describe("sessions tool", () => {
       entry: { sessionId: "session-main" },
     });
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       agentSessionId: "session-main",
       config: {},
@@ -497,7 +484,6 @@ describe("sessions tool", () => {
       });
     });
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       agentSessionId: "session-main",
       config: {},
@@ -539,7 +525,6 @@ describe("sessions tool", () => {
       };
     });
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
     });
@@ -563,7 +548,6 @@ describe("sessions tool", () => {
   it.each(["delete", "reset"])("refuses to %s its currently running session", async (action) => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
       callGateway,
@@ -633,7 +617,6 @@ describe("sessions tool", () => {
         },
       );
       const tool = createSessionsTool({
-        senderIsOwner: true,
         agentSessionKey: sessionKey,
         config: cfg,
         callGateway: callGateway as never,
@@ -762,7 +745,6 @@ describe("sessions tool", () => {
   it("denies model patches without in-process gateway context", async () => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
       callGateway,
@@ -929,7 +911,6 @@ describe("sessions tool", () => {
         resolved: adversarialResolved,
       }));
       const tool = createSessionsTool({
-        senderIsOwner: true,
         agentSessionKey: sessionKey,
         agentSessionId: sessionId,
         config: { session: { store: storePath } },
@@ -999,7 +980,6 @@ describe("sessions tool", () => {
   it("rejects an empty patch", async () => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
       callGateway,
@@ -1016,7 +996,6 @@ describe("sessions tool", () => {
     async (visibility) => {
       const callGateway = vi.fn(async () => ({ sessions: [] }));
       const tool = createSessionsTool({
-        senderIsOwner: true,
         agentSessionKey: "agent:main:cron:organize",
         config: { tools: { sessions: { visibility } } },
         callGateway: callGateway as never,

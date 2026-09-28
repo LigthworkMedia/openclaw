@@ -22,7 +22,6 @@ async function createArchiveSession(dir: string, name: string, sessionId = `sess
     sessionId,
     createTool: (callGateway: AgentToolGatewayRequestCaller) =>
       createSessionsTool({
-        senderIsOwner: true,
         agentSessionKey: sessionKey,
         agentSessionId: sessionId,
         config: { session: { store: storePath } },

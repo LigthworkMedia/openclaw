@@ -346,7 +346,9 @@ async function resolvePatchTarget(
 }
 
 export function createSessionsTool(opts: SessionsToolOptions = {}): AnyAgentTool {
-  const assignmentOnly = opts.senderIsOwner !== true;
+  // Senderless system runs already manage sessions; do not turn that absence
+  // into an explicit non-owner verdict. External transports still gate admission.
+  const assignmentOnly = opts.senderIsOwner === false;
   const gatewayRequest = opts.callGateway ?? callAgentToolGatewayRequest;
   const callGateway = <T = Record<string, unknown>>(
     method: string,
@@ -467,7 +469,7 @@ export function createSessionsTool(opts: SessionsToolOptions = {}): AnyAgentTool
       }
       if (action === "assign_owner") {
         return assignSessionToolOwner(params, {
-          assignmentOnly,
+          requireAdmittedCaller: opts.senderIsOwner !== true,
           gatewayRequest,
           resolveTarget: (sessionKey) => resolvePatchTarget(opts, sessionKey, gatewayRequest),
         });

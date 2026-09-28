@@ -67,7 +67,6 @@ function createStoredSessionTool(config: OpenClawConfig = {}) {
     return payload as T;
   };
   return createSessionsTool({
-    senderIsOwner: true,
     agentSessionKey: currentKey,
     agentSessionId: "current-session",
     config,
@@ -91,7 +90,6 @@ describe("sessions tool batch patch", () => {
       return { outcomes: [{ ok: true, key: targetKeys[0] }] } as T;
     };
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: currentKey,
       config: {},
       callGateway,
@@ -260,7 +258,6 @@ describe("sessions tool batch patch", () => {
   ])("rejects $name before dispatch", async ({ args }) => {
     const callGateway = vi.fn();
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: currentKey,
       config: {},
       callGateway,
@@ -280,7 +277,6 @@ describe("sessions tool batch patch", () => {
       })),
     }));
     const tool = createSessionsTool({
-      senderIsOwner: true,
       agentSessionKey: currentKey,
       config: {},
       callGateway: callGateway as AgentToolGatewayRequestCaller,

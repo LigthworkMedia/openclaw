@@ -14,7 +14,7 @@ import type { AgentToolGatewayRequestCaller } from "./in-process-gateway.js";
 export async function assignSessionToolOwner(
   params: Record<string, unknown>,
   options: {
-    assignmentOnly: boolean;
+    requireAdmittedCaller: boolean;
     resolveTarget: (sessionKey: string | undefined) => Promise<{
       agentId: string;
       key: string;
@@ -25,7 +25,7 @@ export async function assignSessionToolOwner(
   },
 ) {
   const assertCallerCurrent = captureGatewayToolCallerAssertion();
-  if (options.assignmentOnly && !assertCallerCurrent) {
+  if (options.requireAdmittedCaller && !assertCallerCurrent) {
     throw new ToolAuthorizationError("Non-owner assignment requires an admitted agent turn");
   }
   assertCallerCurrent?.("sessions.assignOwner");

@@ -86,23 +86,20 @@ describe("sessions tool ownership", () => {
       "group_set",
       "group_rename",
       "group_delete",
-    ].flatMap((action) => [false, undefined].map((senderIsOwner) => ({ action, senderIsOwner }))),
-  )(
-    "rejects privileged $action with owner posture $senderIsOwner",
-    async ({ action, senderIsOwner }) => {
-      const callGateway = vi.fn();
-      const tool = createSessionsTool({
-        agentSessionKey: "agent:main:main",
-        senderIsOwner,
-        config: {},
-        callGateway,
-      });
-      await expect(tool.execute("denied", { action, senderIsOwner: true })).rejects.toThrow(
-        "Only assign_owner is available to non-owner callers",
-      );
-      expect(callGateway).not.toHaveBeenCalled();
-    },
-  );
+    ].map((action) => ({ action, senderIsOwner: false })),
+  )("rejects privileged $action for an explicit non-owner", async ({ action, senderIsOwner }) => {
+    const callGateway = vi.fn();
+    const tool = createSessionsTool({
+      agentSessionKey: "agent:main:main",
+      senderIsOwner,
+      config: {},
+      callGateway,
+    });
+    await expect(tool.execute("denied", { action, senderIsOwner: true })).rejects.toThrow(
+      "Only assign_owner is available to non-owner callers",
+    );
+    expect(callGateway).not.toHaveBeenCalled();
+  });
 
   it.each([
     {
