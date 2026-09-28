@@ -321,6 +321,70 @@ function registerGitRetainedTransactionTests(
     ).toMatchObject({ commit: beforeSha });
   });
 
+  it.each(["delete", "rewrite"] as const)(
+    "retained rollback preserves a linked-worktree claim before ref %s",
+    async (operation) => {
+      const { root, beforeSha, advanceRemote, update, runCommand, setRunCommand } = getFixture();
+      const linked = path.join(path.dirname(root), "linked-checkout");
+      if (operation === "delete") {
+        await runFixtureGit(root, "checkout", "-b", "operator-branch");
+        await runFixtureGit(root, "branch", "-D", "main");
+      }
+      const targetSha = await advanceRemote();
+      let rollingBack = false;
+      let claimed = false;
+      setRunCommand(async (argv, options) => {
+        const result = await runCommand(argv, options);
+        if (
+          rollingBack &&
+          !claimed &&
+          argv[2] === root &&
+          argv.includes("checkout") &&
+          (operation === "delete" ? argv.at(-1) === "operator-branch" : argv.includes("--detach"))
+        ) {
+          expect(result.code).toBe(0);
+          await runFixtureGit(root, "worktree", "add", linked, "main");
+          claimed = true;
+        }
+        return result;
+      });
+      let retained: PackageUpdateTransaction | undefined;
+      const result = await update({
+        onTransaction: (transaction) => {
+          retained = transaction;
+        },
+      });
+      expect(result.status).toBe("ok");
+      assert(retained);
+      rollingBack = true;
+      const rollback = retained.rollback(() => {});
+      if (operation === "delete") {
+        expect((await rollback).exitCode).toBe(0);
+      } else {
+        await expect(rollback).rejects.toThrow("Git source rollback failed");
+      }
+      expect(claimed).toBe(true);
+      expect(await runFixtureGit(linked, "rev-parse", "HEAD")).toBe(targetSha);
+      expect(await runFixtureGit(linked, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+      expect(await runFixtureGit(root, "rev-parse", "refs/heads/main")).toBe(targetSha);
+      expect(await runFixtureGit(root, "rev-parse", "HEAD")).toBe(beforeSha);
+      expect(await runFixtureGit(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+        operation === "delete" ? "operator-branch" : "HEAD",
+      );
+      await expectRuntime(root, operation === "delete" ? beforeSha : targetSha);
+      if (operation === "delete") {
+        expect(
+          result.steps.find((step) => step.name === "git-rollback-delete-branch"),
+        ).toMatchObject({
+          stdoutTail: expect.stringContaining("another Git worktree"),
+        });
+        await retained.complete({ activationVerified: false }, () => {});
+      } else {
+        await expect(fs.stat(retained.backupRoot)).resolves.toBeDefined();
+      }
+    },
+  );
+
   it.each([
     ["operator-branch", false],
     ["HEAD", false],

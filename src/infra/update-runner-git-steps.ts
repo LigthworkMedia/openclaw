@@ -124,12 +124,54 @@ export async function runGitRollbackSteps({
     }
     assertCurrent();
   };
-  const execute = async (name: string, args: string[], expectedSource = source) => {
+  type RefChange = { branch: string; operation: "rewrite" | "delete" };
+  const execute = async (
+    name: string,
+    args: string[],
+    expectedSource = source,
+    refChange?: RefChange,
+  ) => {
     if (source) {
       await assertSourceCurrent();
     }
     assertCurrent();
-    const result = await runStep(recoveryStep(name, ["git", "-C", gitRoot, ...args], gitRoot));
+    const stepOptions = recoveryStep(name, ["git", "-C", gitRoot, ...args], gitRoot);
+    let skipped: string | undefined;
+    const result = await runStep({
+      ...stepOptions,
+      progress: { ...stepOptions.progress, onStepComplete: undefined },
+      runCommand: async (argv, options) => {
+        if (refChange) {
+          // update-ref's SHA check does not protect linked-worktree branch custody.
+          const worktrees = await stepOptions.runCommand(
+            ["git", "-C", gitRoot, "worktree", "list", "--porcelain"],
+            options,
+          );
+          assertCurrent();
+          if (isFailedUpdateStep({ ...worktrees, exitCode: worktrees.code })) {
+            return worktrees;
+          }
+          if (worktrees.stdout.split("\n").includes(`branch refs/heads/${refChange.branch}`)) {
+            const message = `Branch ${refChange.branch} is used by another Git worktree.`;
+            if (refChange.operation === "delete") {
+              skipped = `Skipped deleting ${refChange.branch}. ${message}`;
+              return { code: 0, stdout: skipped, stderr: "" };
+            }
+            return { code: 1, stdout: "", stderr: `Cannot restore branch. ${message}` };
+          }
+        }
+        assertCurrent();
+        return stepOptions.runCommand(argv, options);
+      },
+    });
+    if (skipped) {
+      result.advisory = { kind: "recoverable-maintenance", message: skipped };
+    }
+    stepOptions.progress?.onStepComplete?.({
+      ...result,
+      index: stepOptions.stepIndex,
+      total: stepOptions.totalSteps,
+    });
     assertCurrent();
     if (source) {
       if (isFailedUpdateStep(result)) {
@@ -142,8 +184,12 @@ export async function runGitRollbackSteps({
     }
     return result;
   };
-  const restore = async (name: string, args: string[], expectedSource = source) =>
-    !isFailedUpdateStep(await execute(name, args, expectedSource));
+  const restore = async (
+    name: string,
+    args: string[],
+    expectedSource = source,
+    refChange?: RefChange,
+  ) => !isFailedUpdateStep(await execute(name, args, expectedSource, refChange));
   // A retained transaction admitted a clean source tree. It owns no dirty
   // files to reset or clean, even if they appear after its last observation.
   let restored = true;
@@ -183,12 +229,12 @@ export async function runGitRollbackSteps({
           branch: "HEAD",
         },
       );
-      await restore("git-rollback-ref", [
-        "update-ref",
-        `refs/heads/${branch}`,
-        beforeSha,
-        branchSha,
-      ]);
+      await restore(
+        "git-rollback-ref",
+        ["update-ref", `refs/heads/${branch}`, beforeSha, branchSha],
+        source,
+        { branch, operation: "rewrite" },
+      );
       await restore("git-rollback-attach", ["checkout", "--no-overwrite-ignore", branch], {
         sha: beforeSha,
         branch,
@@ -203,6 +249,8 @@ export async function runGitRollbackSteps({
       activatedSource
         ? ["update-ref", "-d", `refs/heads/${DEV_BRANCH}`, activatedSource.sha]
         : ["branch", "-D", DEV_BRANCH],
+      source,
+      activatedSource ? { branch: DEV_BRANCH, operation: "delete" } : undefined,
     );
   }
   const head = await execute("git-rollback-verify-head", ["rev-parse", "HEAD"]);
