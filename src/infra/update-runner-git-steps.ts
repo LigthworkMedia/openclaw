@@ -51,3 +51,38 @@ export async function runGitUpstreamStep(options: RunStepOptions) {
   });
   return upstreamStep;
 }
+
+export async function runGitActivationBranchCheckStep(stepOptions: RunStepOptions, branch: string) {
+  const devBranchRef = `refs/heads/${branch}`;
+  return runStep({
+    ...stepOptions,
+    runCommand: async (argv, options) => {
+      const exists = await stepOptions.runCommand(
+        ["git", "-C", stepOptions.cwd, "show-ref", "--verify", "--quiet", devBranchRef],
+        options,
+      );
+      if (exists.code === 1) {
+        return { ...exists, code: 0, stdout: "", stderr: "" };
+      }
+      if (exists.code !== 0) {
+        return {
+          ...exists,
+          stdout: "",
+          stderr: `Could not inspect local branch ${branch} before activation. Resolve the Git branch error, then rerun openclaw update.`,
+        };
+      }
+      // Resetting a branch to its current ref is a ref/reflog no-op, but Git still
+      // enforces every worktree owner state, including paused rebase and bisect.
+      const result = await stepOptions.runCommand(argv, options);
+      const sanitized = { ...result, stdout: "" };
+      return result.code !== 0
+        ? {
+            ...sanitized,
+            stderr:
+              `Cannot activate this dev update because a Git worktree uses or reserves branch ${branch}. ` +
+              `Finish or abort its rebase or bisect, or move it off ${branch}, then rerun openclaw update.`,
+          }
+        : sanitized;
+    },
+  });
+}

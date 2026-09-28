@@ -238,6 +238,10 @@ describe("Git candidate activation", () => {
     beforeSha,
     events,
     isStopped: () => stopped,
+    runCommand,
+    setRunCommand: (runner) => {
+      runCommand = runner;
+    },
     advanceRemote,
     git,
     update,
