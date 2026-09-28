@@ -46,6 +46,8 @@ function seedRequiredChild(
   return run;
 }
 
+const GENERIC_NO_CLAIM_ERROR = expect.stringContaining("return its result normally");
+
 function createYieldToolForTurn({
   onYield = vi.fn(),
   ...claim
