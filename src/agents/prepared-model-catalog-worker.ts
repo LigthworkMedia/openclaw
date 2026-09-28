@@ -165,7 +165,7 @@ function createCatalogPool(
     maxWorkers: GATEWAY_CATALOG_WORKERS,
     // Only the inventory owner can replace captured code; idle retirement or crash restart
     // would import a different source generation into an existing publication.
-    idleTimeoutMs: 0,
+    idleTimeoutMs: 5_000,
     restartOnError: false,
     prepareWorker: () => {
       assertCurrent?.();
