@@ -146,9 +146,11 @@ server available, the turn fails before the thread starts.
 The legacy default plugin/server pair follows this replacement automatically,
 including an explicitly configured `pluginName: "computer-use"` with the default
 server name. Custom plugin, server, or marketplace selections remain unchanged.
-An explicit native `mcp_servers.computer-use` entry or legacy plugin MCP tool
-policy keeps the legacy identity, so a renamed server cannot bypass those
-restrictions. Update that native policy explicitly before selecting the unified
+An explicit native disable for `computer-use@openai-bundled` blocks automatic
+replacement before feature enablement or installation. Startup cache preparation
+keeps the requested identity until native effective policy is available. An
+explicit native `mcp_servers.computer-use` entry or legacy plugin MCP tool policy
+keeps the legacy identity, so a renamed server cannot bypass those restrictions. Update that native policy explicitly before selecting the unified
 server. Native `cua_repl` overrides continue to take precedence over the plugin.
 The managed unified runtime enables its **computer** surface, preserving desktop
 app discovery and control. It does not attach the agent to the desktop app's

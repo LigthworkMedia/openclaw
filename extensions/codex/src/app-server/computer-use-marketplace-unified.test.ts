@@ -7,7 +7,7 @@ import {
   resolveManagedCodexComputerUseConfig,
 } from "./computer-use-unified.js";
 import { ensureCodexComputerUse } from "./computer-use.js";
-import { createComputerUseRequest } from "./computer-use.test-support.js";
+import { createComputerUseRequest, expectSetupErrorStatus } from "./computer-use.test-support.js";
 import { resolveCodexComputerUseConfig } from "./config.js";
 import type { MacOSDesktopCodexAppPathCandidate } from "./desktop-app-paths.js";
 import { createClientHarness, useAutoCleanupTempDirTracker } from "./test-support.js";
@@ -134,6 +134,69 @@ describe("managed unified Computer Use marketplace", () => {
       }
       expect(await fs.readFile(path.join(sourcePlugin, ".mcp.json"), "utf8")).toBe(original);
       expect((await fs.stat(path.join(sourcePlugin, ".mcp.json"))).mode & 0o222).toBe(0);
+    },
+  );
+
+  it.each([false, true])(
+    "review: native plugin disable veto survives readiness and auto-install (%s)",
+    async (autoInstall) => {
+      const root = tempDirs.make("openclaw-unified-native-veto-");
+      const candidate = await writeUnifiedCandidate(root);
+      const agentDir = path.join(root, "agent");
+      const codexHome = path.join(agentDir, "codex-home");
+      await ensureCodexManagedBundledMarketplace({
+        codexHome,
+        ownershipRoot: agentDir,
+        candidates: [candidate],
+      });
+      const { client } = createClientHarness();
+      vi.spyOn(client, "getRuntimeIdentity").mockReturnValue({
+        serverVersion: "0.155.0",
+        codexHome,
+      });
+      const request = createComputerUseRequest({
+        installed: false,
+        pluginName: "unified-computer-use",
+        mcpServerName: "cua_repl",
+        mcpTools: ["js"],
+      });
+      const native = vi.mocked(request).getMockImplementation();
+      if (!native) {
+        throw new Error("missing request fixture");
+      }
+      vi.mocked(request).mockImplementation(async (method, params, options) =>
+        method === "config/read"
+          ? {
+              config: { plugins: { "computer-use@openai-bundled": { enabled: false } } },
+              origins: {},
+              layers: null,
+            }
+          : native(method, params, options),
+      );
+      try {
+        await expectSetupErrorStatus(
+          ensureCodexComputerUse({
+            client,
+            request,
+            agentDir,
+            pluginConfig: { computerUse: { enabled: true, autoInstall } },
+          }),
+          {
+            ready: false,
+            reason: "plugin_disabled",
+            pluginName: "computer-use",
+            mcpServerName: "computer-use",
+          },
+        );
+        expect(vi.mocked(request).mock.calls.map(([method]) => method)).not.toContain(
+          "plugin/install",
+        );
+        expect(vi.mocked(request).mock.calls.map(([method]) => method)).not.toContain(
+          "experimentalFeature/enablement/set",
+        );
+      } finally {
+        client.close();
+      }
     },
   );
 

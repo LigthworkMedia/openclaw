@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { reconcileCodexComputerUseStartArtifacts } from "./auth-bridge.js";
@@ -10,7 +9,10 @@ import {
   isCodexAppServerIndeterminateTransportError,
   type CodexAppServerClient,
 } from "./client.js";
-import { resolveClientManagedBundledMarketplacePath } from "./computer-use-marketplace.js";
+import {
+  resolveBundledComputerUseMarketplacePath,
+  resolveClientManagedBundledMarketplacePath,
+} from "./computer-use-marketplace.js";
 import {
   createComputerUseRequest,
   runCodexComputerUseLiveTest,
@@ -22,6 +24,7 @@ import {
 import { assertNotSymlink } from "./computer-use-service-path.js";
 import {
   hasLegacyCodexComputerUseMcpPolicy,
+  isLegacyCodexComputerUsePluginDisabled,
   resolveManagedCodexComputerUseConfig,
 } from "./computer-use-unified.js";
 import {
@@ -30,10 +33,7 @@ import {
   type CodexComputerUseConfig,
   type ResolvedCodexComputerUseConfig,
 } from "./config.js";
-import {
-  resolveFirstExistingMacOSDesktopCodexBundledMarketplacePath,
-  resolveMacOSDesktopCodexBundledMarketplaceCandidates,
-} from "./desktop-app-paths.js";
+import { resolveMacOSDesktopCodexBundledMarketplaceCandidates } from "./desktop-app-paths.js";
 import { isManagedCodexDesktopCommand } from "./managed-binary.js";
 import { acquireCodexNativeConfigFence } from "./native-config-fence.js";
 import type {
@@ -421,9 +421,6 @@ async function inspectCodexComputerUseWithoutFence(
     if (!resolveCodexComputerUseConfig({ pluginConfig: params.pluginConfig }).autoInstall) {
       await prepareExplicitManagedComputerUseInstall(params);
     }
-    await request<JsonValue>("experimentalFeature/enablement/set", {
-      enablement: { plugins: true },
-    } satisfies CodexRequestObject);
   }
 
   const managedMarketplacePath = await resolveClientManagedBundledMarketplacePath(
@@ -441,9 +438,21 @@ async function inspectCodexComputerUseWithoutFence(
     const nativeConfig = await request<CodexConfigReadResponse>("config/read", {
       includeLayers: false,
     });
+    if (isLegacyCodexComputerUsePluginDisabled(nativeConfig.config)) {
+      return unavailableStatus(
+        params.computerUseConfig,
+        "plugin_disabled",
+        "Computer Use is disabled by native plugin policy; automatic replacement was not installed.",
+      );
+    }
     if (hasLegacyCodexComputerUseMcpPolicy(nativeConfig.config)) {
       computerUseConfig = params.computerUseConfig;
     }
+  }
+  if (params.installPlugin) {
+    await request<JsonValue>("experimentalFeature/enablement/set", {
+      enablement: { plugins: true },
+    } satisfies CodexRequestObject);
   }
   if (params.installPlugin && managedCodexHome) {
     await assertNotSymlink(path.join(managedCodexHome, "config.toml"), "Codex config");
@@ -854,23 +863,6 @@ function shouldAddBundledComputerUseMarketplace(params: {
     !params.config.marketplaceName &&
     Boolean(resolveBundledComputerUseMarketplacePath(params))
   );
-}
-
-function resolveBundledComputerUseMarketplacePath(params: {
-  defaultBundledMarketplacePath?: string;
-  defaultBundledMarketplacePathCandidates?: readonly string[];
-}): string | undefined {
-  if (params.defaultBundledMarketplacePath) {
-    return existsSync(params.defaultBundledMarketplacePath)
-      ? params.defaultBundledMarketplacePath
-      : undefined;
-  }
-  if (!params.defaultBundledMarketplacePathCandidates) {
-    return undefined;
-  }
-  return resolveFirstExistingMacOSDesktopCodexBundledMarketplacePath({
-    candidates: params.defaultBundledMarketplacePathCandidates,
-  });
 }
 
 function findComputerUseMarketplaces(
