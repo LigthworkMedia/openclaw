@@ -1,5 +1,5 @@
 // Tests heartbeat runner typing indicator behavior.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPlugin } from "../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
@@ -8,6 +8,7 @@ import { runHeartbeatOnce } from "./heartbeat-runner.js";
 import { seedMainSessionStore, withTempHeartbeatSandbox } from "./heartbeat-runner.test-utils.js";
 
 const TELEGRAM_TARGET = "-1001234567890";
+const TYPING_INTERVAL_SECONDS = 2;
 
 function installHeartbeatTypingPlugin(params: {
   sendTyping: NonNullable<NonNullable<ChannelPlugin["heartbeat"]>["sendTyping"]>;
@@ -85,17 +86,38 @@ function expectTypingCall(
 
 describe("runHeartbeatOnce heartbeat typing", () => {
   beforeEach(() => {
+    // Typing keepalive ticks follow the fake clock, so slow runs cannot add refreshes.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     setActivePluginRegistry(createTestRegistry());
   });
 
-  it("starts and clears typing around a heartbeat run", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps typing alive during a heartbeat run and clears it once", async () => {
     await withTempHeartbeatSandbox(async ({ tmpDir, storePath, replySpy }) => {
       const sendTyping = vi.fn(async () => undefined);
       const clearTyping = vi.fn(async () => undefined);
       installHeartbeatTypingPlugin({ sendTyping, clearTyping });
-      const cfg = createHeartbeatConfig({ tmpDir, storePath });
+      const cfg = createHeartbeatConfig({
+        tmpDir,
+        storePath,
+        agents: { defaults: { typingIntervalSeconds: TYPING_INTERVAL_SECONDS } },
+      });
       await seedTelegramSession(storePath, cfg);
-      replySpy.mockResolvedValue({ text: "HEARTBEAT_OK" });
+      const typingCounts: Array<{ sent: number; cleared: number }> = [];
+      const recordTypingCounts = () =>
+        typingCounts.push({
+          sent: sendTyping.mock.calls.length,
+          cleared: clearTyping.mock.calls.length,
+        });
+      replySpy.mockImplementation(async () => {
+        recordTypingCounts();
+        await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_SECONDS * 1000);
+        recordTypingCounts();
+        return { text: "HEARTBEAT_OK" };
+      });
 
       await runHeartbeatOnce({
         cfg,
@@ -105,14 +127,17 @@ describe("runHeartbeatOnce heartbeat typing", () => {
           nowMs: () => 0,
         },
       });
+      await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_SECONDS * 1000);
+      recordTypingCounts();
 
-      expect(sendTyping).toHaveBeenCalledOnce();
-      expect(clearTyping).toHaveBeenCalledOnce();
+      // Before the reply, after one keepalive interval, and one interval after the run.
+      expect(typingCounts).toEqual([
+        { sent: 1, cleared: 0 },
+        { sent: 2, cleared: 0 },
+        { sent: 2, cleared: 1 },
+      ]);
       expectTypingCall(sendTyping, { cfg, to: TELEGRAM_TARGET });
       expectTypingCall(clearTyping, { cfg, to: TELEGRAM_TARGET });
-      expect(sendTyping.mock.invocationCallOrder[0]).toBeLessThan(
-        replySpy.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-      );
     });
   });
 
