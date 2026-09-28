@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.webkit.ScriptHandler
+import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -311,7 +312,7 @@ private class ControlUiWebViewClient(
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
       if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
         WebViewCompat.addWebMessageListener(view, NATIVE_GATEWAY_AUTH_BRIDGE, setOf(origin)) { source, message, sourceOrigin, isMainFrame, reply ->
-          if (!isActiveDocument(view) || source !== view || !isMainFrame ||
+          if (message.type != WebMessageCompat.TYPE_STRING || !isActiveDocument(view) || source !== view || !isMainFrame ||
             !sameControlUiOrigin(sourceOrigin.toString(), page.baseUrl)
           ) {
             return@addWebMessageListener
@@ -428,7 +429,7 @@ private class ControlUiWebViewClient(
     if (!request.isForMainFrame) return false
     val nextUrl = request.url.toString()
     navigationUrl?.let { expected ->
-      if (nextUrl == expected) return false
+      if (nextUrl == expected || nextUrl == authenticatedUrl(expected)) return false
       // A streamed page stays mounted; an external link must not retire its auth bridge.
       if (request.hasGesture() && request.url.scheme in setOf("http", "https")) {
         onExternalLink(nextUrl)

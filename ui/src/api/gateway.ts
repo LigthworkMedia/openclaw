@@ -238,7 +238,7 @@ export class GatewayBrowserClient {
           return {
             closeCode: CONNECT_FAILED_CLOSE_CODE,
             closeReason: "native authorization unavailable",
-            stop: this.nativeAuthError.retryable !== true,
+            stop: !this.nativeAuthError.retryable,
           };
         }
         return { closeCode: CONNECT_FAILED_CLOSE_CODE, closeReason: "connect failed" };
@@ -606,7 +606,7 @@ export class GatewayBrowserClient {
   private resolveClose(context: GatewayProtocolCloseContext) {
     if (this.nativeAuthError) {
       return {
-        retry: this.nativeAuthError.retryable === true,
+        retry: this.nativeAuthError.retryable,
         notify: true,
         pendingError: this.nativeAuthError,
       };

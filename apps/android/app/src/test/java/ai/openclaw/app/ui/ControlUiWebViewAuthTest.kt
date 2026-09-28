@@ -165,6 +165,77 @@ class ControlUiWebViewAuthTest {
   }
 
   @Test
+  @Config(sdk = [31])
+  fun streamedBrowserNavigationKeepsNativeAuthForModernAndLegacyWebViews() {
+    for (legacy in listOf(false, true)) {
+      if (legacy) ControlUiAuthFeatureShadow.unsupported.add(WebViewFeature.DOCUMENT_START_SCRIPT)
+      var signed = 0
+      val external = mutableListOf<String>()
+      val path = "focus/browser?sessionKey=agent%3Amain%3Atest&target=host"
+      val mounted =
+        mount(path = path, onExternalLink = external::add) { _, _ ->
+          signed += 1
+          JsonObject(mapOf("nativeDevice" to JsonPrimitive("accepted-native-device")))
+        }
+      try {
+        val originalUrl = requireNotNull(mounted.view.url)
+        val client = mounted.view.webViewClient
+        val browserPort =
+          if (legacy) {
+            client.onPageStarted(mounted.view, originalUrl, null)
+            client.onPageFinished(mounted.view, originalUrl)
+            Shadow
+              .extract<ControlUiAuthWebViewShadow>(mounted.view)
+              .transfers
+              .single()
+              .first.ports!!
+              .single() as RoboWebMessagePort
+          } else {
+            null
+          }
+        assertFalse(client.shouldOverrideUrlLoading(mounted.view, navigationRequest("https://gateway.example:8443/openclaw/$path")))
+        assertFalse(client.shouldOverrideUrlLoading(mounted.view, navigationRequest(originalUrl)))
+        for (destination in listOf("https://foreign.example/", "https://gateway.example:8443/openclaw/dashboard")) {
+          assertTrue(client.shouldOverrideUrlLoading(mounted.view, navigationRequest(destination, gesture = false)))
+          assertTrue(external.isEmpty())
+          assertTrue(client.shouldOverrideUrlLoading(mounted.view, navigationRequest(destination)))
+          assertEquals(listOf(destination), external)
+          external.clear()
+          shadowOf(Looper.getMainLooper()).idle()
+          assertTrue(
+            mounted.view ===
+              findWebView(
+                mounted.controller
+                  .get()
+                  .window.decorView,
+              ),
+          )
+          assertEquals(originalUrl, mounted.view.url)
+          val response =
+            if (browserPort != null) {
+              browserPort.postMessage(WebMessage(REQUEST))
+              Json.parseToJsonElement(browserPort.receivedMessages.last()).jsonObject
+            } else {
+              mounted.request()
+            }
+          assertEquals(
+            "accepted-native-device",
+            response
+              .getValue("result")
+              .jsonObject
+              .getValue("nativeDevice")
+              .jsonPrimitive.content,
+          )
+        }
+        assertEquals(2, signed)
+      } finally {
+        mounted.close()
+        ControlUiAuthFeatureShadow.unsupported.clear()
+      }
+    }
+  }
+
+  @Test
   fun mountedBridgeRefusesForeignFramesMalformedRequestsAndRetiredDocuments() {
     var signed = 0
     val mounted =
@@ -176,6 +247,7 @@ class ControlUiWebViewAuthTest {
       assertNull(mounted.deliver(origin = "https://foreign.example"))
       assertNull(mounted.deliver(mainFrame = false))
       assertNull(mounted.deliver(data = "not json"))
+      assertNull(mounted.deliver(message = WebMessageCompat(REQUEST.toByteArray())))
       for (extra in listOf("\"scopes\":[\"operator.admin\"]", "\"role\":\"node\"", "\"token\":\"chosen\"", "\"payload\":\"arbitrary\"")) {
         val response = mounted.request(data = """{"id":"request","nonce":"challenge","signedAt":1700000000123,$extra}""")
         assertTrue(response.containsKey("error"))
@@ -362,7 +434,10 @@ class ControlUiWebViewAuthTest {
     }
   }
 
-  private fun navigationRequest(url: String): WebResourceRequest =
+  private fun navigationRequest(
+    url: String,
+    gesture: Boolean = true,
+  ): WebResourceRequest =
     object : WebResourceRequest {
       override fun getUrl(): Uri = Uri.parse(url)
 
@@ -370,7 +445,7 @@ class ControlUiWebViewAuthTest {
 
       override fun isRedirect(): Boolean = false
 
-      override fun hasGesture(): Boolean = true
+      override fun hasGesture(): Boolean = gesture
 
       override fun getMethod(): String = "GET"
 
@@ -379,13 +454,15 @@ class ControlUiWebViewAuthTest {
 
   private fun mount(
     baseUrl: String = "https://gateway.example:8443/openclaw/",
+    path: String = "dashboard",
+    onExternalLink: ((String) -> Unit)? = null,
     sign: (String, Long) -> JsonObject,
   ): Mounted {
     val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
     val page = NodeRuntime.GatewayControlPage(baseUrl, null, sign)
     controller.get().setContent {
       OpenClawTheme(themeMode = AppearanceThemeMode.System) {
-        ControlUiWebView(page, "${page.baseUrl}dashboard")
+        ControlUiWebView(page, "${page.baseUrl}$path", onExternalLink = onExternalLink)
       }
     }
     shadowOf(Looper.getMainLooper()).idle()
@@ -415,11 +492,12 @@ class ControlUiWebViewAuthTest {
       origin: String = "https://gateway.example:8443",
       mainFrame: Boolean = true,
       data: String = REQUEST,
+      message: WebMessageCompat = WebMessageCompat(data),
     ): String? {
       var response: String? = null
       registration.listener.onPostMessage(
         view,
-        WebMessageCompat(data),
+        message,
         Uri.parse(origin),
         mainFrame,
         object : JavaScriptReplyProxy() {

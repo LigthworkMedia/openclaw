@@ -154,8 +154,9 @@ export function createNativeGatewayConnectAuth(
         event.origin !== "" ||
         event.ports.length !== 1 ||
         !incomingPort
-      )
+      ) {
         return;
+      }
       let value: unknown;
       try {
         value = typeof event.data === "string" ? JSON.parse(event.data) : undefined;
@@ -167,8 +168,9 @@ export function createNativeGatewayConnectAuth(
         value.type !== "openclaw.native-control-auth" ||
         typeof value.gatewayUrl !== "string" ||
         gatewayCredentialScope(value.gatewayUrl) !== gatewayCredentialScope(gatewayUrl)
-      )
+      ) {
         return;
+      }
       port = incomingPort;
       port.addEventListener("message", (reply) => accept(reply.data));
       port.start();
@@ -176,7 +178,6 @@ export function createNativeGatewayConnectAuth(
       for (const [id, message] of waitingForPort) {
         try {
           // MessagePort has a fixed peer, not a Window target origin.
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin
           port.postMessage(message);
         } catch (error) {
           accept({ id, error: formatUiError(error) });
@@ -191,7 +192,9 @@ export function createNativeGatewayConnectAuth(
         retired = true;
         host.removeEventListener("message", receivePort);
         port?.close();
-        for (const id of pending.keys()) accept({ id, error: "Native dashboard document closed" });
+        for (const id of pending.keys()) {
+          accept({ id, error: "Native dashboard document closed" });
+        }
         waitingForPort.clear();
       },
       { once: true },
@@ -271,7 +274,6 @@ export function createNativeGatewayConnectAuth(
           // oxlint-disable-next-line unicorn/require-post-message-target-origin
           result = webkit.postMessage(request);
         } else if (port) {
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin
           port.postMessage(JSON.stringify(request));
         } else {
           waitingForPort.set(request.id, JSON.stringify(request));

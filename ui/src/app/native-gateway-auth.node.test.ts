@@ -124,7 +124,9 @@ describe("native authenticated Control UI", () => {
     gateway?.stop();
     gateway = undefined;
     window.dispatchEvent(new Event("pagehide"));
-    for (const port of ports.splice(0)) port.close();
+    for (const port of ports.splice(0)) {
+      port.close();
+    }
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -162,7 +164,7 @@ describe("native authenticated Control UI", () => {
   it.each(["before challenge", "after challenge"])(
     "uses the approved native identity on older WebViews when the port arrives %s",
     async (arrival) => {
-      delete window.__OPENCLAW_NATIVE_CONTROL_AUTH__;
+      Reflect.deleteProperty(window, "__OPENCLAW_NATIVE_CONTROL_AUTH__");
       Object.assign(window, { OpenClawNativeGatewayAuth: undefined });
       window.location.hash = `nativeControlAuth=${encodeURIComponent(gatewayUrl)}`;
       const channel = new MessageChannel();
@@ -228,7 +230,7 @@ describe("native authenticated Control UI", () => {
   );
 
   it("drops cancelled challenges before a legacy native port arrives", async () => {
-    delete window.__OPENCLAW_NATIVE_CONTROL_AUTH__;
+    Reflect.deleteProperty(window, "__OPENCLAW_NATIVE_CONTROL_AUTH__");
     Object.assign(window, { OpenClawNativeGatewayAuth: undefined });
     window.location.hash = `nativeControlAuth=${encodeURIComponent(gatewayUrl)}`;
     const socket = connect();
@@ -476,6 +478,7 @@ describe("native authenticated Control UI", () => {
             data: JSON.stringify({ id: JSON.parse(message).id, error: "Native grant unavailable" }),
           });
         }
+        return undefined;
       });
       const first = connect();
       if (failure === "silent bridge") {
