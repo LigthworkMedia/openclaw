@@ -127,6 +127,11 @@ on:
         required: false
         default: ""
         type: string
+      credential_inventory_only:
+        description: Audit Telegram credential capabilities without running package E2E
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       runner_group:
@@ -253,6 +258,11 @@ on:
         required: false
         default: ""
         type: string
+      credential_inventory_only:
+        description: Audit Telegram credential capabilities without running package E2E
+        required: false
+        default: false
+        type: boolean
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -273,7 +283,95 @@ env:
   NODE_VERSION: "24.21.0"
 
 jobs:
+  audit_telegram_credentials:
+    if: inputs.credential_inventory_only
+    name: Audit Telegram credential capabilities
+    runs-on: ubuntu-24.04
+    environment: qa-live-shared
+    env:
+      OPENCLAW_QA_CONVEX_SITE_URL: ${{ secrets.OPENCLAW_QA_CONVEX_SITE_URL }}
+      OPENCLAW_QA_CONVEX_SECRET_CI: ${{ secrets.OPENCLAW_QA_CONVEX_SECRET_CI }}
+    steps:
+      - name: Inventory Telegram credential capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${OPENCLAW_QA_CONVEX_SITE_URL:?Missing OPENCLAW_QA_CONVEX_SITE_URL}"
+          : "${OPENCLAW_QA_CONVEX_SECRET_CI:?Missing OPENCLAW_QA_CONVEX_SECRET_CI}"
+
+          owner_id="release-ci-telegram-audit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          leases_file="$(mktemp)"
+          cleanup() {
+            while IFS=$'\t' read -r credential_id lease_token; do
+              curl -fsS "${OPENCLAW_QA_CONVEX_SITE_URL}/qa-credentials/v1/release" \
+                -H "authorization: Bearer ${OPENCLAW_QA_CONVEX_SECRET_CI}" \
+                -H "content-type: application/json" \
+                --data "$(jq -nc \
+                  --arg kind telegram-test-userbot \
+                  --arg ownerId "$owner_id" \
+                  --arg credentialId "$credential_id" \
+                  --arg leaseToken "$lease_token" \
+                  '{kind:$kind,ownerId:$ownerId,actorRole:"ci",credentialId:$credentialId,leaseToken:$leaseToken}')" \
+                >/dev/null || true
+            done < "$leases_file"
+          }
+          trap cleanup EXIT
+
+          for index in $(seq 1 20); do
+            response="$(curl -fsS "${OPENCLAW_QA_CONVEX_SITE_URL}/qa-credentials/v1/acquire" \
+              -H "authorization: Bearer ${OPENCLAW_QA_CONVEX_SECRET_CI}" \
+              -H "content-type: application/json" \
+              --data "$(jq -nc \
+                --arg kind telegram-test-userbot \
+                --arg ownerId "$owner_id" \
+                '{kind:$kind,ownerId:$ownerId,actorRole:"ci",leaseTtlMs:1200000,heartbeatIntervalMs:30000}')")"
+            status="$(jq -r '.status' <<< "$response")"
+            if [[ "$status" == "error" && "$(jq -r '.code' <<< "$response")" == "POOL_EXHAUSTED" ]]; then
+              printf 'telegram credential rows: %s\n' "$((index - 1))"
+              exit 0
+            fi
+            [[ "$status" == "ok" ]] || {
+              jq '{status,code,message}' <<< "$response"
+              exit 1
+            }
+
+            credential_id="$(jq -r '.credentialId' <<< "$response")"
+            lease_token="$(jq -r '.leaseToken' <<< "$response")"
+            printf '%s\t%s\n' "$credential_id" "$lease_token" >> "$leases_file"
+            payload="$(jq -c '.payload' <<< "$response")"
+            if [[ "$(jq -r '.__openclawQaCredentialPayloadChunksV1 // false' <<< "$payload")" == "true" ]]; then
+              chunks_file="$(mktemp)"
+              chunk_count="$(jq -r '.chunkCount' <<< "$payload")"
+              for chunk_index in $(seq 0 "$((chunk_count - 1))"); do
+                curl -fsS "${OPENCLAW_QA_CONVEX_SITE_URL}/qa-credentials/v1/payload-chunk" \
+                  -H "authorization: Bearer ${OPENCLAW_QA_CONVEX_SECRET_CI}" \
+                  -H "content-type: application/json" \
+                  --data "$(jq -nc \
+                    --arg kind telegram-test-userbot \
+                    --arg ownerId "$owner_id" \
+                    --arg credentialId "$credential_id" \
+                    --arg leaseToken "$lease_token" \
+                    --argjson index "$chunk_index" \
+                    '{kind:$kind,ownerId:$ownerId,actorRole:"ci",credentialId:$credentialId,leaseToken:$leaseToken,index:$index}')" \
+                  | jq -j '.data' >> "$chunks_file"
+              done
+              payload="$(jq -c '.' "$chunks_file")"
+            fi
+
+            fingerprint="$(printf '%s' "$credential_id" | shasum -a 256 | cut -c1-12)"
+            jq -nc \
+              --arg fingerprint "$fingerprint" \
+              --argjson participantCount "$(jq '(.participants // []) | length' <<< "$payload")" \
+              --argjson hasForumGroup "$(jq '(.forumGroupId | type == "string") and (.forumGroupId | test("^-?[0-9]+$"))' <<< "$payload")" \
+              --argjson hasForumTopic "$(jq '(.forumTopicId | type == "number") and (.forumTopicId > 0)' <<< "$payload")" \
+              '{credentialFingerprint:$fingerprint,participantCount:$participantCount,hasForumGroup:$hasForumGroup,hasForumTopic:$hasForumTopic,hasParticipantIdentityFixture:($participantCount >= 2 and $hasForumGroup and $hasForumTopic)}'
+          done
+
+          echo "Telegram credential inventory exceeded the bounded 20-row audit." >&2
+          exit 1
+
   run_package_telegram_e2e:
+    if: ${{ !inputs.credential_inventory_only }}
     name: Run package Telegram E2E
     runs-on: ${{ (inputs.runner_group || (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP) || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((inputs.runner_group || (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP) || '')), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-32vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-32vcpu-ubuntu-2404') }}
     timeout-minutes: 60
