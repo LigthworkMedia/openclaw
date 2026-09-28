@@ -2187,7 +2187,7 @@ process.stdout.write(JSON.stringify({ elapsedMs: Date.now() - startedAt, message
     expect(writerSteps[validateWriter]?.run).toContain("--evidence-artifact-digest");
     expect({
       ...writer.env,
-      ...(writerSteps[validateWriter]?.env ?? {}),
+      ...writerSteps[validateWriter]?.env,
     }).toMatchObject({
       GH_TOKEN: "${{ github.token }}",
       RECONCILE_EVIDENCE_ARTIFACT_DIGEST:

@@ -2468,7 +2468,7 @@ platform :ios do
           "-project", project, "-scheme", "OpenClawUITests", "-configuration", "Debug",
           "-derivedDataPath", derived_data_path,
           "-destination", "generic/platform=iOS Simulator",
-          "-arch", RbConfig::CONFIG.fetch("host_cpu"),
+          "ARCHS=#{RbConfig::CONFIG.fetch("host_cpu")}", "ONLY_ACTIVE_ARCH=YES",
           "-allowProvisioningUpdates", "build-for-testing"
         ],
         log_path: File.join(log_directory, "build.log")
