@@ -149,6 +149,7 @@ import { cliBackendLog } from "./log.js";
 import { buildCliMcpGrantContext, finalizeCliMcpGrant } from "./mcp-grant-context.js";
 import { resolveCliCatalogCapabilities } from "./model-capabilities.js";
 import { CLAUDE_CLI_CONTEXT_MODEL_ALIASES, detectNodeClaudePlacement } from "./prepare-claude.js";
+import { prepareCliMcpToolProjection } from "./prepare-mcp.js";
 import {
   buildCliTurnAppendContext,
   composeCliPromptContext,
@@ -1045,36 +1046,29 @@ async function prepareCliRunContextWithinReadFence(
         store: authStore ?? loadScopedAuthStore(),
       }
     : undefined;
-  const requestedLoopbackToolsAllow =
-    runtimeToolsAllowPolicy ??
-    (rootedExecution ? rootedToolsAllow : params.cliToolAvailability?.openClaw);
-  const mcpProjectionContext =
-    mcpContextBase && requestedLoopbackToolsAllow !== undefined
-      ? { ...mcpContextBase, toolsAllow: [...requestedLoopbackToolsAllow] }
-      : mcpContextBase;
-  const resolveProjectedTools =
-    runtimeToolsAllowPolicy !== undefined || (rootedExecution && rootedToolsAllow === undefined)
-      ? prepareDeps.resolveMcpLoopbackPolicyTools
-      : prepareDeps.resolveMcpLoopbackScopedTools;
   params.assertCurrent?.();
-  const projectedToolsBeforePromptBuild =
-    (bundleMcpEnabled || shouldMaterializeRuntimePolicy || nodeWorkshopEnabled) &&
-    mcpProjectionContext
-      ? (
-          await resolveProjectedTools({
+  const mcpProjection =
+    (bundleMcpEnabled || shouldMaterializeRuntimePolicy || nodeWorkshopEnabled) && mcpContextBase
+      ? await prepareCliMcpToolProjection(params, {
+          agentId: workspaceResolution.agentId,
+          context: mcpContextBase,
+          runtimeToolsAllowPolicy,
+          rootedToolsAllow,
+          scope: {
             cfg: runConfig,
-            signal: params.abortSignal,
-            context: mcpProjectionContext,
             rootedExecution,
             ...(skillLibraryAuthoring ? { skillLibraryAuthoring } : {}),
             ...(mcpToolAuth ? { authProfileStore: mcpToolAuth.store } : {}),
             ...(mcpToolAuth?.agentDir ? { authProfileStoreAgentDir: mcpToolAuth.agentDir } : {}),
-          })
-        ).tools
-      : [];
+          },
+          resolvePolicyTools: prepareDeps.resolveMcpLoopbackPolicyTools,
+          resolveScopedTools: prepareDeps.resolveMcpLoopbackScopedTools,
+        })
+      : { params, tools: [] };
+  params = mcpProjection.params;
   params.assertCurrent?.();
   const hookFilteredProjectedTools = applyEmbeddedAttemptToolsAllow(
-    projectedToolsBeforePromptBuild,
+    mcpProjection.tools,
     promptBuildToolsAllow,
   );
   if (

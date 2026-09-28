@@ -80,7 +80,6 @@ import {
   prepareSystemAgentRunAdmission,
 } from "../admitted-run-context.js";
 import {
-  createTestPreparedRunAdmission,
   withTestRunAdmission,
   wrapRunWithTestPreparedAdmission,
 } from "../admitted-run-context.test-support.js";
@@ -137,6 +136,7 @@ import { prepareClaudeCliSkillsPlugin } from "./claude-skills-plugin.js";
 import { finalizeCliContextEngineTurn } from "./cli-run-transcript.js";
 import { executePluginOwnedProcess } from "./execute-plugin.js";
 import { prepareCliHistoryBoundary } from "./history-boundary.js";
+import { registerCliMcpPreparationTests } from "./prepare-mcp.test-support.js";
 import { registerCliThinkingPreparationTests } from "./prepare-thinking.test-support.js";
 import { prepareCliRunContext } from "./prepare.js";
 import {
@@ -3803,36 +3803,9 @@ describe("prepareCliRunContext", () => {
     expect(context.preparedBackend.backend.args).toEqual(["--print"]);
   });
 
-  it("binds the exact late prepared admission to the CLI MCP grant", async () => {
-    const getActiveMcpLoopbackRuntime = vi.fn(() => ({
-      port: 31783,
-      ownerToken: "loopback-owner-token",
-      nonOwnerToken: "loopback-non-owner-token",
-    }));
-    const bindMcpLoopbackClientGrantAdmission = vi.fn(() => true);
-    setCliRunnerPrepareTestDeps({
-      getActiveMcpLoopbackRuntime,
-      ensureMcpLoopbackServer: vi.fn(createTestMcpLoopbackServer),
-      createMcpLoopbackServerConfig: vi.fn(createTestMcpLoopbackServerConfig),
-      mintMcpLoopbackClientGrant: vi.fn(createTestMcpLoopbackClientGrant),
-      bindMcpLoopbackClientGrantAdmission,
-    });
-    const preparedRunAdmission = createTestPreparedRunAdmission("run-prepared-mcp");
-
-    const context = await fixture.prepare({
-      runId: "run-prepared-mcp",
-      preparedRunAdmission,
-      config: createCliBackendConfig({ bundleMcp: true }),
-    });
-
-    expect(context.params.admittedRunContext.operationalRunInstance).toBe(
-      preparedRunAdmission.operationalRunInstance,
-    );
-    expect(bindMcpLoopbackClientGrantAdmission).toHaveBeenCalledExactlyOnceWith({
-      token: "loopback-token",
-      runtimeOwnerToken: "loopback-owner-token",
-      admittedRunContext: context.params.admittedRunContext,
-    });
+  registerCliMcpPreparationTests({
+    getFixture: () => fixture,
+    createConfig: () => createCliBackendConfig({ bundleMcp: true }),
   });
 
   it("uses loopback-scoped tools when building bundled MCP CLI prompts", async () => {

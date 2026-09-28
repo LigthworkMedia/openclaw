@@ -20,6 +20,7 @@ beforeEach(() => {
 
 function createTool() {
   return createSessionsTool({
+    senderIsOwner: true,
     agentSessionKey: "agent:main:main",
     config: {},
     hasInProcessGatewayContext: () => true,
@@ -30,6 +31,7 @@ describe("sessions tool responses", () => {
   it("clears its model override when patch requests the default model", async () => {
     const callGateway = vi.fn().mockResolvedValue({});
     const tool = createSessionsTool({
+      senderIsOwner: true,
       agentSessionKey: "agent:main:main",
       config: {},
       callGateway,
