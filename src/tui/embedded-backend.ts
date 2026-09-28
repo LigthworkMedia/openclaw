@@ -192,12 +192,6 @@ function ensureEmbeddedHistoryRuntimePluginsLoaded(params: {
   }
 }
 
-function resolveBtwQuestion(message: string): string | undefined {
-  const match = /^\/(?:btw|side)(?::|\s)+(.*)$/i.exec(message.trim());
-  const question = match?.[1]?.trim();
-  return question ? question : undefined;
-}
-
 export class EmbeddedTuiBackend implements TuiBackend {
   readonly connection = { url: "local embedded" };
 
@@ -333,7 +327,8 @@ export class EmbeddedTuiBackend implements TuiBackend {
     await this.ready;
     await this.preparedModelRuntime.waitUntilReady();
     const runId = opts.runId ?? randomUUID();
-    const question = resolveBtwQuestion(opts.message);
+    const sideCommand = /^\/(?:btw|side)(?::|\s)+(.*)$/i.exec(opts.message.trim());
+    const question = sideCommand?.[1]?.trim() || undefined;
     const isQueueCommand = resolveTextCommand(opts.message)?.command.key === "queue";
     const agentId = resolveSessionAgentId({
       sessionKey: opts.sessionKey,
