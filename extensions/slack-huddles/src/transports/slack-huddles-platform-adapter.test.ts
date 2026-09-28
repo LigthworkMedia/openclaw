@@ -339,6 +339,7 @@ describe("Slack huddle browser adapter", () => {
       window: {
         __openclawSlackHuddle: {
           identity: "slack-huddle:C0123ABCD",
+          bindable: true,
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -360,6 +361,7 @@ describe("Slack huddle browser adapter", () => {
       window: {
         __openclawSlackHuddle: {
           identity: "slack-huddle:C0123ABCD",
+          bindable: true,
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -391,6 +393,7 @@ describe("Slack huddle browser adapter", () => {
       window: {
         __openclawSlackHuddle: {
           identity: "slack-huddle:C0123ABCD",
+          bindable: true,
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -414,7 +417,11 @@ describe("Slack huddle browser adapter", () => {
       document,
       currentUrl: CLIENT_URL,
       window: {
-        __openclawSlackHuddle: { identity: "slack-huddle:C0123ABCD", sessionId: "session-1" },
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          bindable: true,
+        },
         __openclawSlackHuddleWorkspaces: { "slack-huddle:C0123ABCD": "T0123ABCD" },
       },
       onPermissionQuery: () => {
@@ -436,6 +443,7 @@ describe("Slack huddle browser adapter", () => {
       window: {
         __openclawSlackHuddle: {
           identity: "slack-huddle:C0123ABCD",
+          bindable: true,
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -458,7 +466,11 @@ describe("Slack huddle browser adapter", () => {
       document,
       currentUrl: CLIENT_URL,
       window: {
-        __openclawSlackHuddle: { identity: "slack-huddle:C0123ABCD", sessionId: "session-1" },
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          bindable: true,
+        },
       },
     });
     expect(await browser.status({ url: "https://app.slack.com/huddle/C0123ABCD" })).toMatchObject({
@@ -484,10 +496,27 @@ describe("Slack huddle browser adapter", () => {
       document,
       currentUrl: "https://app.slack.com/client/T9999ABCD/C0123ABCD",
     });
-    expect(await browser.status({ url: "https://app.slack.com/huddle/C0123ABCD" })).toMatchObject({
-      inCall: false,
-    });
+    const channelOnly = { url: "https://app.slack.com/huddle/C0123ABCD" };
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: false });
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: false });
     expect(browser.window).not.toHaveProperty("__openclawSlackHuddleWorkspaces");
+  });
+
+  it("binds a channel-only session through the normal preview, Join, and in-call flow", async () => {
+    const active = preview("Join Huddle");
+    const browser = fixture({ document: active.document, currentUrl: CLIENT_URL });
+    const channelOnly = { url: "https://app.slack.com/huddle/C0123ABCD" };
+    expect(await browser.status(channelOnly)).toMatchObject({ clickedJoin: true });
+    active.document.body.children.splice(0);
+    active.document.body.append(
+      qaNode("huddle_toolbar__leave_button", "Leave Huddle"),
+      microphone(false),
+      channelHeader(true),
+    );
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: true });
+    expect(browser.window).toMatchObject({
+      __openclawSlackHuddleWorkspaces: { "slack-huddle:C0123ABCD": "T0123ABCD" },
+    });
   });
 
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {

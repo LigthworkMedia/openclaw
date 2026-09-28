@@ -41,7 +41,8 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   let workspaceBound = !channelOnlySession || Boolean(window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]);
   // Only a session that owns this page lifetime's marker may bind; after a reload an established
   // session has no marker and fails closed rather than adopting whatever workspace is showing.
-  const ownsPageMarker = Boolean(sameRecordedIdentity && priorMeeting.sessionId === sessionId);
+  const ownsPageMarker = Boolean(sameRecordedIdentity && priorMeeting.sessionId === sessionId &&
+    priorMeeting.bindable === true);
   if (!workspaceBound && headerMember && canMutateSession && ownsPageMarker && inCallControl && !preview &&
       !confirmation && !multiDevice) {
     let pageTeam;
@@ -83,6 +84,9 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
       identity: expectedIdentity,
       sessionId: sessionId || priorMeeting?.sessionId,
       verifiedAt: Date.now(),
+      // Only a marker born before any live call (pre-join, admission, or our own Join) may later bind a
+      // workspace; one first written beside an already-live, unbound call never can.
+      bindable: (sameRecordedIdentity && !meetingOwnerConflict && priorMeeting.bindable === true) || !inCallControl,
       ...(inCall ? { inCallControl, inCallUrl: location.href, joinRequested: false } : {}),
       ...(!inCall && inCallControl && (confirmation || multiDevice) ? { joinRequested: false } : {}),
     };
