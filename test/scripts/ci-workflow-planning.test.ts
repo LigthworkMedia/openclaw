@@ -2381,7 +2381,6 @@ describe("ci workflow guards", () => {
               ...process.env,
               PATH: `${bin}${path.delimiter}${process.env.PATH}`,
               COMMANDS: commandFile,
-              GITHUB_EVENT_NAME: tier === "main" ? "schedule" : "workflow_dispatch",
               IOS_CI_PHASE: "tests",
               IOS_MAIN_TIER: String(tier === "main"),
               IOS_SIMULATOR_ID: "fixture-phone",
