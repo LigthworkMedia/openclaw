@@ -28,16 +28,7 @@ describe("Slack link-only button acknowledgments", () => {
     vi.clearAllMocks();
   });
 
-  it.each([
-    { name: "current", actionId: "openclaw:reply_link:1:1", value: undefined },
-    { name: "session", actionId: "openclaw:session_link", value: undefined },
-    { name: "additional session", actionId: "openclaw:session_link:1", value: undefined },
-    {
-      name: "legacy",
-      actionId: "openclaw:reply_button:1:1",
-      value: "/approve req-1 allow-once",
-    },
-  ])("ignores $name Slack callbacks emitted for link-only reply buttons", async (testCase) => {
+  async function clickLinkButton(actionId: string, value?: string) {
     const { ctx, app, getHandler } = createContext();
     registerSlackInteractionEvents({ ctx: ctx as never });
 
@@ -55,25 +46,45 @@ describe("Slack link-only button acknowledgments", () => {
             {
               type: "actions",
               block_id: "reply_actions",
-              elements: [{ type: "button", action_id: testCase.actionId }],
+              elements: [{ type: "button", action_id: actionId }],
             },
           ],
         },
       },
       action: {
         type: "button",
-        action_id: testCase.actionId,
+        action_id: actionId,
         block_id: "reply_actions",
         url: "https://example.com/app",
-        ...(testCase.value ? { value: testCase.value } : {}),
+        ...(value ? { value } : {}),
         text: { type: "plain_text", text: "Launch" },
       },
     });
-
     expect(ack).toHaveBeenCalled();
+    return app;
+  }
+
+  it.each([
+    { name: "current", actionId: "openclaw:reply_link:1:1", value: undefined },
+    { name: "session", actionId: "openclaw:session_link", value: undefined },
+    { name: "additional session", actionId: "openclaw:session_link:1", value: undefined },
+    {
+      name: "legacy",
+      actionId: "openclaw:reply_button:1:1",
+      value: "/approve req-1 allow-once",
+    },
+  ])("ignores $name Slack callbacks emitted for link-only reply buttons", async (testCase) => {
+    const app = await clickLinkButton(testCase.actionId, testCase.value);
+
     expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
     expect(enqueueSystemEventMock).not.toHaveBeenCalled();
     expect(requestHeartbeatMock).not.toHaveBeenCalled();
     expect(app.client.chat.update).not.toHaveBeenCalled();
+  });
+
+  it("routes unrelated buttons that only share the session-link prefix", async () => {
+    await clickLinkButton("openclaw:session_linked");
+
+    expect(dispatchPluginInteractiveHandlerMock).toHaveBeenCalled();
   });
 });
