@@ -365,12 +365,16 @@ jobs:
             fi
 
             fingerprint="$(printf '%s' "$credential_id" | shasum -a 256 | cut -c1-12)"
+            forum_group_fingerprint="$(jq -r '.forumGroupId // ""' <<< "$payload" | shasum -a 256 | cut -c1-12)"
             jq -nc \
               --arg fingerprint "$fingerprint" \
+              --arg forumGroupFingerprint "$forum_group_fingerprint" \
+              --argjson payloadKeys "$(jq -c 'keys | sort' <<< "$payload")" \
               --argjson participantCount "$(jq '(.participants // []) | length' <<< "$payload")" \
               --argjson hasForumGroup "$(jq '(.forumGroupId | type == "string") and (.forumGroupId | test("^-?[0-9]+$"))' <<< "$payload")" \
               --argjson hasForumTopic "$(jq '(.forumTopicId | type == "number") and (.forumTopicId > 0)' <<< "$payload")" \
-              '{credentialFingerprint:$fingerprint,participantCount:$participantCount,hasForumGroup:$hasForumGroup,hasForumTopic:$hasForumTopic,hasParticipantIdentityFixture:($participantCount >= 2 and $hasForumGroup and $hasForumTopic)}'
+              --argjson groupMatchesForum "$(jq '.groupId == .forumGroupId' <<< "$payload")" \
+              '{credentialFingerprint:$fingerprint,payloadKeys:$payloadKeys,forumGroupFingerprint:$forumGroupFingerprint,groupMatchesForum:$groupMatchesForum,participantCount:$participantCount,hasForumGroup:$hasForumGroup,hasForumTopic:$hasForumTopic,hasParticipantIdentityFixture:($participantCount >= 2 and $hasForumGroup and $hasForumTopic)}'
           done
 
           echo "Telegram credential inventory exceeded the bounded 20-row audit." >&2
