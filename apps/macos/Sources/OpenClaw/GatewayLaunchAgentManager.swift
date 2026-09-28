@@ -204,21 +204,7 @@ enum GatewayLaunchAgentManager {
                 "\(port)",
             ]
             if allowUnconfigured { arguments.append("--allow-unconfigured") }
-            let result = await self.runDaemonCommandResult(
-                arguments, timeout: Self.startupMigrationTolerance, quiet: false)
-            if result.success { return nil }
-            guard let payload = result.payload,
-                  let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
-                  json["result"] as? String == "runtime-pin-invalid"
-            else {
-                return result.message ?? "Gateway daemon command failed"
-            }
-
-            let retryError = await self.runDaemonCommand(arguments + ["--runtime", "node"])
-            if retryError == nil {
-                self.logger.warning("Invalid Gateway runtime pin replaced with automatic selection")
-            }
-            return retryError
+            return await self.runDaemonCommand(arguments)
         }
 
         self.logger.info("launchd disable requested via CLI")

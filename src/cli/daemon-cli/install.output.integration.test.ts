@@ -159,7 +159,7 @@ describe("runDaemonInstall integration", () => {
   });
 
   it.each(["transient-read", "definition-changed", "validation"] as const)(
-    "classifies a saved runtime pin failure during %s without installing",
+    "reports a saved runtime pin failure during %s without installing",
     async (failure) => {
       const runtimePath = path.join(tempHome, "missing", "node");
       serviceMock.readCommand.mockResolvedValue({
@@ -199,8 +199,7 @@ describe("runDaemonInstall integration", () => {
                 ? "Runtime pin inspection failed: Error: EIO: pin state read failed"
                 : failure === "definition-changed"
                   ? "Runtime pin inspection failed: Error: Managed service changed since its runtime pin was saved. Reinstall with an explicit --runtime or --runtime-path to select runtime intent."
-                  : `Invalid runtime pin: Error: Pinned runtime is not executable: ${runtimePath}`,
-            ...(failure === "transient-read" ? {} : { result: "runtime-pin-invalid" }),
+                  : `Invalid runtime pin: Error: Pinned runtime is not executable: ${runtimePath}; reinstall with an explicit --runtime or --runtime-path to replace the saved runtime pin.`,
           },
           null,
           2,

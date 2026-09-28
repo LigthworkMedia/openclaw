@@ -24,10 +24,7 @@ import {
   resolvePreferredNodePath,
   resolvePinnedDaemonRuntimePath,
 } from "../../daemon/runtime-paths.js";
-import {
-  DaemonRuntimePinDefinitionChangedError,
-  readDaemonRuntimePinForInstall,
-} from "../../daemon/runtime-pin-state.js";
+import { readDaemonRuntimePinForInstall } from "../../daemon/runtime-pin-state.js";
 import { readEmbeddedGatewayToken } from "../../daemon/service-audit.js";
 import { mergeGatewayServiceEnv } from "../../daemon/service-env-merge.js";
 import { sanitizeServiceInspectionError } from "../../daemon/service-inspection-error.js";
@@ -214,11 +211,7 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
       opts.runtime !== undefined || opts.runtimePath !== undefined,
     );
   } catch (error) {
-    fail(
-      `Runtime pin inspection failed: ${String(error)}`,
-      undefined,
-      error instanceof DaemonRuntimePinDefinitionChangedError ? "runtime-pin-invalid" : undefined,
-    );
+    fail(`Runtime pin inspection failed: ${String(error)}`);
     return;
   }
   let pinnedRuntimePath = opts.runtimePath ?? (opts.runtime ? undefined : pinSnapshot.pin?.path);
@@ -302,7 +295,9 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
     }
     runtimePath = wrapperPath ? undefined : pinnedRuntimePath;
   } catch (error) {
-    fail(`Invalid runtime pin: ${String(error)}`, undefined, "runtime-pin-invalid");
+    fail(
+      `Invalid runtime pin: ${String(error)}; reinstall with an explicit --runtime or --runtime-path to replace the saved runtime pin.`,
+    );
     return;
   }
   const installBind = resolveGatewayInstallBindMode(cfg);
