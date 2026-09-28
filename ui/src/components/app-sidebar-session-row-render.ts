@@ -10,7 +10,6 @@ import type { NavigationRouteId } from "../app-navigation.ts";
 import type { ApplicationContext, ApplicationNavigationOptions } from "../app/context.ts";
 import { resolveControlUiAuthCandidates } from "../app/control-ui-auth.ts";
 import { t } from "../i18n/index.ts";
-import { resolveToolDisplayIcon } from "../lib/chat/tool-display-icon.ts";
 import { formatDurationCompact } from "../lib/format-duration.ts";
 import { renderHoverMarquee } from "../lib/hover-marquee.ts";
 import { handleContextMenuEvent } from "../lib/keyboard-shortcuts.ts";
@@ -34,6 +33,7 @@ import {
   sidebarSessionMetaId,
   sidebarSessionStateId,
   type SidebarRecentSession,
+  type SidebarToolActivity,
   type SidebarSessionStatusFilter,
 } from "./app-sidebar-session-types.ts";
 import { icons } from "./icons.ts";
@@ -61,7 +61,7 @@ export interface SessionListHost {
   readonly sessionsShowPreview: boolean;
   readonly sessionsShowSystem: boolean;
   readonly sidebarNarrationLines: ReadonlyMap<string, string>;
-  readonly sidebarTools: ReadonlyMap<string, string>;
+  readonly sidebarTools: ReadonlyMap<string, SidebarToolActivity>;
   readonly sidebarObserverDigests: ReadonlyMap<string, SessionObserverDigest>;
   readonly sessionProjection: Pick<SidebarSessionProjection, "resolveSubtitle">;
   readonly selectedSessionKeys: ReadonlySet<string>;
@@ -353,18 +353,18 @@ export function renderRecentSession(params: {
   const team = host.sidebarAgentsMode === "roster";
   const ownAttention = session.ownAttention ?? session.attention;
   const label = session.label;
-  const toolName =
-    session.hasActiveRun && host.sidebarLiveActivity
+  const toolActivity =
+    !team && host.sessionsShowPreview && session.hasActiveRun && host.sidebarLiveActivity
       ? host.sidebarTools.get(session.key)
       : undefined;
-  const toolLabel = toolName ? `${t("chat.toolCards.tool")}: ${toolName}` : undefined;
-  const { subtitle, narration } = host.sessionProjection.resolveSubtitle({
+  const { subtitle, narration, toolName } = host.sessionProjection.resolveSubtitle({
     session,
     hasDisplay: display !== undefined,
     displaySubtitle: display?.subtitle,
     sidebarLiveActivity: host.sidebarLiveActivity,
     showPreview: host.sessionsShowPreview,
     narrationLine: host.sidebarNarrationLines.get(session.key),
+    toolActivity,
     observerDigest: host.sidebarObserverDigests.get(session.key) ?? null,
   });
   const indicators = renderSidebarSessionIndicators(host, session, display);
@@ -482,10 +482,7 @@ export function renderRecentSession(params: {
       >
         ${persistentIndicator}
         <span class="sidebar-recent-session__text">
-          <span class="sidebar-recent-session__title-row">
-            ${toolName ? html`<openclaw-tooltip .content=${toolLabel} .describe=${false}><span class="sidebar-session-tool" role="img" aria-label=${toolLabel}>${icons[resolveToolDisplayIcon(toolName)]}</span></openclaw-tooltip>` : nothing}
-            ${marqueeLabel}
-          </span>
+          <span class="sidebar-recent-session__title-row">${marqueeLabel}</span>
           <span class="sidebar-recent-session__details">
             ${
               session.channelPresentation
@@ -499,7 +496,7 @@ export function renderRecentSession(params: {
                   </span>`
                 : nothing
             }
-            ${team ? nothing : renderSidebarSessionSubtitle({ subtitle, narration })}
+            ${team ? nothing : renderSidebarSessionSubtitle({ subtitle, narration, toolName })}
             ${indicators.content}
           </span>
         </span>

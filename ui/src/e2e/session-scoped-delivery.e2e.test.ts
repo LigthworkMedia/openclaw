@@ -122,9 +122,25 @@ suite.define(() => {
           stream: "tool",
           data: { name: "read", phase: "start", toolCallId: "sidebar-tool" },
         });
+        await gateway.emitGatewayEvent("session.tool", {
+          sessionKey: narrated,
+          runId: "run-2",
+          stream: "item",
+          data: {
+            kind: "tool",
+            itemId: "tool:sidebar-tool",
+            toolCallId: "sidebar-tool",
+            name: "read",
+            phase: "update",
+            title: "Read",
+            progressText: "Reading the source",
+          },
+        });
         const tool = narrationRow.getByRole("img", { name: "Tool: read", exact: true });
         await tool.waitFor();
-        expect(await narrationRow.locator(".sidebar-recent-session__subtitle").count()).toBe(0);
+        expect(await narrationRow.locator(".sidebar-recent-session__subtitle").textContent()).toBe(
+          "Reading the source",
+        );
         expect(await tool.evaluate((element) => getComputedStyle(element).animationName)).toBe(
           "none",
         );

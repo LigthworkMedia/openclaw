@@ -31,8 +31,9 @@ import {
   normalizeAgentId,
 } from "../lib/sessions/session-key.ts";
 import { stripThinkingTags } from "../lib/strip-thinking-tags.ts";
-import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
+import type { SidebarRecentSession, SidebarToolActivity } from "./app-sidebar-session-types.ts";
 import { deriveSidebarNarrationLine } from "./sidebar-narration-line.ts";
+import { readSidebarToolActivity } from "./sidebar-tool-activity.ts";
 
 const SIDEBAR_NARRATION_SUBSCRIPTION_LIMIT = 6;
 const SIDEBAR_NARRATION_THROTTLE_MS = 2_000;
@@ -159,14 +160,16 @@ export class SidebarSessionNarrationController {
   private throttles = new Map<string, ThrottledLine>();
   private lines = new Map<string, string>();
   private observerDigests = new Map<string, SessionObserverDigest>();
-  private tools = new Map<string, string>();
+  private tools = new Map<string, SidebarToolActivity>();
 
   constructor(
     private readonly onLinesChanged: (lines: ReadonlyMap<string, string>) => void,
     private readonly onObserverDigestsChanged: (
       digests: ReadonlyMap<string, SessionObserverDigest>,
     ) => void = () => undefined,
-    private readonly onToolsChanged: (tools: ReadonlyMap<string, string>) => void = () => undefined,
+    private readonly onToolsChanged: (
+      tools: ReadonlyMap<string, SidebarToolActivity>,
+    ) => void = () => undefined,
   ) {}
 
   sync(input: SidebarNarrationSyncInput): void {
@@ -612,18 +615,27 @@ export class SidebarSessionNarrationController {
       return;
     }
     const record = payload as Record<string, unknown>;
-    if (record.stream !== "tool") {
-      return;
-    }
     const key = this.matchingDesiredKey(record.sessionKey, record.agentId);
     if (!key) {
       return;
     }
-    this.observeRun(key, record.runId);
-    const data = record.data as Record<string, unknown> | undefined;
-    const name = typeof data?.name === "string" ? data.name.trim() : "";
-    if (name && this.tools.get(key) !== name) {
-      this.tools.set(key, name);
+    const runId = typeof record.runId === "string" ? record.runId.trim() : "";
+    const activity = readSidebarToolActivity(
+      record.stream,
+      record.data,
+      !runId || this.runIds.get(key) === runId ? this.tools.get(key) : undefined,
+    );
+    if (!activity) {
+      return;
+    }
+    this.observeRun(key, runId);
+    const previous = this.tools.get(key);
+    if (
+      previous?.name !== activity.name ||
+      previous.toolCallId !== activity.toolCallId ||
+      previous.text !== activity.text
+    ) {
+      this.tools.set(key, activity);
       this.onToolsChanged(new Map(this.tools));
     }
   }

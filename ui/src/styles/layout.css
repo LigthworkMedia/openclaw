@@ -5035,7 +5035,6 @@ html.openclaw-native-macos:not(.openclaw-native-nav):not(.openclaw-native-web-ch
   flex: 0 0 14px;
   width: 14px;
   height: 14px;
-  margin-inline-end: 7px;
   color: var(--muted);
 }
 
