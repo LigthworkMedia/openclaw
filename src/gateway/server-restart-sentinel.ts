@@ -431,7 +431,7 @@ async function loadRestartSentinelStartupTask(params: {
           run: () => {
             params.signal.removeEventListener("abort", cancel);
             if (params.signal.aborted || params.shouldRun?.() === false) {
-              return;
+              return undefined;
             }
             const work = runWithGatewayIndependentRootWorkAdmission(
               () =>

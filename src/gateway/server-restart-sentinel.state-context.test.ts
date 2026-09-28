@@ -205,15 +205,15 @@ it.each(["queued", "running", "admission"] as const)(
     const read = vi.spyOn(restartSentinel, "readRestartSentinel");
     const clear = vi.spyOn(restartSentinel, "clearRestartSentinelIfRevision");
     const clock = createGatewaySchedulerClock();
-    const scheduler = createTestGatewayScheduler(clock.clock);
+    const retryScheduler = createTestGatewayScheduler(clock.clock);
     const sidecar = scheduleRestartSentinelWakeAfterReady({
-      scheduler,
+      scheduler: retryScheduler,
       deps: {},
       log: { warn: vi.fn() },
     });
-    sidecars.push(scheduler, sidecar);
+    sidecars.push(retryScheduler, sidecar);
     await clock.advanceBy(750);
-    expect(scheduler.nextWakeAtMs).toBe(2_750);
+    expect(retryScheduler.nextWakeAtMs).toBe(2_750);
     const readsBeforeRetry = read.mock.calls.length;
     const readStarted = createDeferred();
     const releaseRead = createDeferred<typeof pending>();
@@ -235,7 +235,7 @@ it.each(["queued", "running", "admission"] as const)(
       if (phase === "running") {
         await readStarted.promise;
       }
-      stopping = sidecar.stop().then(() => {
+      stopping = Promise.resolve(sidecar.stop()).then(() => {
         stopped = true;
       });
       if (phase === "running") {
@@ -253,7 +253,7 @@ it.each(["queued", "running", "admission"] as const)(
       await sidecar.stop();
     }
     await clock.advanceBy(2_000);
-    expect(scheduler.nextWakeAtMs).toBeNull();
+    expect(retryScheduler.nextWakeAtMs).toBeNull();
     expect(read).toHaveBeenCalledTimes(readsBeforeRetry + (phase === "running" ? 1 : 0));
     expect(clear).not.toHaveBeenCalled();
     expect(mocks.sendDurableMessageBatchCore).not.toHaveBeenCalled();
@@ -734,13 +734,13 @@ it.each([
     );
     const testMode = captureEnv(["VITEST", "NODE_ENV"]);
     const clock = createGatewaySchedulerClock();
-    const scheduler = createTestGatewayScheduler(clock.clock);
-    sidecars.push(scheduler);
+    const startupScheduler = createTestGatewayScheduler(clock.clock);
+    sidecars.push(startupScheduler);
     setTestEnvValue("VITEST", "");
     setTestEnvValue("NODE_ENV", "production");
     const warn = vi.fn();
     await startGatewaySidecars({
-      scheduler,
+      scheduler: startupScheduler,
       cfg: { commands: { ownerAllowFrom: ["matrix:!operator:example"] } },
       defaultWorkspaceDir: stateDir,
       deps: {},
@@ -812,8 +812,8 @@ it.each([
       await expect(fs.stat(sourcePath)).rejects.toMatchObject({ code: "ENOENT" });
       await fs.writeFile(sourcePath, JSON.stringify({ version: 1, payload: final }));
       await scheduleRestartSentinelWake({
-        scheduler,
-        signal: scheduler.signal,
+        scheduler: startupScheduler,
+        signal: startupScheduler.signal,
         deps: {},
         context,
         shouldRun: () => true,
@@ -902,14 +902,14 @@ it.each([
       });
     const testMode = captureEnv(["VITEST", "NODE_ENV"]);
     const clock = createGatewaySchedulerClock();
-    const scheduler = createTestGatewayScheduler(clock.clock);
-    sidecars.push(scheduler);
+    const recoveryScheduler = createTestGatewayScheduler(clock.clock);
+    sidecars.push(recoveryScheduler);
     setTestEnvValue("VITEST", "");
     setTestEnvValue("NODE_ENV", "production");
     setTestEnvValue("OPENCLAW_SKIP_CHANNELS", "");
     setTestEnvValue("OPENCLAW_SKIP_PROVIDERS", "");
     await startGatewaySidecars({
-      scheduler,
+      scheduler: recoveryScheduler,
       cfg,
       defaultWorkspaceDir: originalRoot,
       deps: {},
@@ -927,13 +927,13 @@ it.each([
     });
     setTestEnvValue("OPENCLAW_STATE_DIR", unrelatedRoot);
     await startupCompleted.promise;
-    expect(scheduler.nextWakeAtMs).toBe(750);
+    expect(recoveryScheduler.nextWakeAtMs).toBe(750);
     testMode.restore();
     await clock.advanceBy(750);
     expect(getUpdateRun(run.runId, { env: originalEnv })?.verification.booted).toBe(true);
     expect(await readRestartSentinel(originalEnv)).not.toBeNull();
     expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledTimes(initialNoticeCount);
-    expect(scheduler.nextWakeAtMs).toBe(2_750);
+    expect(recoveryScheduler.nextWakeAtMs).toBe(2_750);
     finishUpdateRun(run.runId, { status: "succeeded" }, { env: originalEnv });
     if (phase === "stopped") {
       await Promise.all(sidecars.splice(0).map(async (sidecar) => await sidecar.stop()));
