@@ -1,4 +1,3 @@
-// Gateway WebSocket connect authentication validates protocol, origin, credentials, and device proof.
 import {
   ConnectErrorDetailCodes,
   resolveAuthConnectErrorDetailCode,
@@ -12,7 +11,6 @@ import { verifyDeviceToken } from "../../../infra/device-pairing-tokens.js";
 import {
   CLOUD_WORKER_PAIRING_SETUP_BOOTSTRAP_PROFILE,
   deviceBootstrapProfilesEqual,
-  type DeviceBootstrapProfile,
 } from "../../../shared/device-bootstrap-profile.js";
 import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult } from "../../auth.js";
@@ -113,24 +111,13 @@ async function authenticateGatewayConnectCore(
     return undefined;
   }
   let { scopes } = admission;
-  const {
-    minProtocol,
-    maxProtocol,
-    usesLegacyNodeProtocol,
-    role,
-    isControlUi,
-    isBrowserOperatorUi,
-    isWebchat,
-    isNativeAppUi,
-    startupPending,
-  } = admission;
+  const { role, isControlUi, startupPending } = admission;
   const startupBootstrapConnect = startupPending && isStartupNodeBootstrapConnect(connectParams);
 
-  const deviceRaw = connectParams.device;
+  const device = connectParams.device;
   const hasTokenAuth = Boolean(connectParams.auth?.token);
   const hasPasswordAuth = Boolean(connectParams.auth?.password);
   const hasSharedAuth = hasTokenAuth || hasPasswordAuth;
-  const device = deviceRaw;
   const hasBootstrapProof = Boolean(connectParams.auth?.bootstrapToken);
   const hasDeviceTokenProof = Boolean(connectParams.auth?.deviceToken);
   const hasRawHandshakeCredentials =
@@ -491,7 +478,6 @@ async function authenticateGatewayConnectCore(
       return undefined;
     }
   }
-  const handoffBootstrapProfile: DeviceBootstrapProfile | null = null;
   const trustedProxyAuthOk = isTrustedProxyControlUiOperatorAuth({
     isControlUi,
     role,
@@ -512,18 +498,10 @@ async function authenticateGatewayConnectCore(
   });
 
   return {
+    ...admission,
     resolvedAuth,
-    minProtocol,
-    maxProtocol,
-    usesLegacyNodeProtocol,
-    role,
     scopes,
     hasRequestedScopes,
-    isControlUi,
-    isBrowserOperatorUi,
-    isWebchat,
-    isNativeAppUi,
-    startupPending,
     device,
     devicePublicKey: deviceProof.devicePublicKey,
     deviceAuthPayloadVersion: deviceProof.deviceAuthPayloadVersion,
@@ -532,14 +510,12 @@ async function authenticateGatewayConnectCore(
     bootstrapTokenCandidate,
     deviceTokenSharedGatewaySessionGeneration,
     authResult,
-    authOk,
     authMethod,
     pairingLocality,
-    usesSharedGatewayAuth,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
     issuedBootstrapProfile,
-    handoffBootstrapProfile,
+    handoffBootstrapProfile: null,
     trustedProxyAuthOk,
     controlUiPairingKind,
     skipLocalBackendSelfPairing,

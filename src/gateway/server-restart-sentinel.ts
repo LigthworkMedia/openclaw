@@ -1,4 +1,5 @@
 // Gateway restart sentinel recovery resumes pending continuations and outbound delivery.
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   resolveCorrelatedSubagentDelivery,
   settleCorrelatedSubagentDelivery,
@@ -125,13 +126,6 @@ function enqueueRestartSentinelWake(
     reason: "wake",
     agentId,
     sessionKey,
-  });
-}
-
-async function waitForRetry(delayMs: number) {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    timer.unref?.();
   });
 }
 
@@ -346,7 +340,7 @@ async function drainRestartContinuationQueue(params: {
     params.log.info(
       `restart continuation: entry ${params.entryId} still waiting for the previous run to clear; retrying in ${RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS}ms`,
     );
-    await waitForRetry(RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS);
+    await sleep(RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS, undefined, { ref: false });
   }
 }
 

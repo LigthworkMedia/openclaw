@@ -28,7 +28,12 @@ import { createAgentDedupeLifecycle } from "./agent-dedupe-lifecycle.js";
 import { replayAgentTurnIfCached, resolveAgentWaitSource } from "./agent-dedupe.js";
 import { resolveAgentDeliveryPhase } from "./agent-delivery-phase.js";
 import type { RestoredCronContinuation } from "./agent-handler-helpers.js";
-import { captureAgentJobSession, getAgentJobSession, waitForAgentJob } from "./agent-job.js";
+import {
+  captureAgentJobSession,
+  getAgentJobSession,
+  projectAgentJobObservation,
+  waitForAgentJob,
+} from "./agent-job.js";
 import type { AgentRequestPreflight } from "./agent-request-preflight.js";
 import { prepareAgentRequestRouting } from "./agent-request-routing.js";
 import { prepareAgentRunDispatch } from "./agent-run-admission-phase.js";
@@ -692,25 +697,8 @@ export function createAgentTurnService(
           session: captureAgentJobSession(runContext) ?? initialSession,
         };
       }
-      return {
-        session: snapshot.session,
-        result: {
-          runId,
-          status: snapshot.status,
-          startedAt: snapshot.startedAt,
-          endedAt: snapshot.endedAt,
-          error: snapshot.error,
-          stopReason: snapshot.stopReason,
-          livenessState: snapshot.livenessState,
-          yielded: snapshot.yielded,
-          pendingError: snapshot.pendingError,
-          timeoutPhase: snapshot.timeoutPhase,
-          providerStarted: snapshot.providerStarted,
-          ...(snapshot.terminalDelivery ? { terminalDelivery: snapshot.terminalDelivery } : {}),
-          terminalReceipt: snapshot.terminalReceipt,
-          terminalReply: snapshot.terminalReply,
-        },
-      };
+      const { session, ...result } = projectAgentJobObservation(snapshot);
+      return { session, result: { runId, ...result } };
     };
     return { session: initialSession, wait };
   };

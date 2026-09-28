@@ -169,15 +169,6 @@ export const PLATFORM_DEFAULTS: Record<string, string[]> = {
 };
 type PlatformId = "ios" | "watchos" | "android" | "macos" | "windows" | "linux" | "unknown";
 
-const CANONICAL_PLATFORM_IDS = new Set<Exclude<PlatformId, "unknown">>([
-  "ios",
-  "watchos",
-  "android",
-  "macos",
-  "windows",
-  "linux",
-]);
-
 const DEVICE_FAMILY_TOKEN_RULES: ReadonlyArray<{
   id: Exclude<PlatformId, "unknown">;
   tokens: readonly string[];
@@ -189,13 +180,6 @@ const DEVICE_FAMILY_TOKEN_RULES: ReadonlyArray<{
   { id: "windows", tokens: ["windows"] },
   { id: "linux", tokens: ["linux"] },
 ] as const;
-
-function resolvePlatformIdByExactMatch(value: string): Exclude<PlatformId, "unknown"> | undefined {
-  if (CANONICAL_PLATFORM_IDS.has(value as Exclude<PlatformId, "unknown">)) {
-    return value as Exclude<PlatformId, "unknown">;
-  }
-  return undefined;
-}
 
 function platformMatchesDeviceFamily(
   platformId: Exclude<PlatformId, "unknown">,
@@ -251,7 +235,7 @@ function resolvePlatformIdByDeviceFamily(
 function normalizePlatformId(platform?: string, deviceFamily?: string): PlatformId {
   const raw = normalizeDeviceMetadataForPolicy(platform);
   const family = normalizeDeviceMetadataForPolicy(deviceFamily);
-  const byPlatform = resolvePlatformIdByExactMatch(raw);
+  const byPlatform = DEVICE_FAMILY_TOKEN_RULES.find((rule) => rule.id === raw)?.id;
   if (byPlatform) {
     return platformMatchesDeviceFamily(byPlatform, family) ? byPlatform : "unknown";
   }
