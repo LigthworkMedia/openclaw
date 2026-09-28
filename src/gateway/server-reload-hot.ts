@@ -17,6 +17,7 @@ import { resetDirectoryCache } from "../infra/outbound/target-resolver.js";
 import { setGatewayRestartPolicy } from "../infra/restart.js";
 import { PluginRuntimeApplicationError, getPluginRuntimeGeneration } from "../plugins/lifecycle.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
+import { diffConfigPaths } from "./config-diff.js";
 import type { ChannelKind, GatewayReloadPlan } from "./config-reload-plan.js";
 import {
   doesReloadAffectProviderAuth,
@@ -95,8 +96,12 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const state = params.getState();
     const nextState = { ...state };
     const candidateEnv = publication?.runtimeEnv ?? process.env;
-    const refreshModelRuntime = doesReloadAffectProviderAuth(plan, getRuntimeConfig(), nextConfig);
-    const modelRuntimeAgentIds = mrReload.resolveReloadAgentIds(plan.changedPaths);
+    const previousConfig = getRuntimeConfig();
+    const refreshModelRuntime = doesReloadAffectProviderAuth(plan, previousConfig, nextConfig);
+    const modelRuntimeAgentIds = mrReload.resolveReloadAgentIds([
+      ...plan.changedPaths,
+      ...diffConfigPaths(previousConfig, nextConfig),
+    ]);
     const modelRuntimeRefreshScope = modelRuntimeAgentIds ? { agentIds: modelRuntimeAgentIds } : {};
 
     if (plan.reloadHooks || plan.refreshHooksPolicy) {

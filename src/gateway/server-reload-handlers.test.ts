@@ -860,9 +860,22 @@ async function runManagedOwnershipScenario(params: {
   queueRevert: boolean;
   secretProviderChanged?: boolean;
   sharedAuthRotation?: boolean;
+  resolvedProviderRotation?: "channel" | "agent";
   /** Makes secrets activation resolve to a different object than it received. */
   resolveToDistinctConfig?: boolean;
 }) {
+  const providerConfig = (apiKey: string | { source: "env"; provider: string; id: string }) => ({
+    models: {
+      providers: { fixture: { baseUrl: "https://provider.example.test/v1", apiKey, models: [] } },
+    },
+  });
+  const providerSource = params.resolvedProviderRotation
+    ? {
+        ...providerConfig({ source: "env", provider: "default", id: "FIXTURE_PROVIDER_KEY" }),
+        agents: { entries: { main: { model: "fixture/first" }, other: {} } },
+        channels: { slack: { streaming: { mode: "off" as const } } },
+      }
+    : {};
   const auth = params.sharedAuthRotation
     ? {
         mode: "token" as const,
@@ -870,8 +883,14 @@ async function runManagedOwnershipScenario(params: {
       }
     : undefined;
   const initialConfig = {
+    ...providerSource,
     gateway: {
-      reload: { mode: params.sharedAuthRotation ? ("hot" as const) : ("off" as const) },
+      reload: {
+        mode:
+          params.sharedAuthRotation || params.resolvedProviderRotation
+            ? ("hot" as const)
+            : ("off" as const),
+      },
       ...(auth ? { auth } : {}),
     },
     ...(params.secretProviderChanged
@@ -880,6 +899,7 @@ async function runManagedOwnershipScenario(params: {
     hooks: { enabled: true, token: "test-token", path: "/old" },
   } satisfies OpenClawConfig;
   const configA = {
+    ...providerSource,
     gateway: {
       reload: {
         mode: params.kind === "restart" ? ("restart" as const) : ("hot" as const),
@@ -891,13 +911,18 @@ async function runManagedOwnershipScenario(params: {
       token: "test-token",
       path: params.kind === "noop" ? "/old" : "/a",
     },
-    ...(params.kind === "noop" && !params.sharedAuthRotation
+    ...(params.kind === "noop" && !params.sharedAuthRotation && !params.resolvedProviderRotation
       ? { talk: { realtime: { instructions: "updated instructions" } } }
       : {}),
     ...(params.secretProviderChanged
       ? { secrets: { providers: { default: { source: "file" as const, path: "/new" } } } }
       : {}),
     ...(params.loggingChanged ? { logging: { level: "debug" as const } } : {}),
+    ...(params.resolvedProviderRotation === "channel"
+      ? { channels: { slack: { streaming: { mode: "partial" as const } } } }
+      : params.resolvedProviderRotation === "agent"
+        ? { agents: { entries: { main: { model: "fixture/next" }, other: {} } } }
+        : {}),
   } satisfies OpenClawConfig;
   const configB = structuredClone(initialConfig);
   const snapshot = (config: OpenClawConfig) => makePreparedSecretsSnapshot(config);
@@ -917,13 +942,16 @@ async function runManagedOwnershipScenario(params: {
         createConfigWriteNotification(configB, "hash-b", 2, "runtime-b", "source-b"),
       );
     }
-    if (!params.resolveToDistinctConfig && !params.sharedAuthRotation) {
+    if (
+      !params.resolveToDistinctConfig &&
+      !params.sharedAuthRotation &&
+      !params.resolvedProviderRotation
+    ) {
       return snapshot(config);
     }
-    // Real secret resolution returns a NEW config object. Returning the input
-    // unchanged is what let a rebuild against the source candidate look correct.
     const resolved: OpenClawConfig = {
       ...config,
+      ...(params.resolvedProviderRotation ? providerConfig("synthetic-new-provider-key") : {}),
       ...(params.sharedAuthRotation
         ? { gateway: { ...config.gateway, auth: { mode: "token", token: "new-shared-token" } } }
         : {}),
@@ -931,12 +959,18 @@ async function runManagedOwnershipScenario(params: {
     resolvedConfigs.push(resolved);
     return makePreparedSecretsSnapshot(config, { config: resolved });
   });
-  const initialRuntimeConfig: OpenClawConfig = params.sharedAuthRotation
-    ? {
-        ...initialConfig,
-        gateway: { ...initialConfig.gateway, auth: { mode: "token", token: "old-shared-token" } },
-      }
-    : initialConfig;
+  const initialRuntimeConfig: OpenClawConfig = {
+    ...initialConfig,
+    ...(params.resolvedProviderRotation ? providerConfig("synthetic-old-provider-key") : {}),
+    ...(params.sharedAuthRotation
+      ? {
+          gateway: { ...initialConfig.gateway, auth: { mode: "token", token: "old-shared-token" } },
+        }
+      : {}),
+  };
+  if (params.resolvedProviderRotation) {
+    hoisted.runtimeConfig.value = initialRuntimeConfig;
+  }
   const generation = (token: string | undefined) =>
     resolveSharedGatewaySessionGeneration({ mode: "token", token, allowTailscale: false });
   const sharedState = new SharedGatewaySessionGenerationState({
@@ -1551,7 +1585,6 @@ describe("managed reload transaction ownership", () => {
     expect(result.startChannel).not.toHaveBeenCalled();
     expect(result.stopChannel).not.toHaveBeenCalled();
     expect(result.reloadPlugins).not.toHaveBeenCalled();
-    expect(result.setState).not.toHaveBeenCalled();
     expect(result.requestRecoveryRestart).not.toHaveBeenCalled();
     expect(result.commitRuntimePolicy).toHaveBeenCalledOnce();
     expect(result.reconcileRuntimePolicy).toHaveBeenCalledOnce();
@@ -1570,38 +1603,54 @@ describe("managed reload transaction ownership", () => {
     expect(hoisted.refreshPreparedModelRuntimeSnapshots).not.toHaveBeenCalled();
   });
 
-  it("rebuilds a no-op secret-provider publication from the resolved committed config", async () => {
-    // Regression: the rebuild used the source-derived candidate. When secret
-    // resolution yields a different object, the rebuilt owner carries an
-    // identity no reader supplies, so every strict catalog read rejects it --
-    // reviving the failure on the very fallback meant to be safe.
-    const pluginMetadataSnapshot = {} as never;
-    const result = await runManagedOwnershipScenario({
-      kind: "noop",
-      queueRevert: false,
-      secretProviderChanged: true,
-      resolveToDistinctConfig: true,
-      getPluginMetadataSnapshot: () => pluginMetadataSnapshot,
-    });
+  it.each(["secret-provider", "channel", "agent"] as const)(
+    "fences resolved provider credentials before committing a %s edit",
+    async (edit) => {
+      const plugin: ChannelPlugin = {
+        ...createChannelTestPluginBase({ id: "slack" }),
+        reload: { configPrefixes: ["channels.slack"], noopPrefixes: ["channels.slack.streaming"] },
+      };
+      setActivePluginRegistry(createTestRegistry([{ pluginId: "slack", plugin, source: "test" }]));
+      const pluginMetadataSnapshot = {} as never;
+      const result = await runManagedOwnershipScenario({
+        kind: "noop",
+        queueRevert: false,
+        secretProviderChanged: edit === "secret-provider",
+        resolvedProviderRotation: edit === "secret-provider" ? undefined : edit,
+        resolveToDistinctConfig: true,
+        getPluginMetadataSnapshot: () => pluginMetadataSnapshot,
+      });
 
-    const resolved = result.resolvedConfigs.at(-1);
-    expect(resolved).toBeDefined();
-    expect(resolved).not.toBe(result.configA);
-    expect(hoisted.advancePreparedModelRuntimeConfig).not.toHaveBeenCalled();
-    expect(hoisted.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledOnce();
-    // Identity, not deep equality: the resolved config is a clone of the source
-    // candidate, so toHaveBeenCalledWith would match either object and prove
-    // nothing about which one the rebuild actually used.
-    const [rebuiltWith, options] = hoisted.refreshPreparedModelRuntimeSnapshots.mock.calls[0] ?? [];
-    expect(rebuiltWith).toBe(resolved);
-    expect(rebuiltWith).not.toBe(result.configA);
-    expect(options).toEqual({
-      gatewayLifecycle: true,
-      catalogMode: "static",
-      allowGatewaySubagentBinding: true,
-      pluginMetadataSnapshot,
-    });
-  });
+      expect(hoisted.markPreparedModelRuntimeSnapshotsStale).toHaveBeenCalledExactlyOnceWith(
+        "prepared model runtime owner is stale before config publication",
+        { waitForReplacement: true },
+      );
+      expect(
+        hoisted.markPreparedModelRuntimeSnapshotsStale.mock.invocationCallOrder[0],
+      ).toBeLessThan(result.commitRuntimePolicy.mock.invocationCallOrder[0]);
+      expect(hoisted.advancePreparedModelRuntimeConfig).not.toHaveBeenCalled();
+      expect(hoisted.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledOnce();
+      const [config, options] = hoisted.refreshPreparedModelRuntimeSnapshots.mock.calls[0]!;
+      expect(config).toBe(result.resolvedConfigs.at(-1));
+      expect(config).not.toBe(result.configA);
+      expect(options).toEqual({
+        catalogMode: "static",
+        joinSupersedingPublication: true,
+        allowGatewaySubagentBinding: true,
+        pluginMetadataSnapshot,
+      });
+      if (edit !== "secret-provider") {
+        expect(config.models?.providers?.fixture?.apiKey).toBe("synthetic-new-provider-key");
+        expect(result.prepareTerminalConfig.mock.calls[0]?.[0].changedPaths).toEqual([
+          edit === "channel" ? "channels.slack.streaming.mode" : "agents.entries.main.model",
+        ]);
+      }
+      expect(result.startChannel).not.toHaveBeenCalled();
+      expect(result.stopChannel).not.toHaveBeenCalled();
+      expect(result.reloadPlugins).not.toHaveBeenCalled();
+      expect(result.requestRecoveryRestart).not.toHaveBeenCalled();
+    },
+  );
 
   it("applies a current in-process hot config", async () => {
     const result = await runManagedOwnershipScenario({ kind: "hot", queueRevert: false });
@@ -1925,6 +1974,7 @@ describe("gateway hot reload model state", () => {
     const logReload = { info: vi.fn(), warn: vi.fn() };
     const { applyHotReload } = createReloadHandlersForTest(logReload);
     const nextConfig = {} as OpenClawConfig;
+    hoisted.runtimeConfig.value = nextConfig;
 
     await applyHotReload(
       buildGatewayReloadPlan(["agents.entries.Alpha.model", "meta.lastTouchedAt"]),

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { collectConfiguredModelRefs } from "@openclaw/model-catalog-core/configured-model-refs";
 import { resolveChannelConfigActivationFacts } from "../config/channel-config-activation.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { diffConfigPaths } from "./config-diff.js";
 import type { GatewayReloadPlan } from "./config-reload-plan.js";
 
 export function shouldRefreshContextWindowCache(plan: GatewayReloadPlan): boolean {
@@ -30,6 +31,7 @@ export function doesReloadAffectProviderAuth(
   return (
     plan.reloadPlugins ||
     plan.changedPaths.some(isProviderAuthRelevantReloadPath) ||
+    diffConfigPaths(previousConfig, nextConfig).some(isProviderAuthRelevantReloadPath) ||
     !isDeepStrictEqual(
       collectConfiguredModelRefs(previousConfig),
       collectConfiguredModelRefs(nextConfig),

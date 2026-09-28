@@ -1,8 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  advancePreparedModelRuntimeConfig,
-  refreshPreparedModelRuntimeSnapshots,
-} from "../agents/prepared-model-runtime.js";
 import { copyConfigResolutionFacts } from "../config/resolution-facts.js";
 import { publishSystemEventStoreConfig } from "../config/sessions/session-store-path.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -15,8 +11,6 @@ import { getActiveSecretsRuntimeSnapshotRevisionState } from "../secrets/runtime
 import { runOutsideAsyncWorkScope } from "../shared/async-work-scope.js";
 import { resetSkillSnapshotConfigFingerprintCache } from "../skills/runtime/snapshot-config-fingerprint.js";
 import { invalidateConfigGetResponseCache } from "./config-get-response.js";
-import { isNoopGatewayReloadPlan } from "./config-reload-plan.js";
-import { doesReloadAffectProviderAuth } from "./config-reload-recovery.js";
 import {
   startGatewayConfigReloader,
   type GatewayConfigReloadTransactionOwnership,
@@ -52,16 +46,6 @@ import {
   disconnectStaleSharedGatewayAuthClients,
   type SharedGatewaySessionGenerationOwnership,
 } from "./server-shared-auth-generation.js";
-
-function canAdvancePreparedModelRuntimeConfigInPlace(
-  plan: GatewayReloadPlan,
-  previousConfig: OpenClawConfig,
-  nextConfig: OpenClawConfig,
-): boolean {
-  return (
-    isNoopGatewayReloadPlan(plan) && !doesReloadAffectProviderAuth(plan, previousConfig, nextConfig)
-  );
-}
 
 export function startManagedGatewayConfigReloader(
   params: ManagedGatewayConfigReloaderParams,
@@ -319,7 +303,6 @@ export function startManagedGatewayConfigReloader(
       applyHotReload,
     });
 
-  let lastCommittedRuntimeConfig: OpenClawConfig | undefined;
   let committedRuntimeConfig = params.initialConfig;
   const configReloader = startGatewayConfigReloader({
     onReloadEnabledChange: params.onReloadEnabledChange,
@@ -349,18 +332,9 @@ export function startManagedGatewayConfigReloader(
       );
     },
     onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig) => {
-      // Secret resolution can make the committed runtime config a different
-      // object from the source-derived candidate. Record the committed one so a
-      // rebuild below stamps owners with the identity readers actually supply.
       const sessionStoresChanged =
         committedRuntimeConfig.session?.store !== nextCommittedRuntimeConfig.session?.store ||
         plan.changedPaths.some((path) => path === "env" || path.startsWith("env."));
-      const advanceModelConfig = canAdvancePreparedModelRuntimeConfigInPlace(
-        plan,
-        committedRuntimeConfig,
-        nextCommittedRuntimeConfig,
-      );
-      lastCommittedRuntimeConfig = nextCommittedRuntimeConfig;
       committedRuntimeConfig = nextCommittedRuntimeConfig;
       publishOperatorRoleConfigChange(params.resolveGatewayContext?.());
       // Store retirement follows locator changes, not unrelated presentation commits.
@@ -368,9 +342,6 @@ export function startManagedGatewayConfigReloader(
         publishSystemEventStoreConfig(nextCommittedRuntimeConfig);
       }
       params.resolveGatewayContext?.()?.mentionInbox?.invalidate();
-      if (advanceModelConfig) {
-        advancePreparedModelRuntimeConfig(nextCommittedRuntimeConfig);
-      }
     },
     ...(params.prepareConfigCandidate
       ? { prepareConfigCandidate: params.prepareConfigCandidate }
@@ -497,31 +468,7 @@ export function startManagedGatewayConfigReloader(
     onConfigRevisionApplied: publishAppliedConfigHash,
     hasOutstandingGatewayRestart,
     onEffectiveConfigUnchanged,
-    onNoopConfigCommit: async (plan, nextConfig, ownership, sourceConfig) => {
-      // Cleared per transaction so a rebuild can never inherit a config committed
-      // by an earlier one when this commit does not reach markRuntimeCommitted.
-      lastCommittedRuntimeConfig = undefined;
-      const advanceModelConfig = canAdvancePreparedModelRuntimeConfigInPlace(
-        plan,
-        committedRuntimeConfig,
-        nextConfig,
-      );
-      const applicationStatus = await onHotReload(plan, nextConfig, ownership, sourceConfig);
-      if (isNoopGatewayReloadPlan(plan) && !advanceModelConfig) {
-        // Rebuild against the committed runtime config, not the source-derived
-        // candidate. `secrets.providers.*` resolves to a different object, and
-        // stamping the rebuilt owner with the pre-resolution identity makes every
-        // strict catalog read reject it -- the failure this fix exists to remove.
-        const pluginMetadataSnapshot = params.getPluginMetadataSnapshot?.();
-        await refreshPreparedModelRuntimeSnapshots(lastCommittedRuntimeConfig ?? nextConfig, {
-          gatewayLifecycle: true,
-          catalogMode: "static",
-          allowGatewaySubagentBinding: true,
-          ...(pluginMetadataSnapshot ? { pluginMetadataSnapshot } : {}),
-        });
-      }
-      return applicationStatus;
-    },
+    onNoopConfigCommit: onHotReload,
     onHotReload,
     onRestart: runManagedRestart,
     log: params.logReload,
