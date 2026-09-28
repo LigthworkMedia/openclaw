@@ -43,6 +43,7 @@ import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
 } from "../test-utils/gateway-scheduler-clock.js";
+import { scheduleRestartSentinelWakeAfterReady } from "./server-startup-restart-sentinel.js";
 
 const mocks = vi.hoisted(() => ({
   portableStateDir: "",
@@ -183,6 +184,82 @@ beforeEach(() => {
     ]),
   );
 });
+
+it.each(["queued", "running", "admission"] as const)(
+  "stops pending update recovery and joins its retry (%s)",
+  async (phase) => {
+    const stateDir = tempDirs.make("openclaw-restart-retry-stop-");
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    setTestEnvValue("OPENCLAW_STATE_DIR", stateDir);
+    const pending = await writeRestartSentinel(
+      {
+        kind: "update",
+        status: "skipped",
+        ts: 123,
+        sessionKey: "agent:main:main",
+        stats: { handoffId: "pending-handoff", reason: "managed-service-handoff-started" },
+      },
+      env,
+    );
+    const readSnapshot = restartSentinel.readRestartSentinel;
+    const read = vi.spyOn(restartSentinel, "readRestartSentinel");
+    const clear = vi.spyOn(restartSentinel, "clearRestartSentinelIfRevision");
+    const clock = createGatewaySchedulerClock();
+    const scheduler = createTestGatewayScheduler(clock.clock);
+    const sidecar = scheduleRestartSentinelWakeAfterReady({
+      scheduler,
+      deps: {},
+      log: { warn: vi.fn() },
+    });
+    sidecars.push(scheduler, sidecar);
+    await clock.advanceBy(750);
+    expect(scheduler.nextWakeAtMs).toBe(2_750);
+    const readsBeforeRetry = read.mock.calls.length;
+    const readStarted = createDeferred();
+    const releaseRead = createDeferred<typeof pending>();
+    if (phase === "running") {
+      read.mockImplementationOnce(() => {
+        readStarted.resolve();
+        return releaseRead.promise;
+      });
+    }
+    const suspension =
+      phase === "admission" ? gatewayWorkAdmission.tryBeginGatewaySuspendAdmission(() => {}) : null;
+    if (phase === "admission") {
+      expect(suspension?.commit()).toBe(true);
+    }
+    const retry = phase === "queued" ? undefined : clock.advanceBy(2_000);
+    let stopped = false;
+    let stopping: Promise<void> | undefined;
+    try {
+      if (phase === "running") {
+        await readStarted.promise;
+      }
+      stopping = sidecar.stop().then(() => {
+        stopped = true;
+      });
+      if (phase === "running") {
+        // The initial startup timer has settled; only this retry can hold stop open.
+        for (let turn = 0; turn < 5; turn += 1) {
+          await Promise.resolve();
+        }
+        expect(stopped).toBe(false);
+      }
+    } finally {
+      releaseRead.resolve(pending);
+      await stopping;
+      await retry;
+      suspension?.release();
+      await sidecar.stop();
+    }
+    await clock.advanceBy(2_000);
+    expect(scheduler.nextWakeAtMs).toBeNull();
+    expect(read).toHaveBeenCalledTimes(readsBeforeRetry + (phase === "running" ? 1 : 0));
+    expect(clear).not.toHaveBeenCalled();
+    expect(mocks.sendDurableMessageBatchCore).not.toHaveBeenCalled();
+    expect(await readSnapshot(env)).toEqual(pending);
+  },
+);
 
 it.each(["absent", "maintenance"] as const)(
   "refuses legacy notice import with an %s Gateway owner",
