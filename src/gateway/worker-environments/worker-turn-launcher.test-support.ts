@@ -31,6 +31,7 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import type { WorkerComputerLaunchDescriptor } from "../../worker/launch-descriptor.js";
+import { WORKER_TOOL_NAMES } from "../../worker/tool-authority.js";
 import type { MintedWorkerCredential } from "./credential.js";
 import { measureNodeWorkerLaunchBytes } from "./node-launch-adapter.js";
 import type {
@@ -59,6 +60,9 @@ export const OWNER_EPOCH = 3;
 const BUNDLE_HASH = "a".repeat(64);
 export const MANIFEST_REF = `sha256:${"b".repeat(64)}`;
 const HOST_KEY = [["ssh", "ed25519"].join("-"), "AAAA"].join(" ");
+
+export const readLaunchToolNames: WorkerTurnTunnelHandle["readLaunchToolNames"] = async () =>
+  WORKER_TOOL_NAMES;
 
 export const measureLaunchTurn: WorkerTurnTunnelHandle["measureLaunchTurn"] = (plan, claim) =>
   measureNodeWorkerLaunchBytes("fixture-node", {

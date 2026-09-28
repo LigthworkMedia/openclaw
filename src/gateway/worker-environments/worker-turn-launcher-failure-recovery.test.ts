@@ -28,6 +28,7 @@ import {
   createWorkerSessionTurnPlacementProvider,
   credential,
   measureLaunchTurn,
+  readLaunchToolNames,
   hasLoneSurrogate,
   openSessionManager,
   placements,
@@ -69,6 +70,7 @@ describe("worker turn launcher failure recovery", () => {
         reconcileWorkspace: vi.fn(),
         stop: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: async (request) => {
           request.onDispatchReady?.();
           launchStarted.resolve();
@@ -384,6 +386,7 @@ describe("worker turn launcher failure recovery", () => {
       quiesceWorkspace: vi.fn(),
       runWorkspaceCommand: vi.fn(),
       measureLaunchTurn,
+      readLaunchToolNames,
       launchTurn,
       syncWorkspace: vi.fn(),
       reconcileWorkspace: vi.fn(),
@@ -538,6 +541,7 @@ describe("worker turn launcher failure recovery", () => {
         })),
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(async (request) => {
           if (dispatched) {
             request.onDispatchReady?.();
@@ -611,6 +615,7 @@ describe("worker turn launcher failure recovery", () => {
         ownerEpoch: OWNER_EPOCH,
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(async (request): Promise<SpawnResult> => {
           request.onDispatchReady?.();
           return {

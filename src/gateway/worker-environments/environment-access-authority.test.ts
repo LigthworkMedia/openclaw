@@ -3,7 +3,7 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import type { WorkerEnvironmentNodeTunnel } from "./environment-access.js";
 import * as support from "./service.test-support.js";
 import type { WorkerTunnelManager } from "./tunnel.js";
-import { measureLaunchTurn } from "./worker-turn-launcher.test-support.js";
+import { measureLaunchTurn, readLaunchToolNames } from "./worker-turn-launcher.test-support.js";
 
 describe("worker environment startup authority", () => {
   support.setupWorkerEnvironmentServiceSuite();
@@ -63,6 +63,7 @@ describe("worker environment startup authority", () => {
         environmentId: "pending",
         ownerEpoch: 0,
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(),
         runWorkspaceCommand: vi.fn(),
         quiesceWorkspace: vi.fn(),

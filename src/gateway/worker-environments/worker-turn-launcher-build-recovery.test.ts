@@ -28,6 +28,7 @@ import {
   credential,
   database,
   measureLaunchTurn,
+  readLaunchToolNames,
   openSessionManager,
   placements,
   root,
@@ -159,6 +160,7 @@ async function createBuildRecoveryHarness(
           resume: async () => {},
         }),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn,
         syncWorkspace: vi.fn(),
         reconcileWorkspace: async (request) => {

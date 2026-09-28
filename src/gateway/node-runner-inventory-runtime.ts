@@ -232,7 +232,10 @@ export function sameNodeWorkerHostDeclaration(
         left.portalStream === right.portalStream &&
         left.environmentSession === right.environmentSession &&
         left.preparedWorkspace === right.preparedWorkspace &&
-        left.capturedExecPolicy === right.capturedExecPolicy))
+        left.capturedExecPolicy === right.capturedExecPolicy &&
+        left.launchToolNames?.length === right.launchToolNames?.length &&
+        (left.launchToolNames?.every((name, index) => name === right.launchToolNames?.[index]) ??
+          true)))
   );
 }
 
@@ -268,6 +271,9 @@ export function resolveNodeWorkerSupervisorProof(
     workerHost: {
       ...declaration.workerHost,
       capacity: { ...declaration.workerHost.capacity },
+      ...(declaration.workerHost.launchToolNames !== undefined
+        ? { launchToolNames: [...declaration.workerHost.launchToolNames] }
+        : {}),
     },
     commands: [...node.commands],
   };

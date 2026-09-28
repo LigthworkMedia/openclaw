@@ -18,7 +18,7 @@ import { createWorkerPlacementDispatchService } from "./placement-dispatch.js";
 import { createWorkerSessionPlacementStore } from "./placement-store.js";
 import { deriveEnvironmentIntent } from "./service-contract.js";
 import * as support from "./service.test-support.js";
-import { measureLaunchTurn } from "./worker-turn-launcher.test-support.js";
+import { measureLaunchTurn, readLaunchToolNames } from "./worker-turn-launcher.test-support.js";
 import { createWorkerWorkspaceOperationCoordinator } from "./workspace-operation-coordinator.js";
 import { createWorkerWorkspaceRecoveryFixture } from "./workspace-recovery.test-support.js";
 
@@ -264,6 +264,7 @@ describe("worker environment service provision replay", () => {
         environmentId,
         ownerEpoch,
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(),
         runWorkspaceCommand: vi.fn(),
         quiesceWorkspace: vi.fn(),

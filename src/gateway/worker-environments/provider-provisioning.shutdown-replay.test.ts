@@ -24,7 +24,7 @@ import { deriveEnvironmentIntent } from "./service-contract.js";
 import * as support from "./service.test-support.js";
 import { createWorkerEnvironmentStore } from "./store.js";
 import { createWorkerBootstrapArtifactTransferService } from "./worker-bootstrap-artifact-transfer-service.js";
-import { measureLaunchTurn } from "./worker-turn-launcher.test-support.js";
+import { measureLaunchTurn, readLaunchToolNames } from "./worker-turn-launcher.test-support.js";
 import { createWorkerWorkspaceOperationCoordinator } from "./workspace-operation-coordinator.js";
 import { createWorkerWorkspaceRecoveryFixture } from "./workspace-recovery.test-support.js";
 
@@ -231,6 +231,7 @@ describe("worker node provisioning shutdown replay", () => {
         environmentId,
         ownerEpoch,
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(),
         runWorkspaceCommand: vi.fn(),
         quiesceWorkspace: vi.fn(),

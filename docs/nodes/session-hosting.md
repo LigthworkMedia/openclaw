@@ -96,6 +96,11 @@ execution and other approved node commands retain their existing requirements.
 Updating a node first remains compatible with an older Gateway; the node
 advertises this support only when the Gateway understands it.
 
+Worker tools newer than a node's installed OpenClaw, such as `presence`, are
+offered only when the node's supervisor declares support. Older nodes keep
+hosting OpenClaw worker turns without those tools. Update OpenClaw on the node
+and restart it to enable them.
+
 This setting enables supervised session turns on the paired device, including
 Gateway-owned workspace transfer and result reconciliation. By default, each
 node has one worker slot per available CPU core. Configure the slot count with

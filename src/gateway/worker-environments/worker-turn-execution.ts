@@ -184,6 +184,9 @@ export async function executeWorkerTurn(
     ...(turn.abortSignal ? { signal: turn.abortSignal } : {}),
     timeoutMs: turn.timeoutMs,
   });
+  if (!tunnel.launchTurn) {
+    throw new Error("Worker tunnel does not support worker turns");
+  }
   const portalAvailable =
     Boolean(environment.nodeDeviceId) &&
     environment.sshEndpoint === null &&
@@ -191,6 +194,7 @@ export async function executeWorkerTurn(
       placement.environmentId,
       placement.activeOwnerEpoch,
     )) === true;
+  const launchToolNames = await tunnel.readLaunchToolNames();
   const reasoning = resolveProviderThinkingLevel({
     provider: modelRef.provider,
     model: modelRef.model,
@@ -216,6 +220,7 @@ export async function executeWorkerTurn(
       modelRef,
       turn,
       portalAvailable,
+      launchToolNames,
     });
   params.placements.authorizeWorkerTurnTools(params.turnClaim, toolAuthority.allowedToolNames);
   const { operationalRunInstance, runtimeIdentity, assertActive, takeFinishingOutcome } =
@@ -376,9 +381,6 @@ export async function executeWorkerTurn(
     }
     // Project the wire handshake; the receipt also carries storage-only provenance.
     const { bundleHash, openclawVersion, protocolFeatures } = bootstrapReceipt;
-    if (!tunnel.launchTurn) {
-      throw new Error("Worker tunnel does not support worker turns");
-    }
     // Presence belongs to the Gateway; workers cannot read its process-local node registry.
     const requesterProfileId = readRunOperatorAuthority(turn)?.profileId;
     await prepareActiveNodeContext(requesterProfileId);

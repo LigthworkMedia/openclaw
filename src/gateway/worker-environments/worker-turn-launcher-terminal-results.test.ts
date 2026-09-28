@@ -49,6 +49,7 @@ import {
   createWorkerSessionTurnPlacementProvider,
   credential,
   measureLaunchTurn,
+  readLaunchToolNames,
   openSessionManager,
   placements,
   root,
@@ -183,6 +184,7 @@ describe("worker turn launcher terminal results", () => {
         })),
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(async (request): Promise<SpawnResult> => {
           request.onDispatchReady?.();
           launchedModels.push(request.plan.assignment.modelRef.model);
@@ -477,6 +479,7 @@ describe("worker turn launcher terminal results", () => {
       })),
       runWorkspaceCommand: vi.fn(),
       measureLaunchTurn,
+      readLaunchToolNames,
       launchTurn: vi.fn(async (request): Promise<SpawnResult> => {
         request.onDispatchReady?.();
         const completed = openSessionManager();
@@ -636,6 +639,7 @@ describe("worker turn launcher terminal results", () => {
           })),
           runWorkspaceCommand: vi.fn(),
           measureLaunchTurn,
+          readLaunchToolNames,
           launchTurn: vi.fn(async (request): Promise<SpawnResult> => {
             request.onDispatchReady?.();
             const completed = openSessionManager();

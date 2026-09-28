@@ -36,6 +36,7 @@ import {
   createWorkerSessionTurnPlacementProvider,
   credential,
   measureLaunchTurn,
+  readLaunchToolNames,
   openSessionManager,
   placements,
   root,
@@ -82,6 +83,7 @@ function harness() {
     }),
     stop: vi.fn(async () => {}),
     measureLaunchTurn,
+    readLaunchToolNames,
     launchTurn: vi.fn<WorkerTurnTunnelHandle["launchTurn"]>(async (request) => {
       launches.push(structuredClone(request.plan));
       request.onDispatchReady?.();

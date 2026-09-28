@@ -1,6 +1,11 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { WORKER_BUNDLE_PREWARM_VERSION } from "../../packages/gateway-protocol/src/schema/worker-admission.js";
 import { parseWorkerSlotSummary } from "../shared/node-list-parse.js";
+import {
+  isWorkerToolName,
+  WORKER_TOOL_NAMES,
+  type WorkerToolName,
+} from "../worker/tool-authority.js";
 
 export { NODE_WORKER_CAPACITY_MAX } from "../shared/node-list-parse.js";
 
@@ -18,6 +23,23 @@ export const NODE_WORKER_BUNDLE_STATUS_VERSION = 1;
 export const NODE_WORKER_PORTAL_STREAM_VERSION = 1;
 export const NODE_WORKER_ENVIRONMENT_SESSION_VERSION = 1;
 export const NODE_WORKER_PREPARED_WORKSPACE_VERSION = 1;
+
+// Supervisors predating launchToolNames admit this closed vocabulary: OpenClaw 2026.9.6
+// is the only published release that passes the worker-turn launch gate. Retire with the next dialect.
+const LEGACY_NODE_WORKER_LAUNCH_TOOL_NAMES = Object.freeze([
+  "read",
+  "write",
+  "edit",
+  "apply_patch",
+  "exec",
+  "process",
+  "browser",
+  "computer",
+  "skill_workshop",
+  "sessions_spawn",
+  "sessions_send",
+  "portal",
+] satisfies WorkerToolName[]);
 
 export const NODE_RUNNER_UPDATE_REQUIRED_ISSUE = {
   code: "update-required",
@@ -44,6 +66,7 @@ export type NodeWorkerHostDeclaration =
       environmentSession?: typeof NODE_WORKER_ENVIRONMENT_SESSION_VERSION;
       preparedWorkspace?: typeof NODE_WORKER_PREPARED_WORKSPACE_VERSION;
       capturedExecPolicy?: true;
+      launchToolNames?: readonly WorkerToolName[];
     };
 
 export type NodeRunnerInventoryDeclaration =
@@ -70,7 +93,7 @@ function parseWorkerHostDeclaration(value: unknown): NodeWorkerHostDeclaration |
   if (
     !capacity ||
     keys.length < 2 ||
-    keys.length > 9 ||
+    keys.length > 10 ||
     !keys.includes("enabled") ||
     !keys.includes("capacity") ||
     keys.some(
@@ -83,7 +106,8 @@ function parseWorkerHostDeclaration(value: unknown): NodeWorkerHostDeclaration |
         key !== "portalStream" &&
         key !== "environmentSession" &&
         key !== "preparedWorkspace" &&
-        key !== "capturedExecPolicy",
+        key !== "capturedExecPolicy" &&
+        key !== "launchToolNames",
     ) ||
     (value.bundlePrewarm !== undefined && value.bundlePrewarm !== WORKER_BUNDLE_PREWARM_VERSION) ||
     (value.bundleRetention !== undefined &&
@@ -100,6 +124,24 @@ function parseWorkerHostDeclaration(value: unknown): NodeWorkerHostDeclaration |
     (value.bundleStatus !== undefined && value.bundleRetention === undefined)
   ) {
     return null;
+  }
+  let launchToolNames: WorkerToolName[] | undefined;
+  if ("launchToolNames" in value) {
+    const declared = value.launchToolNames;
+    if (
+      !Array.isArray(declared) ||
+      declared.length > 64 ||
+      new Set(declared).size !== declared.length
+    ) {
+      return null;
+    }
+    for (const name of declared) {
+      if (typeof name !== "string" || name.length === 0 || name.length > 64) {
+        return null;
+      }
+    }
+    const knownNames = new Set(declared.filter(isWorkerToolName));
+    launchToolNames = WORKER_TOOL_NAMES.filter((name) => knownNames.has(name));
   }
   return {
     enabled: true,
@@ -123,6 +165,7 @@ function parseWorkerHostDeclaration(value: unknown): NodeWorkerHostDeclaration |
       ? { preparedWorkspace: NODE_WORKER_PREPARED_WORKSPACE_VERSION }
       : {}),
     ...(value.capturedExecPolicy === true ? { capturedExecPolicy: true } : {}),
+    ...(launchToolNames !== undefined ? { launchToolNames } : {}),
   };
 }
 
@@ -176,4 +219,12 @@ export function resolveNodeWorkerExecutionIssue(
   return workerHost.enabled && workerHost.capturedExecPolicy !== true
     ? NODE_RUNNER_UPDATE_REQUIRED_ISSUE
     : undefined;
+}
+
+export function resolveNodeWorkerLaunchToolNames(
+  workerHost: NodeWorkerHostDeclaration | undefined,
+): readonly WorkerToolName[] {
+  return (
+    (workerHost?.enabled && workerHost.launchToolNames) || LEGACY_NODE_WORKER_LAUNCH_TOOL_NAMES
+  );
 }

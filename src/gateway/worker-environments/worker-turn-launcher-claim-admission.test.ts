@@ -26,6 +26,7 @@ import {
   createWorkerSessionTurnPlacementProvider,
   credential,
   measureLaunchTurn,
+  readLaunchToolNames,
   openSessionManager,
   placements,
   seedActivePlacement,
@@ -450,6 +451,7 @@ describe("worker turn launcher claim admission", () => {
         })),
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn,
         syncWorkspace: vi.fn(async () => {
           throw new Error("unexpected workspace sync");
@@ -591,6 +593,7 @@ describe("worker turn launcher claim admission", () => {
         })),
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn,
         syncWorkspace: vi.fn(async () => {
           throw new Error("unexpected workspace sync");
@@ -745,6 +748,7 @@ describe("worker turn launcher claim admission", () => {
         })),
         runWorkspaceCommand: vi.fn(),
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn: vi.fn(async (request): Promise<SpawnResult> => {
           request.onDispatchReady?.();
           launchCount += 1;

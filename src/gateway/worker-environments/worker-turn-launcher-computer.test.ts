@@ -39,6 +39,7 @@ import {
   computerDescriptor,
   createWorkerSessionTurnPlacementProvider,
   measureLaunchTurn,
+  readLaunchToolNames,
   placements,
   seedActivePlacement,
   setupWorkerTurnLauncherTest,
@@ -83,6 +84,7 @@ describe("worker launch capabilities", () => {
         ownerEpoch: OWNER_EPOCH,
         launchTurn,
         measureLaunchTurn,
+        readLaunchToolNames,
         stageAttachments: vi.fn(),
         runWorkspaceCommand: vi.fn(),
         quiesceWorkspace: vi.fn(),
@@ -113,9 +115,10 @@ describe("worker launch capabilities", () => {
     { missingFeature: undefined, modelHasVision: true, allowed: true },
     { missingFeature: undefined, modelHasVision: false, allowed: false },
     { missingFeature: WORKER_COMPUTER_PROTOCOL_FEATURE, modelHasVision: true, allowed: false },
+    { modelHasVision: true, supervisorAdmitsComputer: false, allowed: false },
   ])(
-    "grants computer with negotiated features and model vision (missing: $missingFeature, vision: $modelHasVision)",
-    async ({ missingFeature, modelHasVision, allowed }) => {
+    "grants computer with negotiated features, supervisor vocabulary, and model vision (%j)",
+    async ({ missingFeature, modelHasVision, supervisorAdmitsComputer = true, allowed }) => {
       await seedActivePlacement();
       const environment = attachedEnvironment();
       if (!missingFeature) {
@@ -146,6 +149,10 @@ describe("worker launch capabilities", () => {
         ownerEpoch: OWNER_EPOCH,
         launchTurn,
         measureLaunchTurn,
+        readLaunchToolNames: async () =>
+          (await readLaunchToolNames()).filter(
+            (name) => supervisorAdmitsComputer || name !== "computer",
+          ),
         stageAttachments: vi.fn(async () => {}),
         runWorkspaceCommand: vi.fn(),
         quiesceWorkspace: vi.fn(),
@@ -175,7 +182,9 @@ describe("worker launch capabilities", () => {
       ).rejects.toBeInstanceOf(WorkerRunnerCapacityError);
       expect(launchTurn).toHaveBeenCalledOnce();
       expect(tunnel.stageAttachments).toHaveBeenCalledTimes(modelHasVision === true ? 1 : 0);
-      expect(prepareComputer).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(prepareComputer).toHaveBeenCalledTimes(
+        !missingFeature && modelHasVision !== false ? 1 : 0,
+      );
       expect(bind).toHaveBeenCalledTimes(allowed ? 1 : 0);
     },
   );
@@ -343,6 +352,7 @@ describe("worker launch capabilities", () => {
         environmentId: ENVIRONMENT_ID,
         ownerEpoch: OWNER_EPOCH,
         measureLaunchTurn,
+        readLaunchToolNames,
         launchTurn,
         runWorkspaceCommand: async (command) =>
           await runCommandWithTimeout([...command.argv], {
