@@ -1,3 +1,4 @@
+import { writeSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -22,14 +23,73 @@ export function registerRetainedUpdateRuntime(directory: string): () => void {
   return () => void retainedRuntimes.delete(directory);
 }
 
-export function reportRetainedUpdateRuntime(directory: string, reason: string): string {
+export function reportRetainedUpdateRuntime(
+  directory: string,
+  reason: string,
+  immediate = false,
+): string {
   const message = `Runtime retained at ${directory}: ${reason}`;
   try {
-    log.warn(message);
+    if (immediate) {
+      // The output deadline cannot wait for an asynchronous log transport.
+      writeSync(2, `${message}\n`);
+    } else {
+      log.warn(message);
+    }
   } catch {
     // The caller still records the warning.
   }
   return message;
+}
+
+async function isRetainedRuntimeMarker(marker: string): Promise<boolean> {
+  if ((await fs.realpath(marker).catch(() => undefined)) !== marker) {
+    return false;
+  }
+  const value: unknown = JSON.parse(await fs.readFile(marker, "utf8"));
+  return isRecord(value) && value.name === "openclaw";
+}
+
+async function recognizesRetainedRuntime(directory: string, packageRoot: string): Promise<boolean> {
+  const base = path.parse(packageRoot).root;
+  const tree = path.join(directory, "tree", Buffer.from(base).toString("hex"));
+  const projectedRoot = path.join(tree, path.relative(base, packageRoot));
+  if (await isRetainedRuntimeMarker(path.join(projectedRoot, "package.json"))) {
+    return true;
+  }
+  // Shipped projections encode the old source path, not the currently installed
+  // pnpm version. Search only sibling package versions in that same projected store.
+  const modules = path.dirname(projectedRoot);
+  const version = path.dirname(modules);
+  const store = path.dirname(version);
+  if (
+    path.basename(projectedRoot) !== "openclaw" ||
+    path.basename(modules) !== "node_modules" ||
+    !path.basename(version).startsWith("openclaw@") ||
+    path.basename(store) !== ".pnpm" ||
+    (await fs.realpath(store).catch(() => undefined)) !== store
+  ) {
+    return false;
+  }
+  let inspected = 0;
+  for await (const entry of await fs.opendir(store)) {
+    // A normal dependency store can contain well over a thousand entries.
+    if (++inspected > 4096) {
+      throw new Error(
+        "retained pnpm version inventory exceeds the bounded lookup; inspect it before manual cleanup",
+      );
+    }
+    if (
+      entry.isDirectory() &&
+      entry.name.startsWith("openclaw@") &&
+      (await isRetainedRuntimeMarker(
+        path.join(store, entry.name, "node_modules/openclaw/package.json"),
+      ))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Marked updater projections are disposable; live owners and maintenance fence reclamation. */
@@ -65,14 +125,7 @@ export async function maintainRetainedUpdateRuntimes(params: {
           }
           let marked = false;
           for (const packageRoot of packages) {
-            const base = path.parse(packageRoot).root;
-            const tree = path.join(directory, "tree", Buffer.from(base).toString("hex"));
-            const marker = path.join(tree, path.relative(base, packageRoot), "package.json");
-            if ((await fs.realpath(marker).catch(() => undefined)) !== marker) {
-              continue;
-            }
-            const value: unknown = JSON.parse(await fs.readFile(marker, "utf8"));
-            if (isRecord(value) && value.name === "openclaw") {
+            if (await recognizesRetainedRuntime(directory, packageRoot)) {
               marked = true;
               break;
             }

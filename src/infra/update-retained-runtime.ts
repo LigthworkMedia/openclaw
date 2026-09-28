@@ -217,10 +217,13 @@ export async function withRetainedUpdateRuntime<T>(
         })();
         return preparation;
       }),
-    async () => {
+    async (signal) => {
       closing = true;
       // A signal can arrive during projection; stop and join its last filesystem write.
       await preparation?.catch(() => undefined);
+      if (signal.aborted) {
+        return;
+      }
       const retained = directory;
       if (retained) {
         await removeTemporaryArtifacts(retained, "Updater runtime", (error) => {
@@ -229,9 +232,9 @@ export async function withRetainedUpdateRuntime<T>(
       }
       unregister?.();
     },
-    (reason) => {
+    (reason, immediate) => {
       if (directory) {
-        reportRetainedUpdateRuntime(directory, reason);
+        reportRetainedUpdateRuntime(directory, reason, immediate);
       }
       return directory;
     },

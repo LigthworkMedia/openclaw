@@ -31,16 +31,23 @@ it.skipIf(process.platform === "win32").each([
   { exit: "SIGTERM", code: 143 },
   { exit: "SIGINT", code: 130 },
   { exit: "failure-report", code: 1 },
-])("releases the retained runtime before $exit exits", async ({ exit, code }) => {
+  { exit: "stalled-close-success", code: 0 },
+  { exit: "stalled-close-failure", code: 7 },
+  { exit: "stalled-close-late", code: 7 },
+  { exit: "stalled-close-pending", code: 0 },
+])("settles or preserves the retained runtime before $exit exits", async ({ exit, code }) => {
   const result = spawnNodeEvalSync(
     `import fs from "node:fs/promises";
      import path from "node:path";
+     import assert from "node:assert/strict";
+     import { mock } from "node:test";
      import { pathToFileURL } from "node:url";
      import { MessageChannel } from "node:worker_threads";
      import { withRetainedUpdateRuntime } from ${JSON.stringify(new URL("./update-retained-runtime.ts", import.meta.url).href)};
-     import { installCliSignalExitHandlers } from ${JSON.stringify(new URL("../cli/signal-exit-barrier.ts", import.meta.url).href)};
-     import { exitCliAfterOutput, runCliWithExitFinalization } from ${JSON.stringify(new URL("../cli/one-shot-exit.ts", import.meta.url).href)};
+     import { installCliSignalExitHandlers, registerSignalExitBarrier, exitAfterSignalExitBarriers } from ${JSON.stringify(new URL("../cli/signal-exit-barrier.ts", import.meta.url).href)};
+     import { exitCliAfterOutput, runCliWithExitFinalization, watchCliExitAfterOutput } from ${JSON.stringify(new URL("../cli/one-shot-exit.ts", import.meta.url).href)};
      import { defaultRuntime } from ${JSON.stringify(new URL("../runtime.ts", import.meta.url).href)};
+     import { captureRuntimeWorkerSource } from ${JSON.stringify(new URL("./runtime-worker-generation.ts", import.meta.url).href)};
      const root = ${JSON.stringify(root)};
      const outcome = ${JSON.stringify(exit)};
      installCliSignalExitHandlers();
@@ -49,6 +56,37 @@ it.skipIf(process.platform === "win32").each([
          await retain({ mutationRoots: [root], timeoutMs: 30000, assertCurrent() {} });
          const retained = (await fs.readdir(path.dirname(root))).filter(name => name.startsWith("openclaw-update-runtime-"));
          process.stdout.write(JSON.stringify({ retained }) + "\\n");
+         if (outcome.startsWith("stalled-close")) {
+           const directory = path.join(path.dirname(root), retained[0]);
+           let releaseBarrier;
+           const late = outcome === "stalled-close-late";
+           if (late) registerSignalExitBarrier(() => new Promise(resolve => { releaseBarrier = resolve; }));
+           const { runtimeGeneration } = captureRuntimeWorkerSource(pathToFileURL(path.join(root, "dist/updater.mjs")));
+           assert(runtimeGeneration);
+           runtimeGeneration.retain({}, () => new Promise(resolve => {
+             mock.timers.enable({ apis: ["setTimeout"] });
+             let stalled = false;
+             process.exitCode = 91; // unrelated cleanup status cannot replace the recorded outcome
+             if (outcome === "stalled-close-pending") exitAfterSignalExitBarriers(${JSON.stringify(code)});
+             watchCliExitAfterOutput(${JSON.stringify(code)}, () => { stalled = true; });
+             mock.timers.tick(9999);
+             assert.equal(stalled, false);
+             mock.timers.tick(1);
+             assert.equal(stalled, true);
+             setImmediate(async () => {
+               if (late) {
+                 assert((await fs.stat(directory)).isDirectory());
+                 resolve();
+                 await new Promise(done => setImmediate(done));
+                 assert((await fs.stat(directory)).isDirectory(), "late settlement must not delete the retained runtime");
+                 assert(releaseBarrier, "maintenance barrier must still be awaited");
+                 releaseBarrier();
+               }
+               setImmediate(() => { process.stderr.write("WATCHDOG_DID_NOT_EXIT"); process.exit(99); });
+             });
+           }));
+           return;
+         }
          if (outcome === "failure-report") {
            defaultRuntime.error("Update failure reported");
            exitCliAfterOutput(defaultRuntime, 1);
@@ -83,7 +121,14 @@ it.skipIf(process.platform === "win32").each([
     expect(result.stderr).toContain("Update failure reported");
     expect(result.stderr).not.toContain("Unexpected error:");
   }
-  expect(
-    (await fs.readdir(base)).filter((name) => name.startsWith("openclaw-update-runtime-")),
-  ).toEqual([]);
+  const remaining = (await fs.readdir(base)).filter((name) =>
+    name.startsWith("openclaw-update-runtime-"),
+  );
+  if (exit.startsWith("stalled-close")) {
+    expect(remaining).toHaveLength(1);
+    expect(result.stderr).toContain(`Runtime retained at ${path.join(base, remaining[0]!)}:`);
+    expect(result.stderr).toContain("exit deadline");
+  } else {
+    expect(remaining).toEqual([]);
+  }
 });
