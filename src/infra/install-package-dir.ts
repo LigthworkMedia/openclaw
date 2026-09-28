@@ -17,6 +17,7 @@ import { withInstallActivity, type InstallActivityObserver } from "./install-pro
 import { assertCanonicalPathWithinBase } from "./install-safe-path.js";
 import { formatNpmCommandFailureOutput } from "./install-source-utils.js";
 import { tryReadJson, writeJson } from "./json-files.js";
+import { resolveNpmCommand } from "./npm-command.js";
 import { createSafeNpmInstallArgs, createSafeNpmInstallEnv } from "./safe-package-install.js";
 
 type InstallSourceHardlinks = "package-manager" | "reject";
@@ -494,14 +495,13 @@ export async function installPackageDir<
                 // Verified on Blacksmith Ubuntu/Node 24/npm 11: `--silent` can make npm fail
                 // with empty stdout/stderr for bad specs like `workspace:^`; `--loglevel=error`
                 // stays quiet on success while preserving the actionable npm failure text.
-                [
-                  "npm",
-                  ...createSafeNpmInstallArgs({
+                resolveNpmCommand(
+                  createSafeNpmInstallArgs({
                     omitDev: true,
                     loglevel: "error",
                     ignoreWorkspaces: true,
                   }),
-                ],
+                ),
                 {
                   timeoutMs: resolveInstallWorkTimeoutMs(
                     params.workTimeoutMs,

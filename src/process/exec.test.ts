@@ -272,6 +272,24 @@ describe("runCommandWithTimeout", () => {
     expect(resolved.npm_config_fund).toBe("false");
   });
 
+  it("suppresses npm fund prompts for the bundled CLI under a renamed Bun executable", () => {
+    const versions = process.versions;
+    const execPath = process.execPath;
+    Object.defineProperty(process, "versions", { value: { ...versions, bun: "1.4.2" } });
+    Object.defineProperty(process, "execPath", { value: "/runtime/custom-bun" });
+    try {
+      const resolved = resolveCommandEnv({
+        argv: [process.execPath, "/openclaw/node_modules/npm/bin/npm-cli.js", "install"],
+        baseEnv: {},
+      });
+      expect(resolved.NPM_CONFIG_FUND).toBe("false");
+      expect(resolved.npm_config_fund).toBe("false");
+    } finally {
+      Object.defineProperty(process, "versions", { value: versions });
+      Object.defineProperty(process, "execPath", { value: execPath });
+    }
+  });
+
   it("infers success for shimmed Windows commands when exit codes are missing", () => {
     expect(
       resolveProcessExitCode({
