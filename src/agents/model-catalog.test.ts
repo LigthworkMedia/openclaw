@@ -554,7 +554,7 @@ describe("prepared model catalog builder", () => {
   });
 
   it("uses an explicitly ready live catalog order across entries and route variants", async () => {
-    const metadataSnapshot = providerManifestSnapshot({
+    const manifestSnapshot = providerManifestSnapshot({
       provider: "demo",
       discovery: "runtime",
       modelIds: ["first", "second"],
@@ -571,7 +571,7 @@ describe("prepared model catalog builder", () => {
     };
     const snapshot = await build({
       entries,
-      metadataSnapshot,
+      metadataSnapshot: manifestSnapshot,
       providerOutcomes: [liveOrder],
     });
 
@@ -580,7 +580,7 @@ describe("prepared model catalog builder", () => {
     expect(snapshot.entries.map(({ providerOrder }) => providerOrder)).toEqual([0, 1, 2]);
     expect(snapshot.entries).toHaveLength(entries.length);
 
-    const withoutOptIn = await build({ entries, metadataSnapshot });
+    const withoutOptIn = await build({ entries, metadataSnapshot: manifestSnapshot });
     expect(withoutOptIn.entries.map(({ id }) => id)).toEqual(["first", "second", "new"]);
   });
 
