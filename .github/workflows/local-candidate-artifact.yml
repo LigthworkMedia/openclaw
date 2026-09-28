@@ -1,0 +1,83 @@
+name: Local candidate artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Exact upstream openclaw/openclaw commit to build"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-candidate-artifact-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=12288
+    steps:
+      - name: Checkout exact upstream commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+
+      - name: Verify immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+
+      - name: Setup Node 24.16
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.16.0
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Run targeted memory regression tests
+        shell: bash
+        env:
+          OPENCLAW_VITEST_MAX_WORKERS: "1"
+        run: |
+          set -euo pipefail
+          corepack pnpm exec vitest run \
+            src/agents/prepared-model-catalog-worker.reuse.integration.test.ts \
+            src/agents/prepared-model-catalog-worker.workspace-heap.integration.test.ts \
+            src/agents/prepared-model-catalog-worker.captures.integration.test.ts
+
+      - name: Build packages and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          corepack pnpm pack --pack-destination artifacts
+          corepack pnpm --dir extensions/codex pack --pack-destination "$GITHUB_WORKSPACE/artifacts"
+          cd artifacts
+          test "$(find . -maxdepth 1 -name '*.tgz' | wc -l)" -eq 2
+          sha256sum *.tgz > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          git -C .. rev-parse HEAD > SOURCE_SHA
+
+      - name: Upload verified packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-${{ inputs.candidate_sha }}
+          path: |
+            artifacts/*.tgz
+            artifacts/SHA256SUMS
+            artifacts/SOURCE_SHA
+          if-no-files-found: error
+          retention-days: 3
