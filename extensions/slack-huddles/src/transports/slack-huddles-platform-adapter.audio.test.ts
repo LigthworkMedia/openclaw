@@ -339,10 +339,12 @@ it("stops clicking once another session takes over the page during an awaited st
   });
   camera.onClick = () => {
     camera.setAttribute("aria-checked", "false");
-    browser.window.__openclawSlackHuddle = {
-      identity: "slack-huddle:T0123ABCD:C0123ABCD",
-      sessionId: "session-2",
-    };
+    Object.assign(browser.window, {
+      __openclawSlackHuddle: {
+        identity: "slack-huddle:T0123ABCD:C0123ABCD",
+        sessionId: "session-2",
+      },
+    });
   };
   document.body.append(camera);
   await browser.status({ mode: "transcribe" });
