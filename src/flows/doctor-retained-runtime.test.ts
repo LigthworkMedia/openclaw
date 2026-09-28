@@ -285,19 +285,24 @@ it.each(["abandoned", "live", "no-maintenance", "symlink", "bounded"])(
       fs.rmSync(path.join(projectedStore, "openclaw@2026.9.5"), { recursive: true });
       fs.mkdirSync(path.join(projectedStore, "unrelated-dependency"));
       const [entry] = fs.readdirSync(projectedStore, { withFileTypes: true });
+      if (!entry) {
+        throw new Error("expected a projected store entry");
+      }
       const opendir = fsPromises.opendir.bind(fsPromises);
       vi.spyOn(fsPromises, "opendir").mockImplementation(async (...args) => {
         const handle = await opendir(...args);
         if (String(args[0]) === projectedStore) {
-          vi.spyOn(handle, Symbol.asyncIterator).mockImplementation(async function* () {
-            try {
-              for (let index = 0; index < 4097; index++) {
-                yield entry;
+          vi.spyOn(handle, Symbol.asyncIterator).mockImplementation(
+            async function* (): AsyncGenerator<fs.Dirent, undefined> {
+              try {
+                for (let index = 0; index < 4097; index++) {
+                  yield entry;
+                }
+              } finally {
+                await handle.close();
               }
-            } finally {
-              await handle.close();
-            }
-          });
+            },
+          );
         }
         return handle;
       });
