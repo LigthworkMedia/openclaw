@@ -22,10 +22,12 @@ import {
   resolveManagedServiceNodeRunner,
   summarizeGatewayServiceLayout,
 } from "../../daemon/service-layout.js";
+import { withGatewayServiceOperationLock } from "../../daemon/service-operation-lock.js";
 import {
   hasGatewayServiceDefinitionOverrides,
   type GatewayServiceCommandConfig,
   type GatewayServiceState,
+  type GatewayServiceUnitInspection,
 } from "../../daemon/service-types.js";
 import {
   readGatewayServiceState,
@@ -169,10 +171,7 @@ function serviceInspectionWarningMessage(state: GatewayServiceState): string {
     return `${GATEWAY_SERVICE_INSPECTION_WARNING} ${formatServiceInspectionReason(state.inspectionReason)}`;
   }
   if (process.platform === "freebsd") {
-    return (
-      `${GATEWAY_SERVICE_INSPECTION_WARNING} ` +
-      "On FreeBSD, use the Gateway's rc.d or foreground process owner for service management."
-    );
+    return `${GATEWAY_SERVICE_INSPECTION_WARNING} On FreeBSD, use the Gateway's rc.d or foreground process owner for service management.`;
   }
   const runtime = state.runtime;
   const tasksCurrent = runtime?.systemd?.tasksCurrent;
@@ -242,15 +241,12 @@ export async function inspectManagedGatewayServiceBeforeUpdate(params: {
   }
   // Updaters through 2026.9.4 omit selection provenance and known-empty systemd overrides.
   // Keep their fingerprint while discovery and runtime pinning retain the full snapshot.
-  const { startupEntryPaths: _startupEntryPaths, ...installedCommand } = command;
-  const {
-    managedDefinition: _managedDefinition,
-    managedOverrides: _managedOverrides,
-    ...effectiveCommand
-  } = installedCommand;
-  const serialized = stableStringify(
-    hasGatewayServiceDefinitionOverrides(installedCommand) ? installedCommand : effectiveCommand,
-  );
+  const { startupEntryPaths: _startupEntryPaths, ...fingerprintCommand } = command;
+  if (!hasGatewayServiceDefinitionOverrides(fingerprintCommand)) {
+    delete fingerprintCommand.managedDefinition;
+    delete fingerprintCommand.managedOverrides;
+  }
+  const serialized = stableStringify(fingerprintCommand);
   if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) {
     return unavailable();
   }
@@ -296,13 +292,31 @@ export function readGatewayServiceStateForUpdate(
   service: GatewayService,
   env: NodeJS.ProcessEnv | undefined,
   timeoutMs?: number,
+  inspection?: { managerUid: number | undefined; assertCurrent: () => void },
 ): Promise<GatewayServiceState> {
-  return readGatewayServiceState(service, {
-    env,
-    requireEffective: true,
-    requireLoadedCommand: true,
-    validateEnvBeforeStatusRead: assertGatewayServiceManagementAllowedForUpdate,
-    timeoutMs,
+  const read = (loadForInspection?: GatewayServiceUnitInspection) =>
+    readGatewayServiceState(service, {
+      env,
+      requireEffective: true,
+      requireLoadedCommand: true,
+      loadForInspection,
+      validateEnvBeforeStatusRead: assertGatewayServiceManagementAllowedForUpdate,
+      timeoutMs,
+    });
+  if (process.platform !== "linux" || inspection?.managerUid === undefined) {
+    return read();
+  }
+  const { managerUid } = inspection;
+  // systemd may collect a stopped unit; loading its metadata retains both owners.
+  return withGatewayServiceOperationLock(env ?? process.env, async (assertNative) => {
+    const assertCurrent = () => {
+      assertNative();
+      inspection.assertCurrent();
+    };
+    assertCurrent();
+    const state = await read({ managerUid, assertCurrent, assertReadCurrent: assertNative });
+    assertCurrent();
+    return state;
   });
 }
 

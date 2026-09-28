@@ -640,11 +640,11 @@ if (isDirectRunUrl(process.argv[1], import.meta.url)) {
     args = parseBuildAllArgs(process.argv.slice(2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exit(2);
+    process.exitCode = 2;
   }
   if (args?.help) {
     console.log(buildAllUsage());
-  } else {
+  } else if (args) {
     const { runLegacySourceUpdateBuild } = await import("./lib/source-update-build.mts");
     const legacyExit = await runLegacySourceUpdateBuild(args.profile, (env) =>
       runBuildAllSteps(args.profile, { env }),
@@ -654,7 +654,7 @@ if (isDirectRunUrl(process.argv[1], import.meta.url)) {
       (await withDistArtifactOwnership(process.cwd(), () => runBuildAllSteps(args.profile)))
         .exitCode;
     if (exitCode !== 0) {
-      process.exit(exitCode);
+      process.exitCode = exitCode;
     }
   }
 }
