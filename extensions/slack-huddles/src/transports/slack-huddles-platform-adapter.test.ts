@@ -958,6 +958,30 @@ it("re-mutes when Slack leaves the virtual input right after the microphone unmu
   expect(mic.getAttribute("aria-checked")).toBe("false");
 });
 
+it("reports no call when membership ends during the shared runtime's device routing await", async () => {
+  const { document } = inCall(undefined, false);
+  const header = document.body.children.find((node) =>
+    (node.attributes.class ?? "").includes("p-huddle_channel_header_button--in_huddle"),
+  );
+  const playback = Object.assign(new PageNode("audio"), { setSinkId: async () => {} });
+  document.body.append(
+    playback,
+    qaNode("huddle_window_titlebar_title", "Other team huddle"),
+    new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch"),
+  );
+  const result = await fixture({
+    document,
+    joined: true,
+    onEnumerateDevices: () => {
+      if (header) {
+        header.attributes.class = "p-huddle_channel_header_button__container";
+      }
+    },
+  }).status({ mode: "agent", readOnly: true });
+  expect(result.inCall).toBe(false);
+  expect(result.meetingTitle).toBeUndefined();
+});
+
 it("does not mistake an available virtual microphone for Slack's selected input", async () => {
   const { document } = inCall(undefined, true);
   document.body.append(

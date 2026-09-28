@@ -121,8 +121,9 @@ and follow the same uppercase and length rules.
 
 Message permalinks, user ids, `slack://` deep links, and Slack `/client/...`
 browser URLs are not accepted join inputs. Use **Copy huddle link** or a channel
-reference. Team-qualified and channel-only links for the same channel reuse one
-session.
+reference. Channel ids are only unique within a workspace, so a team-qualified
+link keeps its workspace: it reuses a session only for the same workspace and
+channel, and never matches a bare channel reference.
 
 The `slack_huddles` tool supports `join`, `leave`, `status`, `transcript`, and
 `speak`. Its join `url` can be a huddle link or channel reference. In a Slack

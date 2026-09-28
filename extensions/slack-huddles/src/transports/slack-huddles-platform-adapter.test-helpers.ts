@@ -195,6 +195,8 @@ export function fixture(params: {
   window?: Record<string, unknown>;
   /** Seeds the marker a completed Join click leaves behind. */
   joined?: boolean;
+  /** Runs inside the shared runtime's awaited device enumeration. */
+  onEnumerateDevices?: () => void;
 }) {
   const window =
     params.window ??
@@ -218,12 +220,17 @@ export function fixture(params: {
     window,
     crypto: { randomUUID: () => "slack-caption-epoch" },
     // Capture setup past the ownership check is the shared runtime's concern; stop there.
-    AudioContext: class {
-      constructor() {
-        throw new Error("audio capture passed ownership");
-      }
+    AudioContext: function AudioContext() {
+      throw new Error("audio capture passed ownership");
     },
-    navigator: { mediaDevices: { enumerateDevices: async () => [] } },
+    navigator: {
+      mediaDevices: {
+        enumerateDevices: async () => {
+          params.onEnumerateDevices?.();
+          return [];
+        },
+      },
+    },
     MutationObserver: class {
       constructor(callback: () => void) {
         mutation = callback;
@@ -282,16 +289,15 @@ export function fixture(params: {
       return JSON.parse(runInNewContext(`(${source})()`, sandbox)) as Record<string, unknown>;
     },
     startAudioCapture() {
-      const build = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildAudioCaptureScript;
-      if (!build) {
-        throw new Error("Missing audio capture script");
-      }
-      const source = build({
+      const source = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildAudioCaptureScript?.({
         action: "start",
         captureId: "capture-1",
         meetingSessionId: "session-1",
         meetingUrl: HUDDLE_URL,
       });
+      if (!source) {
+        throw new Error("Missing audio capture script");
+      }
       return runInNewContext(`(${source})()`, sandbox) as Promise<string>;
     },
     transcript(finalize = false) {
