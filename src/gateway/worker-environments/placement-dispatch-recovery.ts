@@ -8,9 +8,9 @@ import {
   type WorkerActiveDispatchPlacement,
   type WorkerDispatchEnvironmentService,
 } from "./placement-dispatch-failure.js";
+import { cleanupPendingWorkspaceResultOrphans } from "./placement-dispatch-orphan-cleanup.js";
 import {
   recoverPendingWorkspaceResults,
-  cleanupPendingWorkspaceResultOrphans,
   type PlacementRecoveryDeps,
 } from "./placement-dispatch-pending-results.js";
 import type { WorkerSessionPlacementProjection } from "./placement-read-projection.types.js";
@@ -23,6 +23,16 @@ import { WorkerRuntimeRefreshPendingError } from "./provider-runtime-refresh.js"
 import { boundedWorkerError } from "./worker-error.js";
 
 const log = createSubsystemLogger("gateway/worker-placement");
+
+export type WorkerPlacementRecoveryAdmission = (
+  sessionIds: readonly string[],
+  run: () => Promise<void>,
+) => Promise<boolean>;
+
+const admitRecovery: WorkerPlacementRecoveryAdmission = async (_sessionIds, run) => {
+  await run();
+  return true;
+};
 
 function activePlacementExecutionError(
   placement: WorkerActiveDispatchPlacement,
@@ -269,7 +279,12 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
     }
   };
 
-  const reconcile = async (mode?: "startup"): Promise<void> => {
+  const reconcile = async (
+    mode?: "startup",
+    admit: WorkerPlacementRecoveryAdmission = admitRecovery,
+  ): Promise<void> => {
+    // Environment reconciliation can resume provisioning through session admission.
+    // It must finish outside admission, before any recoverSession unit enters it.
     if (mode === "startup") {
       // Drain the bounded environment pass before recovering placement authority or results.
       // Unowned teardown remains in the service-owned sweep.
@@ -293,17 +308,19 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
       orphanCleanupPending = true;
     }
     for (const { sessionId } of candidates) {
-      await recoverSession(sessionId, mode ?? "restart");
+      await admit([sessionId], () => recoverSession(sessionId, mode ?? "restart"));
     }
-    if (mode !== "startup") {
-      await cleanupPendingWorkspaceResultOrphans(deps);
-      orphanCleanupPending = false;
+    if (mode !== "startup" && orphanCleanupPending) {
+      orphanCleanupPending = !(await cleanupPendingWorkspaceResultOrphans(deps, admit));
     }
   };
 
   // Runtime sweeps must not classify a live dispatch preparation as a crash. They only repair
   // durable active ownership and retry teardown already fenced by a previous failure.
-  const reconcileActive = async (environmentId?: string): Promise<void> => {
+  const reconcileActive = async (
+    environmentId?: string,
+    admit: WorkerPlacementRecoveryAdmission = admitRecovery,
+  ): Promise<void> => {
     await environments.reconcileOnce(environmentId);
     for (const candidate of await placements.readRecoveryCandidates()) {
       if (
@@ -313,11 +330,12 @@ export function createPlacementRecoveryActions(deps: PlacementRecoveryDeps) {
       ) {
         continue;
       }
-      await recoverSession(candidate.sessionId, "runtime", environmentId);
+      await admit([candidate.sessionId], () =>
+        recoverSession(candidate.sessionId, "runtime", environmentId),
+      );
     }
     if (orphanCleanupPending && environmentId === undefined) {
-      await cleanupPendingWorkspaceResultOrphans(deps);
-      orphanCleanupPending = false;
+      orphanCleanupPending = !(await cleanupPendingWorkspaceResultOrphans(deps, admit));
     }
   };
 
