@@ -197,6 +197,7 @@ export function fixture(params: {
   joined?: boolean;
   /** Runs inside the shared runtime's awaited device enumeration. */
   onEnumerateDevices?: () => void;
+  devices?: { kind: string; label: string; deviceId: string }[];
 }) {
   const window =
     params.window ??
@@ -227,7 +228,7 @@ export function fixture(params: {
       mediaDevices: {
         enumerateDevices: async () => {
           params.onEnumerateDevices?.();
-          return [];
+          return params.devices ?? [];
         },
       },
     },

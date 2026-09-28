@@ -979,13 +979,24 @@ it("re-mutes when Slack leaves the virtual input right after the microphone unmu
   expect(mic.getAttribute("aria-checked")).toBe("false");
 });
 
-it("reports no call when membership ends during the shared runtime's device routing await", async () => {
-  const { document } = inCall(undefined, false);
-  const header = document.body.children.find((node) =>
-    (node.attributes.class ?? "").includes("p-huddle_channel_header_button--in_huddle"),
-  );
-  const playback = Object.assign(new PageNode("audio"), { setSinkId: async () => {} });
+it("does not mute or route playback when membership ends during device enumeration", async () => {
+  const { document } = inCall(undefined, true, false);
+  const header = channelHeader(true);
+  let muteWrites = 0;
+  const playback = Object.assign(new PageNode("audio"), {
+    sinkId: "physical-out",
+    async setSinkId(sinkId: string) {
+      this.sinkId = sinkId;
+    },
+  });
+  Object.defineProperty(playback, "muted", {
+    get: () => false,
+    set: () => {
+      muteWrites += 1;
+    },
+  });
   document.body.append(
+    header,
     playback,
     qaNode("huddle_window_titlebar_title", "Other team huddle"),
     new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch"),
@@ -993,13 +1004,14 @@ it("reports no call when membership ends during the shared runtime's device rout
   const result = await fixture({
     document,
     joined: true,
+    devices: [{ kind: "audiooutput", label: "BlackHole 2ch", deviceId: "virtual-out" }],
     onEnumerateDevices: () => {
-      if (header) {
-        header.attributes.class = "p-huddle_channel_header_button__container";
-      }
+      header.attributes.class = "p-huddle_channel_header_button__container";
     },
-  }).status({ mode: "agent", readOnly: true });
-  expect(result.inCall).toBe(false);
+  }).status({ mode: "agent" });
+  expect(playback.sinkId).toBe("physical-out");
+  expect(muteWrites).toBe(0);
+  expect(result).toMatchObject({ inCall: false, audioOutputRouted: false });
   expect(result.meetingTitle).toBeUndefined();
 });
 

@@ -2,6 +2,7 @@ import { MeetingPlatformAdapter } from "openclaw/plugin-sdk/meeting-runtime";
 
 export function slackHuddleStatusCallSource(): string {
   return MeetingPlatformAdapter.createStatusCallSource({
+    liveOwnershipSource: "authorityHolds()",
     platform: {
       audioOutputElementIdPrefix: "openclaw-slack-huddle-audio-output-",
       displayName: "Slack huddle",

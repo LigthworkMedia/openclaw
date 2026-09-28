@@ -12,6 +12,8 @@ type MeetingStatusCallSourceOptions = {
     manualActionReasonPrefix: string;
   };
   extraResultSource?: string;
+  /** In-page boolean expression that revalidates call ownership after media-routing awaits. */
+  liveOwnershipSource?: string;
   transcriptMaxLines?: number;
 };
 
@@ -21,10 +23,31 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
   const captionsGlobal = JSON.stringify(options.platform.globals.captions);
   const meetingGlobal = JSON.stringify(options.platform.globals.meeting);
   const transcriptMaxLines = options.transcriptMaxLines ?? 500;
+  const withLiveOwnership = (source: string) =>
+    options.liveOwnershipSource === undefined ? "" : source;
+  const ownershipCheck = (indent: number) =>
+    withLiveOwnership(
+      `\n${" ".repeat(indent)}if (!recheckAudioOwnership()) break audioOutputRouting;`,
+    );
   return `  let audioOutputRouted;
   let audioOutputDeviceLabel;
   let audioOutputRouteError;
-  let audioOutputRouteRetryable = false;
+  let audioOutputRouteRetryable = false;${withLiveOwnership(`
+  const routingSources = [];
+  const routingBridges = [];
+  const recheckAudioOwnership = () => {
+    if (${options.liveOwnershipSource}) return true;
+    if (canMutateSession) {
+      routingBridges.forEach((entry) => retireAudioBridge(entry, false));
+      retireOwnedAudioBridges();
+      routingSources.forEach(restoreAudioBridgeSource);
+    }
+    audioOutputRouted = false;
+    audioOutputRouteRetryable = true;
+    notes.push("Call ownership changed during audio routing; stopped this pass.");
+    return false;
+  };
+  audioOutputRouting: {`)}
   const remoteCapture = window.__openclawMeetingRemoteAudio;
   if (remoteCapture && remoteCapture.sessionId === sessionId && remoteCapture.isCurrent()) {
     if (canMutateSession) remoteCapture.scan();
@@ -38,7 +61,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     );
     if (media.length > 0) {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
+        const devices = await navigator.mediaDevices.enumerateDevices();${ownershipCheck(8)}
         const output = devices.find(
           (device) => device.kind === "audiooutput" && isVirtualAudioDevice(device.label)
         );
@@ -76,7 +99,13 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
               }
               // Sink changes are asynchronous. Silence the physical output until either
               // the source or its fallback bridge is confirmed on the virtual device.
-              element.muted = true;
+              ${withLiveOwnership(`routingSources.push({
+                element,
+                muted: originalMuteBySource.get(element),
+                stream: element.srcObject,
+                url: mediaSourceUrl(element),
+              });
+              `)}element.muted = true;
             }
           }
           const currentSources = new Set(routeCandidates.map((entry) => entry.element));
@@ -133,9 +162,9 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
             let directRouteError;
             if (canMutateSession && !elementRouted) {
               try {
-                await element.setSinkId(output.deviceId);
+                await element.setSinkId(output.deviceId);${ownershipCheck(16)}
                 elementRouted = element.sinkId === output.deviceId;
-              } catch (error) {
+              } catch (error) {${ownershipCheck(16)}
                 directRouteError = {
                   message: error?.message || String(error),
                   retryable: error?.name === "AbortError",
@@ -199,16 +228,16 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
                   sourceUrl: mediaSourceUrl(element),
                   stream,
                 };
-                bridgeEntries.push(entry);
+                bridgeEntries.push(entry);${withLiveOwnership("\n                routingBridges.push(entry);")}
                 suspendedBySource.delete(element);
               }
               if (entry?.bridge) {
                 try {
                   if (canMutateSession) {
                     if (entry.bridge.sinkId !== output.deviceId) {
-                      await entry.bridge.setSinkId(output.deviceId);
+                      await entry.bridge.setSinkId(output.deviceId);${ownershipCheck(22)}
                     }
-                    await entry.bridge.play();
+                    await entry.bridge.play();${ownershipCheck(20)}
                     entry.playing = true;
                   }
                   elementRouted =
@@ -217,7 +246,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
                     suspendedBySource.delete(element);
                     if (canMutateSession && !entry.sourceMuted) element.muted = true;
                   }
-                } catch (error) {
+                } catch (error) {${ownershipCheck(18)}
                   entry.playing = false;
                   if (canMutateSession) retireAudioBridge(entry, false);
                   routeErrors.push({
@@ -262,7 +291,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
           if (canMutateSession) suspendOwnedAudioBridges();
           notes.push("The OpenClaw virtual audio speaker output was not visible to ${options.platform.displayName}.");
         }
-      } catch (error) {
+      } catch (error) {${ownershipCheck(8)}
         audioOutputRouted = false;
         audioOutputRouteError = error?.message || String(error);
         if (canMutateSession) suspendOwnedAudioBridges();
@@ -273,7 +302,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     } else {
       audioOutputRouted = false;
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
+        const devices = await navigator.mediaDevices.enumerateDevices();${ownershipCheck(8)}
         const output = devices.find(
           (device) => device.kind === "audiooutput" && isVirtualAudioDevice(device.label)
         );
@@ -285,7 +314,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
         } else {
           notes.push("The OpenClaw virtual audio speaker output was not visible to ${options.platform.displayName}.");
         }
-      } catch (error) {
+      } catch (error) {${ownershipCheck(8)}
         audioOutputRouteError = error?.message || String(error);
         notes.push("Could not inspect ${options.platform.displayName} speaker outputs: " + audioOutputRouteError);
       }
@@ -296,7 +325,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     audioOutputRouted = false;
     if (canMutateSession) retireOwnedAudioBridges();
   }
-  let captioning = false;
+${withLiveOwnership("  }\n")}  let captioning = false;
   let captionsEnabledAttempted = false;
   let transcriptLines = 0;
   let lastCaptionAt;
