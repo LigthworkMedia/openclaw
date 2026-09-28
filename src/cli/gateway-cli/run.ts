@@ -988,13 +988,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
       beginBoot,
       completeBoot,
       onRestartStartupFailure: triageStartupFailure,
-      start: async ({
-        processStartedAt,
-        startupStartedAt,
-        requestHotReloadRecovery,
-        hostLifecycle,
-        startupOperation,
-      } = {}) => {
+      start: async ({ requestHotReloadRecovery, ...startupOptions } = {}) => {
         const snapshotPreparation = await import("../../config/io.snapshot-preparation.js");
         const startupConfigSnapshotReadForThisStart = startupConfigSnapshotReadForNextStart;
         startupConfigSnapshotReadForNextStart = undefined;
@@ -1004,10 +998,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
           ...(activeBootId ? { bootId: activeBootId } : {}),
           auth: authOverride,
           tailscale: tailscaleOverride,
-          ...(processStartedAt !== undefined ? { processStartedAt } : {}),
-          startupStartedAt,
-          hostLifecycle,
-          startupOperation,
+          ...startupOptions,
           prepareConfigSnapshot: snapshotPreparation.prepareHostConfigSnapshot,
           ...(requestHotReloadRecovery ? { hotReloadRecovery: requestHotReloadRecovery } : {}),
           startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart,

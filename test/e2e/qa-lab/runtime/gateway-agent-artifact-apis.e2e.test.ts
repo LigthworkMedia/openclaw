@@ -399,7 +399,7 @@ describe("Gateway agent and artifact APIs", () => {
       } as never,
     });
     expect(
-      attachManagedOutgoingMediaToMessage({ messageId, blocks: managedBlocks, stateDir }),
+      await attachManagedOutgoingMediaToMessage({ messageId, blocks: managedBlocks, stateDir }),
     ).toBe(true);
 
     await disconnectGatewayClient(client);
@@ -487,7 +487,7 @@ describe("Gateway agent and artifact APIs", () => {
         agentId: "other",
         artifactId: artifact.id,
       }),
-    ).rejects.toThrow(/artifact not found/i);
+    ).rejects.toThrow('Unknown agent id "other"');
 
     await expect(
       client.request("agents.delete", {
