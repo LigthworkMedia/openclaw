@@ -291,6 +291,7 @@ jobs:
     env:
       OPENCLAW_QA_CONVEX_SITE_URL: ${{ secrets.OPENCLAW_QA_CONVEX_SITE_URL }}
       OPENCLAW_QA_CONVEX_SECRET_CI: ${{ secrets.OPENCLAW_QA_CONVEX_SECRET_CI }}
+      OPENCLAW_QA_CONVEX_SECRET_MAINTAINER: ${{ secrets.OPENCLAW_QA_CONVEX_SECRET_MAINTAINER }}
     steps:
       - name: Inventory Telegram credential capabilities
         shell: bash
@@ -298,6 +299,11 @@ jobs:
           set -euo pipefail
           : "${OPENCLAW_QA_CONVEX_SITE_URL:?Missing OPENCLAW_QA_CONVEX_SITE_URL}"
           : "${OPENCLAW_QA_CONVEX_SECRET_CI:?Missing OPENCLAW_QA_CONVEX_SECRET_CI}"
+          if [[ -n "${OPENCLAW_QA_CONVEX_SECRET_MAINTAINER:-}" ]]; then
+            echo "maintainer admin secret available: true"
+          else
+            echo "maintainer admin secret available: false"
+          fi
 
           owner_id="release-ci-telegram-audit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           leases_file="$(mktemp)"
