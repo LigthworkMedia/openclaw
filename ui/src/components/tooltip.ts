@@ -1,9 +1,11 @@
 // Control UI adapter for Web Awesome tooltips. OpenClaw keeps its terse
 // wrapper API and manual dismissal; Web Awesome owns positioning and rendering.
-import "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 import type WaTooltip from "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 import { css, html, type TemplateResult } from "lit";
 import { property, query } from "lit/decorators.js";
+import { ensureCustomElementDefined } from "../app/lazy-custom-element.ts";
+import { formatUiError } from "../lib/format-error.ts";
+import { showToast } from "../lib/toast.ts";
 import { OpenClawLitElement } from "../lit/openclaw-element.ts";
 import { kbdStyles } from "./kbd-styles.ts";
 import {
@@ -183,6 +185,10 @@ class Tooltip extends OpenClawLitElement {
         display: contents;
       }
 
+      wa-tooltip:not(:defined) {
+        display: none;
+      }
+
       wa-tooltip {
         --max-width: var(--openclaw-tooltip-max-width, min(260px, calc(100vw - 16px)));
         --wa-tooltip-arrow-size: var(--openclaw-tooltip-arrow-size, 0px);
@@ -358,6 +364,10 @@ class Tooltip extends OpenClawLitElement {
     tooltip.showDelay = 0;
     tooltip.hideDelay = 0;
     const trigger = this.#triggerElement;
+    if (!customElements.get("wa-tooltip")) {
+      tooltip.anchor = trigger;
+      return;
+    }
     // WaTooltip's initial `for` watcher clears a directly assigned anchor.
     // Reapply it after that update or an open tooltip has no popup geometry.
     void tooltip.updateComplete.then(() => {
@@ -480,6 +490,24 @@ class Tooltip extends OpenClawLitElement {
     ) {
       return;
     }
+    // Descriptions and dismissal stay synchronous. Lit preserves these pending
+    // properties when the optional popup upgrades, including a close during loading.
+    void ensureCustomElementDefined(
+      "wa-tooltip",
+      () => import("@awesome.me/webawesome/dist/components/tooltip/tooltip.js"),
+    ).then(
+      () => {
+        if (this.isConnected) {
+          this.#syncWebAwesomeTooltip();
+        }
+      },
+      (error: unknown) => {
+        if (Tooltip.#activeByDocument.get(this.ownerDocument) === this) {
+          this.#close();
+          showToast({ message: formatUiError(error) });
+        }
+      },
+    );
     this.#clearTimers(false);
     const active = Tooltip.#activeByDocument.get(this.ownerDocument);
     if (active && active !== this) {

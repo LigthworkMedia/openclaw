@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import type WaTooltip from "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import {
@@ -11,7 +12,10 @@ import {
   waitForControlUiSettingsTakeover,
 } from "../test-helpers/control-ui-e2e.ts";
 import { openPicker, selectPickerValue } from "../test-helpers/select-picker-e2e.ts";
-import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import {
+  createControlUiE2eSuite,
+  holdModuleResponse,
+} from "./control-ui-e2e-suite.test-support.ts";
 
 /*
  * A theme that declares webfonts must actually paint in them, and a theme that
@@ -446,7 +450,28 @@ suite.define(() => {
       await page.addInitScript((value) => {
         Object.defineProperty(navigator, "platform", { get: () => value });
       }, platform);
-      await page.goto(`${suite.server.baseUrl}chat`);
+      const popupModule = await holdModuleResponse(page, /\/assets\/tooltip-[^/?]+\.js(?:\?.*)?$/u);
+      try {
+        await page.goto(`${suite.server.baseUrl}chat`);
+        const trigger = page.locator(".sidebar-brand__search");
+        await trigger.waitFor();
+        expect(popupModule.requests()).toBe(0);
+        await trigger.focus();
+        await popupModule.request;
+        expect(await trigger.getAttribute("aria-describedby")).not.toBeNull();
+        await page.keyboard.press("Escape");
+        popupModule.release();
+        await page.waitForFunction(() => Boolean(customElements.get("wa-tooltip")));
+        const popup = trigger.locator("..").locator("wa-tooltip");
+        expect(
+          await popup.evaluate(async (element: WaTooltip) => {
+            await element.updateComplete;
+            return element.open;
+          }),
+        ).toBe(false);
+      } finally {
+        popupModule.release();
+      }
       const identity = page.locator(".sidebar-identity-card");
       await identity.focus();
       await page.keyboard.press("Enter");
