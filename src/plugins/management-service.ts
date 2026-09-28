@@ -63,6 +63,7 @@ import {
 } from "./management-catalog.js";
 import { ManagedPluginLifecycleError } from "./management-lifecycle-error.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
+import { readPluginMcpAuthStatus } from "./mcp-auth-status.js";
 import {
   getOfficialExternalPluginCatalogManifest,
   listOfficialExternalPluginCatalogEntries,
@@ -624,6 +625,9 @@ export const inspectManagedPlugin = withManagedPluginCache(
           `Plugin package "${installOwner}" has incomplete manifest metadata.`,
         );
       }
+      const mcpAuth = enabled
+        ? await readPluginMcpAuthStatus({ config: params.config, pluginId, metadata })
+        : undefined;
       return {
         ok: true,
         plugin: {
@@ -645,6 +649,7 @@ export const inspectManagedPlugin = withManagedPluginCache(
         components: projectInstalledPluginComponents({ manifest, declared }),
         overview: readInstalledPluginOverview(manifest),
         credentials: manifest ? resolvePluginCredentialDescriptors(manifest) : [],
+        ...(mcpAuth ? { mcpAuth } : {}),
         reviewToken: computeDeclaredSurfaceHash(declared),
         ...(trust ? { trust } : {}),
       };
