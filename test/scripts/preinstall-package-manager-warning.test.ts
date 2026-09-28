@@ -169,74 +169,90 @@ describe("install runtime enforcement", () => {
     expect(reportError).toHaveBeenCalledWith(expect.stringContaining("detected Node missing"));
   });
 
-  it.each([
-    {
-      name: "no marker",
-      launcher: undefined,
-      bun: "1.4.3",
-      persistent: undefined,
-      accepted: false,
-      error: "detected Node missing",
-    },
-    {
-      name: "supported launcher",
-      launcher: "/opt/bun/bin/bun",
-      bun: "1.4.3",
-      persistent: undefined,
-      accepted: true,
-      error: undefined,
-    },
-    {
-      name: "old launcher",
-      launcher: "/opt/bun/bin/bun",
-      bun: "1.3.9",
-      persistent: undefined,
-      accepted: false,
-      error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4+",
-    },
-    {
-      name: "relative launcher",
-      launcher: "bin/bun",
-      bun: "1.4.3",
-      persistent: undefined,
-      accepted: false,
-      error: "detected Node missing",
-    },
-    {
-      name: "persistent old Node after the shim",
-      launcher: "/opt/bun/bin/bun",
-      bun: "1.4.3",
-      persistent: "old-node",
-      accepted: false,
-      error: "detected Node 24.14.1",
-    },
-    {
-      name: "different Bun-backed node before the shim",
-      launcher: "/opt/bun/bin/bun",
-      bun: "1.4.3",
-      persistent: "other-bun",
-      accepted: false,
-      error: "detected Node missing",
-    },
-    {
-      name: "same Bun-backed node before supported Node without marker",
-      launcher: undefined,
-      bun: "1.3.9",
-      persistent: "same-bun",
-      accepted: false,
-      error: "detected Node missing",
-    },
-    {
-      name: "same Bun-backed node before supported Node with marker",
-      launcher: "/opt/bun/bin/bun",
-      bun: "1.3.9",
-      persistent: "same-bun",
-      accepted: false,
-      error: "detected Node missing",
-    },
-  ])(
+  it.each(
+    [
+      {
+        name: "no marker",
+        launcher: undefined,
+        bun: "1.4.3",
+        persistent: undefined,
+        accepted: false,
+        error: "detected Node missing",
+      },
+      ...[
+        "bun-node-ddfce5d01",
+        "bun-node-501-6b9148b1",
+        "bun-node-501-debug",
+        "bun-node-501-6b9148b1-0123456789abcdef",
+        "bun-node-501-debug-0123456789abcdef",
+      ].flatMap((shimDirectory) =>
+        [true, false].map((shimMatchesBun) => ({
+          name: `${shimDirectory} resolving to ${shimMatchesBun ? "running" : "another"} Bun`,
+          launcher: "/opt/bun/bin/bun",
+          bun: "1.4.3",
+          persistent: undefined,
+          shimDirectory,
+          shimMatchesBun,
+          accepted: shimMatchesBun,
+          error: shimMatchesBun ? undefined : "detected Node missing",
+        })),
+      ),
+      {
+        name: "old launcher",
+        launcher: "/opt/bun/bin/bun",
+        bun: "1.3.9",
+        persistent: undefined,
+        accepted: false,
+        error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4+",
+      },
+      {
+        name: "relative launcher",
+        launcher: "bin/bun",
+        bun: "1.4.3",
+        persistent: undefined,
+        accepted: false,
+        error: "detected Node missing",
+      },
+      {
+        name: "persistent old Node after the shim",
+        launcher: "/opt/bun/bin/bun",
+        bun: "1.4.3",
+        persistent: "old-node",
+        accepted: false,
+        error: "detected Node 24.14.1",
+      },
+      {
+        name: "different Bun-backed node before the shim",
+        launcher: "/opt/bun/bin/bun",
+        bun: "1.4.3",
+        persistent: "other-bun",
+        accepted: false,
+        error: "detected Node missing",
+      },
+      {
+        name: "same Bun-backed node before supported Node without marker",
+        launcher: undefined,
+        bun: "1.3.9",
+        persistent: "same-bun",
+        accepted: false,
+        error: "detected Node missing",
+      },
+      {
+        name: "same Bun-backed node before supported Node with marker",
+        launcher: "/opt/bun/bin/bun",
+        bun: "1.3.9",
+        persistent: "same-bun",
+        accepted: false,
+        error: "detected Node missing",
+      },
+    ].map((testCase) => ({
+      shimDirectory: "bun-node-ddfce5d01",
+      shimMatchesBun: true,
+      ...testCase,
+    })),
+  )(
     "enforces the explicit Bun launcher contract: $name",
-    ({ launcher, bun, persistent, accepted, error }) => {
+    ({ launcher, bun, persistent, shimDirectory, shimMatchesBun, accepted, error }) => {
       const reportError = vi.fn();
       const run = vi.fn(
         (
@@ -271,7 +287,8 @@ describe("install runtime enforcement", () => {
               cwd: "/work/openclaw",
               execPath: "/opt/bun/bin/bun",
               realpath: (candidate) =>
-                candidate === "/tmp/bun-node-ddfce5d01/node" || candidate === "/opt/bun/bin/node"
+                (candidate === `/tmp/${shimDirectory}/node` && shimMatchesBun) ||
+                candidate === "/opt/bun/bin/node"
                   ? "/opt/bun/bin/bun"
                   : candidate,
               platform: "linux",
@@ -286,7 +303,7 @@ describe("install runtime enforcement", () => {
                 "/node_modules/.bin",
                 ...(persistent === "other-bun" ? ["/other-bun/bin"] : []),
                 ...(persistent === "same-bun" ? ["/opt/bun/bin", "/opt/node/bin"] : []),
-                "/tmp/bun-node-ddfce5d01",
+                `/tmp/${shimDirectory}`,
                 ...(persistent === "old-node" ? ["/opt/node/bin"] : []),
               ].join(":"),
               run,
@@ -307,9 +324,11 @@ describe("install runtime enforcement", () => {
             ? ["/other-bun/bin/node"]
             : persistent === "same-bun"
               ? ["/opt/bun/bin/node"]
-              : launcher?.startsWith("/")
-                ? [launcher]
-                : [],
+              : !shimMatchesBun
+                ? [`/tmp/${shimDirectory}/node`]
+                : launcher?.startsWith("/")
+                  ? [launcher]
+                  : [],
       );
     },
   );

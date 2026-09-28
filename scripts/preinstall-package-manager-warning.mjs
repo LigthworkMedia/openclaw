@@ -219,9 +219,11 @@ export function probePackageCliNodeRuntime(options = {}) {
     }
     seen.add(candidate);
     try {
-      // Skip only Bun's temporary lifecycle shim, not persistent node aliases.
+      // Skip stock/fork Bun lifecycle shims, never persistent node aliases.
       if (
-        /^bun-node-[0-9a-f]+$/u.test(pathApi.basename(pathApi.dirname(candidate))) &&
+        /^bun-node-(?:[0-9a-f]+|[0-9]+-(?:[0-9a-f]+|debug)(?:-[0-9a-f]{16})?)$/u.test(
+          pathApi.basename(pathApi.dirname(candidate)),
+        ) &&
         realpath(candidate) === realpath(execPath)
       ) {
         continue;
