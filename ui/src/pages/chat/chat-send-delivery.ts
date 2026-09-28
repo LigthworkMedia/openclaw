@@ -40,6 +40,7 @@ import {
   finishChatDeliveryAdmission,
   finishScopedChatSending,
   reconnectSafeQueuedSendState,
+  rejectOversizedQueuedChatDelivery,
   prepareQueuedChatPayload,
   publishPendingSendMessage,
   resolveQueuedChatLeaf,
@@ -65,11 +66,6 @@ import {
   refreshChatSessionListForTarget,
 } from "./chat-session.ts";
 import { getPendingChatPickerPatch } from "./chat-settings-patches.ts";
-import {
-  attachmentsTooLargeMessage,
-  oversizedAttachmentBatch,
-  resolveChatAttachmentLimits,
-} from "./components/chat-attachment-admission.ts";
 import { formatConnectError } from "./connect-error.ts";
 import { readChatSessionProjectionScope, reduceChatSessionProjection } from "./history-merge.ts";
 import { resetChatInputHistoryNavigation } from "./input-history.ts";
@@ -310,18 +306,7 @@ async function sendPreparedChatMessage(
     return "pending";
   }
 
-  const oversized = oversizedAttachmentBatch(
-    attachments,
-    resolveChatAttachmentLimits(host.hello?.policy),
-  );
-  if (oversized.length > 0) {
-    const error = attachmentsTooLargeMessage(
-      oversized.map((attachment) => attachment.fileName ?? ""),
-    );
-    if (!restoreRejectedChatDelivery(host, prepared, options)) {
-      setState("failed", error);
-    }
-    surfaceChatDeliveryFailure(host, sessionKey, prepared.agentId, error);
+  if (rejectOversizedQueuedChatDelivery(host, prepared, attachments, sessionKey, options)) {
     return "failed";
   }
 

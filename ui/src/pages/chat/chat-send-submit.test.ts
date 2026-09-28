@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { expectDefined } from "@openclaw/normalization-core/expect";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { GatewayRequestError } from "../../api/gateway.ts";
@@ -40,6 +41,13 @@ const attachmentDataUrl = "data:application/pdf;base64,JVBERi0xLjQK";
 useChatSendBrowserFixture();
 
 describe("attachment frame admission", () => {
+  const frameLimitedHello = (maxPayload: number) => ({
+    ...sessionMutationGatewayHello(),
+    policy: { maxPayload, attachments: { maxBytes: 100, maxImageBytes: 100 } },
+  });
+  const queuedAttachmentBatch = (host: ChatHost) =>
+    expectDefined(listStoredChatOutboxes(host)[0]?.queue[0], "stored attachment batch");
+
   it.each([
     { message: "@Alex review these", chatRunId: null },
     { message: "/approve approval-1 allow-once", chatRunId: "active-run" },
@@ -53,13 +61,7 @@ describe("attachment frame admission", () => {
       const replyTarget = { messageId: "reply-source", text: "Earlier question" };
       const showToast = vi.spyOn(toast, "showToast").mockReturnValue(true);
       const host = makeChatHost({
-        hello: {
-          ...sessionMutationGatewayHello(),
-          policy: {
-            maxPayload: 256 * 1024 + 92,
-            attachments: { maxBytes: 100, maxImageBytes: 100 },
-          },
-        },
+        hello: frameLimitedHello(256 * 1024 + 92),
         chatMessage: message,
         chatRunId,
         chatMentions: mentions,
@@ -88,13 +90,7 @@ describe("attachment frame admission", () => {
     const { attachments, dataUrls } = createDeliveryAttachmentBatch();
     const source = makeChatHost({
       connected: false,
-      hello: {
-        ...sessionMutationGatewayHello(),
-        policy: {
-          maxPayload: 25 * 1024 * 1024,
-          attachments: { maxBytes: 100, maxImageBytes: 100 },
-        },
-      },
+      hello: frameLimitedHello(25 * 1024 * 1024),
       chatMessage: "Review these after reconnect",
       chatAttachments: attachments,
       requestHandlers: {
@@ -106,50 +102,33 @@ describe("attachment frame admission", () => {
       },
     });
     await handleSendChat(source);
-    const original = listStoredChatOutboxes(source)[0]?.queue[0];
-    if (!original) {
-      throw new Error("Expected a durable offline attachment batch");
-    }
+    const original = queuedAttachmentBatch(source);
     expect(original.attachmentPayload).toBeDefined();
     reloadChatDocumentStorage(attachments);
     const restored = makeChatHost({
       client: source.client,
       chatMessage: "Keep this newer draft",
-      hello: {
-        ...sessionMutationGatewayHello(),
-        policy: {
-          maxPayload: 256 * 1024 + 92,
-          attachments: { maxBytes: 100, maxImageBytes: 100 },
-        },
-      },
+      hello: frameLimitedHello(256 * 1024 + 92),
     });
-
-    await resumeStoredChatOutboxes(restored);
-
-    expect(source.request).not.toHaveBeenCalledWith("chat.send", expect.anything());
-    expect(listStoredChatOutboxes(restored)[0]?.queue[0]).toMatchObject({
+    const expectedRow = {
       id: original.id,
       sendState: "failed",
       sendError: "Too large to send: brief.pdf",
       sendAttempts: 0,
       attachmentPayload: original.attachmentPayload,
-    });
+    };
+
+    await resumeStoredChatOutboxes(restored);
+
+    expect(source.request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(listStoredChatOutboxes(restored)[0]?.queue[0]).toMatchObject(expectedRow);
     expect(restored.chatError).toBe("Too large to send: brief.pdf");
 
     await retryQueuedChatMessage(restored, original.id);
 
     expect(source.request).not.toHaveBeenCalledWith("chat.send", expect.anything());
-    const failed = listStoredChatOutboxes(restored)[0]?.queue[0];
-    expect(failed).toMatchObject({
-      id: original.id,
-      sendState: "failed",
-      sendError: "Too large to send: brief.pdf",
-      sendAttempts: 0,
-      attachmentPayload: original.attachmentPayload,
-    });
-    if (!failed) {
-      throw new Error("Expected the rejected payload to remain editable");
-    }
+    const failed = queuedAttachmentBatch(restored);
+    expect(failed).toMatchObject(expectedRow);
     const hydrated = await prepareOutboxPayload(restored, failed);
     expect(
       hydrated.status === "ready" ? hydrated.update.attachments?.map(getChatAttachmentDataUrl) : [],

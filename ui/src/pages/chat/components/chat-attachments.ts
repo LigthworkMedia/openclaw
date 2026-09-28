@@ -20,12 +20,11 @@ import { admitAttachmentFiles, chatAttachmentBatchBytes } from "./chat-attachmen
 import type { ChatAttachmentControlsProps } from "./chat-attachment-controls.types.ts";
 import { renderAttachmentFileIcon } from "./chat-attachment-file-icon.ts";
 import { renderCompactAttachmentFile } from "./chat-attachment-file.ts";
-import { resizeChatAttachmentImage } from "./chat-attachment-image.ts";
 import { useSingleAttachmentPicker } from "./chat-attachment-picker-policy.ts";
 import {
   ChatAttachmentReadLifecycle,
   type ChatAttachmentRead,
-  type PendingChatAttachmentRead,
+  readChatAttachmentFile,
 } from "./chat-attachment-reads.ts";
 import { encodeTextAsDataUrl } from "./chat-attachment-text.ts";
 import { renderComposerPastedText } from "./chat-composer-pasted-text.ts";
@@ -38,7 +37,6 @@ const CHAT_ATTACHMENT_ACCEPT =
 const LARGE_PASTE_TEXT_THRESHOLD = 1000;
 const LARGE_PASTE_TEXT_MIME_TYPE = "text/plain";
 const LARGE_PASTE_TEXT_FILE_PREFIX = "pasted-text-";
-const CHAT_ATTACHMENT_READ_TIMEOUT_MS = 15_000;
 
 function isFileDrag(dataTransfer: DataTransfer | null): boolean {
   return Array.from(dataTransfer?.types ?? []).includes("Files");
@@ -190,122 +188,6 @@ export function chatAttachmentFromDataUrl(
   return chatAttachmentFromFile(parsed.file, parsed.dataUrl);
 }
 
-function readAttachmentFile(
-  file: File,
-  entry: PendingChatAttachmentRead,
-  reads: ChatAttachmentReadLifecycle,
-  props: ChatAttachmentControlsProps,
-): void {
-  const signal = props.readSignal ?? reads.readSignal;
-  if (signal.aborted) {
-    reads.remove(entry);
-    return;
-  }
-  const reader = new FileReader();
-  let preparedFile = file;
-  const preparation = new AbortController();
-  let settled = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const cancel = (outcome: "error" | "aborted") => {
-    finish(outcome);
-    try {
-      reader.abort();
-    } catch {
-      // Ignore reader abort errors on stalled handles.
-    }
-  };
-  const finish = (outcome: "ready" | "error" | "aborted") => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    preparation.abort();
-    clearTimeout(timer);
-    timer = undefined;
-    signal.removeEventListener("abort", abort);
-    entry.cancel = undefined;
-    if (outcome === "ready" && !uploadsEnabled(props.uploadConfig)) {
-      showToast({ message: uploadsDisabledMessage() });
-      // Keep a failed slot visible rather than silently dropping the rejected file.
-      reads.settle(entry, "error");
-    } else if (outcome === "ready" && typeof reader.result === "string" && !signal.aborted) {
-      const completedAttachment = registerChatAttachmentPayload({
-        attachment: entry.attachment,
-        dataUrl: reader.result,
-        file: preparedFile,
-      });
-      const ready = [...entry.destination.getAttachments(), completedAttachment];
-      const readyIds = new Set(ready.map(({ id }) => id));
-      // Publish only readable payloads, in admission order, before releasing send.
-      entry.destination.onAttachmentsChange(
-        reads
-          .project(ready)
-          .filter(({ attachment }) => readyIds.has(attachment.id))
-          .map(({ attachment }) => attachment),
-      );
-      reads.settle(entry, "ready");
-    } else if (outcome === "aborted" || signal.aborted) {
-      reads.remove(entry);
-    } else {
-      reads.settle(entry, "error");
-    }
-    entry.destination.onPendingReadsChange?.(-1);
-  };
-  const abort = () => cancel("aborted");
-  const onTimeout = () => cancel("error");
-  const setProcessing = (processing: boolean) => {
-    clearTimeout(timer);
-    timer =
-      processing && !settled ? setTimeout(onTimeout, CHAT_ATTACHMENT_READ_TIMEOUT_MS) : undefined;
-  };
-  entry.cancel = abort;
-  signal.addEventListener("abort", abort, { once: true });
-  reader.addEventListener("error", () => finish("error"), { once: true });
-  reader.addEventListener("abort", () => finish("aborted"), { once: true });
-  reader.addEventListener("load", () => finish("ready"), { once: true });
-  reader.addEventListener("progress", (event) => {
-    if (!settled && event.lengthComputable && event.total > 0) {
-      reads.updateProgress(entry, Math.min(1, Math.max(0, event.loaded / event.total)));
-      if (timer !== undefined) {
-        setProcessing(true);
-      }
-    }
-  });
-  entry.destination.onPendingReadsChange?.(1);
-  setProcessing(true);
-  const readPreparedFile = (prepared: File) => {
-    if (settled) {
-      return;
-    }
-    // Intake reserved this file's batch share at its per-file ceiling; preparation can only shrink it.
-    if (admitAttachmentFiles([prepared], props.attachmentLimits, 0).length === 0) {
-      finish("error");
-      return;
-    }
-    preparedFile = prepared;
-    entry.attachment = {
-      ...entry.attachment,
-      mimeType: prepared.type || "application/octet-stream",
-      sizeBytes: prepared.size,
-    };
-    setProcessing(true);
-    try {
-      reader.readAsDataURL(prepared);
-    } catch {
-      finish("error");
-    }
-  };
-  const imageLimit = props.attachmentLimits?.maxImageBytes;
-  if (imageLimit !== undefined && file.type.startsWith("image/") && file.size > imageLimit) {
-    void resizeChatAttachmentImage(file, imageLimit, preparation.signal, setProcessing).then(
-      readPreparedFile,
-      () => finish("error"),
-    );
-  } else {
-    readPreparedFile(file);
-  }
-}
-
 export function appendChatAttachmentFiles(
   candidates: readonly File[],
   props: ChatAttachmentControlsProps,
@@ -343,7 +225,7 @@ export function appendChatAttachmentFiles(
   entries.forEach((entry, index) => {
     const file = files[index];
     if (file) {
-      readAttachmentFile(file, entry, reads, props);
+      readChatAttachmentFile(file, entry, reads, props);
     }
   });
   return files.length;

@@ -48,7 +48,7 @@ function skippedFilesMessage(messageKey: string, names: readonly string[]): stri
   });
 }
 
-export function attachmentsTooLargeMessage(names: readonly string[]): string {
+function attachmentsTooLargeMessage(names: readonly string[]): string {
   return skippedFilesMessage("chat.attachments.tooLarge", names);
 }
 
@@ -119,7 +119,7 @@ export function chatAttachmentBatchBytes(attachments: readonly ChatAttachment[])
   return attachments.reduce((total, attachment) => total + attachmentBytes(attachment), 0);
 }
 
-export function oversizedAttachmentBatch(
+function oversizedAttachmentBatch(
   attachments: readonly ChatAttachment[],
   limits: ChatAttachmentLimits | undefined,
 ): ChatAttachment[] {
@@ -138,4 +138,14 @@ export function oversizedAttachmentBatch(
     total += size;
     return false;
   });
+}
+
+export function attachmentBatchRejection(
+  attachments: readonly ChatAttachment[],
+  policy: ChatAttachmentHelloPolicy | undefined,
+): string | undefined {
+  const oversized = oversizedAttachmentBatch(attachments, resolveChatAttachmentLimits(policy));
+  return oversized.length > 0
+    ? attachmentsTooLargeMessage(oversized.map((attachment) => attachment.fileName ?? ""))
+    : undefined;
 }

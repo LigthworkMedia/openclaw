@@ -5,11 +5,7 @@ import { trimHumanMentions } from "../../lib/chat/human-mentions.ts";
 import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
 import { buildChatApiAttachments } from "../chat/attachment-api.ts";
-import {
-  attachmentsTooLargeMessage,
-  oversizedAttachmentBatch,
-  resolveChatAttachmentLimits,
-} from "../chat/components/chat-attachment-admission.ts";
+import { attachmentBatchRejection } from "../chat/components/chat-attachment-admission.ts";
 import { prepareBackgroundSessionCompletion } from "./background-session-notice.ts";
 import type { NewSessionCapabilityController } from "./capability-controller.ts";
 import type { DraftSessionCreateOverrides, NewSessionVisibility } from "./create-params.ts";
@@ -67,16 +63,9 @@ export function prepareDraftSubmission(
   )?.map(({ profileId, start, end }) => ({ profileId, start, end }));
   const attachments = draft.attachmentDraft.attachments;
   if (!startup && !pendingPlacement) {
-    const oversized = oversizedAttachmentBatch(
-      attachments,
-      resolveChatAttachmentLimits(context.gateway.snapshot.hello?.policy),
-    );
-    if (oversized.length > 0) {
-      showToast({
-        message: attachmentsTooLargeMessage(
-          oversized.map((attachment) => attachment.fileName ?? ""),
-        ),
-      });
+    const error = attachmentBatchRejection(attachments, context.gateway.snapshot.hello?.policy);
+    if (error !== undefined) {
+      showToast({ message: error });
       return null;
     }
   }

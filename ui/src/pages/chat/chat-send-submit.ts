@@ -66,11 +66,7 @@ import {
 import { recordChatSendTiming } from "./chat-send-timing.ts";
 import { getPendingChatPickerPatch } from "./chat-settings-patches.ts";
 import { withChatSubmitGuard, withChatSubmitHandoff } from "./chat-submit-guard.ts";
-import {
-  attachmentsTooLargeMessage,
-  oversizedAttachmentBatch,
-  resolveChatAttachmentLimits,
-} from "./components/chat-attachment-admission.ts";
+import { attachmentBatchRejection } from "./components/chat-attachment-admission.ts";
 import { recordNonTranscriptInputHistory } from "./input-history.ts";
 import {
   captureOutboxPayloadOwner,
@@ -231,16 +227,11 @@ export async function handleSendChat(
       )
     : attachmentsToSend;
   const rejectOversizedAttachments = () => {
-    const oversized = oversizedAttachmentBatch(
-      deliveredAttachments,
-      resolveChatAttachmentLimits(host.hello?.policy),
-    );
-    if (oversized.length === 0) {
+    const error = attachmentBatchRejection(deliveredAttachments, host.hello?.policy);
+    if (error === undefined) {
       return false;
     }
-    showToast({
-      message: attachmentsTooLargeMessage(oversized.map((attachment) => attachment.fileName ?? "")),
-    });
+    showToast({ message: error });
     return true;
   };
 
