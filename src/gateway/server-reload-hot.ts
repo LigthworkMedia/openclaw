@@ -2,6 +2,7 @@ import { reloadSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-config.js";
 import { refreshContextWindowCache } from "../agents/context.js";
 import {
+  advancePreparedModelRuntimeConfig,
   markPreparedModelRuntimeSnapshotsStale,
   rejectPendingPreparedModelRuntimeReplacement,
   type PreparedModelRuntimeReplacementGateId,
@@ -18,6 +19,7 @@ import { PluginRuntimeApplicationError, getPluginRuntimeGeneration } from "../pl
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import type { ChannelKind, GatewayReloadPlan } from "./config-reload-plan.js";
 import {
+  doesReloadAffectProviderAuth,
   reloadPlanNeedsRecovery,
   shouldRefreshContextWindowCache,
 } from "./config-reload-recovery.js";
@@ -93,6 +95,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const state = params.getState();
     const nextState = { ...state };
     const candidateEnv = publication?.runtimeEnv ?? process.env;
+    const refreshModelRuntime = doesReloadAffectProviderAuth(plan, getRuntimeConfig(), nextConfig);
     const modelRuntimeAgentIds = mrReload.resolveReloadAgentIds(plan.changedPaths);
     const modelRuntimeRefreshScope = modelRuntimeAgentIds ? { agentIds: modelRuntimeAgentIds } : {};
 
@@ -275,12 +278,15 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
           nextState.heartbeatRunner.updateConfig(nextConfig);
         }
         revokeActiveSkillReviewsBeforeConfigPublication(nextConfig);
-        // Config, plugin hooks, and prepared stores publish as one generation. Synchronously
-        // retire the prior stores at the commit edge so no request can mix generations.
-        preparedModelRuntimeReplacementGateId = markPreparedModelRuntimeSnapshotsStale(
-          "prepared model runtime owner is stale before config publication",
-          { waitForReplacement: true, ...modelRuntimeRefreshScope },
-        );
+        if (refreshModelRuntime) {
+          // Retire model/auth inputs together so requests cannot mix generations.
+          preparedModelRuntimeReplacementGateId = markPreparedModelRuntimeSnapshotsStale(
+            "prepared model runtime owner is stale before config publication",
+            { waitForReplacement: true, ...modelRuntimeRefreshScope },
+          );
+        } else {
+          advancePreparedModelRuntimeConfig(nextConfig);
+        }
         if (!runtime) {
           params.setState(nextState);
           runtimeCommitted = true;
@@ -572,17 +578,19 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    try {
-      await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-        mrReload.refreshModelRuntimeAfterHotReload({
-          config: nextConfig,
-          agentIds: modelRuntimeAgentIds,
-          pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-        }),
-      );
-    } catch (err) {
-      scheduleRecoveryRestart("prepared model runtime reload", err);
-      return "applied-restart-required";
+    if (refreshModelRuntime) {
+      try {
+        await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
+          mrReload.refreshModelRuntimeAfterHotReload({
+            config: nextConfig,
+            agentIds: modelRuntimeAgentIds,
+            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
+          }),
+        );
+      } catch (err) {
+        scheduleRecoveryRestart("prepared model runtime reload", err);
+        return "applied-restart-required";
+      }
     }
 
     if (plan.disposeMcpRuntimes) {

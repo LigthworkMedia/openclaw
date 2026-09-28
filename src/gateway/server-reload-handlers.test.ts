@@ -98,7 +98,6 @@ import {
   type ChannelKind,
   type GatewayReloadPlan,
 } from "./config-reload-plan.js";
-import { doesReloadAffectProviderAuth } from "./config-reload-recovery.js";
 import type { GatewayHotReloadApplication } from "./config-reload-status.types.js";
 import {
   createPluginLifecycleLeaseTestClock,
@@ -1607,8 +1606,10 @@ describe("managed reload transaction ownership", () => {
   it("applies a current in-process hot config", async () => {
     const result = await runManagedOwnershipScenario({ kind: "hot", queueRevert: false });
 
-    // Hot plans rebuild prepared owners. Advancing the stamp in place is reserved for no-op plans.
-    expect(hoisted.advancePreparedModelRuntimeConfig).not.toHaveBeenCalled();
+    expect(hoisted.advancePreparedModelRuntimeConfig).toHaveBeenCalledExactlyOnceWith(
+      result.configA,
+    );
+    expect(hoisted.refreshPreparedModelRuntimeSnapshots).not.toHaveBeenCalled();
     expect(result.activateRuntimeSecrets.prepareSnapshot).toHaveBeenCalledOnce();
     expect(result.commitRuntimePolicy).toHaveBeenCalledOnce();
     expect(result.acceptTerminalConfig).toHaveBeenCalledOnce();
@@ -1639,68 +1640,6 @@ describe("managed reload transaction ownership", () => {
       expect(getActiveSecretsRuntimeSnapshot()?.sourceConfig).toEqual(result.configB);
     },
   );
-});
-
-describe("prepared provider auth reload invalidation", () => {
-  it.each([
-    "auth",
-    "env.vars.OPENAI_API_KEY",
-    "models.providers.openai.api",
-    "plugins.entries.openai.enabled",
-    "secrets.providers.default.path",
-    "agent.model",
-    "agents",
-    "agents.list",
-    "agents.defaults",
-    "agents.defaults.model",
-    "agents.defaults.heartbeat",
-    "agents.defaults.heartbeat.model",
-    "agents.defaults.compaction",
-    "agents.defaults.compaction.model",
-    "agents.defaults.compaction.provider",
-    "agents.defaults.compaction.memoryFlush",
-    "agents.defaults.compaction.memoryFlush.model",
-    "agents.defaults.subagents",
-    "agents.defaults.subagents.model.primary",
-    "agents.entries",
-    "agents.entries.main.model",
-    "agents.entries.main.heartbeat.model",
-  ])("invalidates prepared auth for config path %s", (changedPath) => {
-    expect(doesReloadAffectProviderAuth(createHotTailPlan({ changedPaths: [changedPath] }))).toBe(
-      true,
-    );
-  });
-
-  it.each([
-    "agents.defaults.heartbeat.target",
-    "agents.entries.main.heartbeat.every",
-    "agents.defaults.compaction.enabled",
-    "agents.defaults.compaction.memoryFlush.enabled",
-    "agent.heartbeat",
-    "agents.entries.main.tools",
-    "agents.defaults.subagents.thinking",
-    "logging.level",
-  ])("can retain prepared auth for unrelated config path %s", (changedPath) => {
-    expect(doesReloadAffectProviderAuth(createHotTailPlan({ changedPaths: [changedPath] }))).toBe(
-      false,
-    );
-  });
-
-  it("invalidates prepared auth when plugins reload without a config path", () => {
-    expect(
-      doesReloadAffectProviderAuth(createHotTailPlan({ changedPaths: [], reloadPlugins: true })),
-    ).toBe(true);
-  });
-
-  it("retains auth-relevant changes mixed with unrelated config paths", () => {
-    expect(
-      doesReloadAffectProviderAuth(
-        createHotTailPlan({
-          changedPaths: ["logging.level", "agents.defaults.workspace"],
-        }),
-      ),
-    ).toBe(true);
-  });
 });
 
 describe("gateway hot reload model state", () => {
@@ -2000,37 +1939,48 @@ describe("gateway hot reload model state", () => {
   });
 
   it.each([
-    "agents.defaults.compaction.model",
-    "agents.defaults.compaction.maxActiveTranscriptBytes",
-  ])("refreshes prepared model runtime without restarting subsystems: %s", async (changedPath) => {
-    const logReload = { info: vi.fn(), warn: vi.fn() };
-    const channels = { start: vi.fn(async () => new Map()), stop: vi.fn(async () => {}) };
-    const { applyHotReload, heartbeatRunner, cron } = createReloadHandlersForTest(
-      logReload,
-      channels,
-    );
-    const nextConfig = {
-      agents: {
-        defaults: {
-          compaction: {
-            model: "mock-openai/gpt-5.6-luna-new",
-            maxActiveTranscriptBytes: "10b",
+    { changedPath: "agents.defaults.compaction.model", modelChanged: true },
+    { changedPath: "agents.defaults.compaction.maxActiveTranscriptBytes", modelChanged: false },
+  ])(
+    "refreshes only changed model inputs without restarting subsystems: $changedPath",
+    async ({ changedPath, modelChanged }) => {
+      const logReload = { info: vi.fn(), warn: vi.fn() };
+      const channels = { start: vi.fn(async () => new Map()), stop: vi.fn(async () => {}) };
+      const { applyHotReload, heartbeatRunner, cron } = createReloadHandlersForTest(
+        logReload,
+        channels,
+      );
+      const nextConfig = {
+        agents: {
+          defaults: {
+            compaction: {
+              ...(modelChanged ? { model: "mock-openai/gpt-5.6-luna-new" } : {}),
+              maxActiveTranscriptBytes: "10b",
+            },
           },
         },
-      },
-    } satisfies OpenClawConfig;
+      } satisfies OpenClawConfig;
 
-    await applyHotReload(buildGatewayReloadPlan([changedPath]), nextConfig);
+      await applyHotReload(buildGatewayReloadPlan([changedPath]), nextConfig);
 
-    expect(hoisted.markPreparedModelRuntimeSnapshotsStale).toHaveBeenCalledOnce();
-    expectPreparedModelRefresh(nextConfig);
-    expect(heartbeatRunner.updateConfig).not.toHaveBeenCalled();
-    expect(cron.stop).not.toHaveBeenCalled();
-    expect(channels.start).not.toHaveBeenCalled();
-    expect(channels.stop).not.toHaveBeenCalled();
-    expect(hoisted.reloadSessionMcpRuntimes).not.toHaveBeenCalled();
-    expect(logReload.info).toHaveBeenCalledWith(`config hot reload applied (${changedPath})`);
-  });
+      if (modelChanged) {
+        expect(hoisted.markPreparedModelRuntimeSnapshotsStale).toHaveBeenCalledOnce();
+        expectPreparedModelRefresh(nextConfig);
+      } else {
+        expect(hoisted.markPreparedModelRuntimeSnapshotsStale).not.toHaveBeenCalled();
+        expect(hoisted.refreshPreparedModelRuntimeSnapshots).not.toHaveBeenCalled();
+        expect(hoisted.advancePreparedModelRuntimeConfig).toHaveBeenCalledExactlyOnceWith(
+          nextConfig,
+        );
+      }
+      expect(heartbeatRunner.updateConfig).not.toHaveBeenCalled();
+      expect(cron.stop).not.toHaveBeenCalled();
+      expect(channels.start).not.toHaveBeenCalled();
+      expect(channels.stop).not.toHaveBeenCalled();
+      expect(hoisted.reloadSessionMcpRuntimes).not.toHaveBeenCalled();
+      expect(logReload.info).toHaveBeenCalledWith(`config hot reload applied (${changedPath})`);
+    },
+  );
 
   it("stops old cron exit watchers and reconciles rebuilt ones after cron restart", async () => {
     const order: string[] = [];

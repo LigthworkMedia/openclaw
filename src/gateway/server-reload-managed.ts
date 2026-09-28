@@ -53,8 +53,14 @@ import {
   type SharedGatewaySessionGenerationOwnership,
 } from "./server-shared-auth-generation.js";
 
-function canAdvancePreparedModelRuntimeConfigInPlace(plan: GatewayReloadPlan): boolean {
-  return isNoopGatewayReloadPlan(plan) && !doesReloadAffectProviderAuth(plan);
+function canAdvancePreparedModelRuntimeConfigInPlace(
+  plan: GatewayReloadPlan,
+  previousConfig: OpenClawConfig,
+  nextConfig: OpenClawConfig,
+): boolean {
+  return (
+    isNoopGatewayReloadPlan(plan) && !doesReloadAffectProviderAuth(plan, previousConfig, nextConfig)
+  );
 }
 
 export function startManagedGatewayConfigReloader(
@@ -349,6 +355,11 @@ export function startManagedGatewayConfigReloader(
       const sessionStoresChanged =
         committedRuntimeConfig.session?.store !== nextCommittedRuntimeConfig.session?.store ||
         plan.changedPaths.some((path) => path === "env" || path.startsWith("env."));
+      const advanceModelConfig = canAdvancePreparedModelRuntimeConfigInPlace(
+        plan,
+        committedRuntimeConfig,
+        nextCommittedRuntimeConfig,
+      );
       lastCommittedRuntimeConfig = nextCommittedRuntimeConfig;
       committedRuntimeConfig = nextCommittedRuntimeConfig;
       publishOperatorRoleConfigChange(params.resolveGatewayContext?.());
@@ -357,7 +368,7 @@ export function startManagedGatewayConfigReloader(
         publishSystemEventStoreConfig(nextCommittedRuntimeConfig);
       }
       params.resolveGatewayContext?.()?.mentionInbox?.invalidate();
-      if (canAdvancePreparedModelRuntimeConfigInPlace(plan)) {
+      if (advanceModelConfig) {
         advancePreparedModelRuntimeConfig(nextCommittedRuntimeConfig);
       }
     },
@@ -490,8 +501,13 @@ export function startManagedGatewayConfigReloader(
       // Cleared per transaction so a rebuild can never inherit a config committed
       // by an earlier one when this commit does not reach markRuntimeCommitted.
       lastCommittedRuntimeConfig = undefined;
+      const advanceModelConfig = canAdvancePreparedModelRuntimeConfigInPlace(
+        plan,
+        committedRuntimeConfig,
+        nextConfig,
+      );
       const applicationStatus = await onHotReload(plan, nextConfig, ownership, sourceConfig);
-      if (isNoopGatewayReloadPlan(plan) && !canAdvancePreparedModelRuntimeConfigInPlace(plan)) {
+      if (isNoopGatewayReloadPlan(plan) && !advanceModelConfig) {
         // Rebuild against the committed runtime config, not the source-derived
         // candidate. `secrets.providers.*` resolves to a different object, and
         // stamping the rebuilt owner with the pre-resolution identity makes every
