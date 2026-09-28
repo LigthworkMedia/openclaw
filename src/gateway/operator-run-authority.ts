@@ -481,6 +481,13 @@ export async function captureGatewayOperatorRunAuthority(input: {
       authority: createAdmittedRunOperatorAuthority({
         profileId,
         scopes,
+        rolePolicy: capturedRole
+          ? {
+              sessionAccessCap: capturedRole.sessions.others,
+              sandboxRequired: capturedRole.sandbox === "required",
+              agents: capturedRole.agents,
+            }
+          : undefined,
         readCurrentRoleAssignment: () => {
           assertCurrent();
           return assertProfileCurrent().assignedRole;

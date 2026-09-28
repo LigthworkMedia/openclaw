@@ -355,6 +355,7 @@ function resolveReplyToolAuthorityInputFingerprint(
         operatorAuthority: authority
           ? {
               scopes: [...new Set(authority.scopes)].toSorted(),
+              rolePolicy: authority.rolePolicy,
               gatewayAccessGrant:
                 authority.gatewayAccessGrant === undefined
                   ? resolveReplyOperatorAuthorityKey(authority)

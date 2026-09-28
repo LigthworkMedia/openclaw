@@ -86,9 +86,10 @@ people have steered the turn, the agent must pass that person's verified
 `requester_profile.id` as `user` to choose whose view or appearance to change,
 and ask if it is unclear. Each authenticated Control UI message includes its
 requester's verified profile id in the agent's user-role conversation context.
-Different permissions (role scopes, model access, access grant, or tool policy)
-queue the message as a followup; changes to execution policy, workspace, or
-bound tools can also require a followup.
+Different permissions (role scopes, session access cap, sandbox requirement,
+allowed agents, model access, access grant, or tool policy) queue the message as
+a followup; changes to execution policy, workspace, or bound tools can also
+require a followup.
 
 Automatic credential rotation and model fallback also retain the active turn.
 New input can steer that turn while the selected model remains unchanged, fallback

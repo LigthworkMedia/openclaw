@@ -35,9 +35,10 @@ import {
   loadTranscriptEventsSync,
   patchSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
+import type { GatewayOperatorRoleDefinition } from "../../config/types.gateway.js";
 import { rotateAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
-import { ensureProfileForEmail, linkEmail } from "../../state/user-profiles.js";
+import { ensureProfileForEmail, linkEmail, setUserProfileRole } from "../../state/user-profiles.js";
 import { captureGatewayOperatorRunAuthority } from "../operator-run-authority.js";
 import { handleGatewayRequest } from "../server-methods.js";
 import {
@@ -62,24 +63,77 @@ describe("steering input custody", () => {
     "revoked grant",
     "same permissions across profiles",
     "different scopes across profiles",
+    "same role permissions across profiles",
+    "different role session caps across profiles",
+    "different role agents across profiles",
+    "different role sandbox across profiles",
   ] as const)(
     "preserves authenticated chat.send steering authority across callers (%s)",
     async (scenario) => {
       const startOwnerTurn = scenario === "same permissions across profiles";
-      const fixture = await createBrowserFollowupFixture({
-        preserveContent: true,
-        active: !startOwnerTurn,
-      });
       const profile = ensureProfileForEmail("reconnect-steering@example.test");
-      const acrossProfiles =
-        scenario === "same permissions across profiles" ||
-        scenario === "different scopes across profiles";
+      const acrossProfiles = scenario.endsWith("across profiles");
+      const withRoles = scenario.includes("role");
       const incomingProfile = acrossProfiles
         ? ensureProfileForEmail("other-steering@example.test")
         : profile;
-      const accepted = scenario === "same grant" || scenario === "same permissions across profiles";
-      const queued =
-        scenario === "changed grant" || scenario === "different scopes across profiles";
+      const fixture = await createBrowserFollowupFixture({
+        preserveContent: true,
+        active: !startOwnerTurn,
+        sandbox: scenario === "different role sandbox across profiles" ? "required" : undefined,
+        // Both callers may write here; their caps still differ for other sessions.
+        ...(withRoles
+          ? { createdActor: { type: "human", source: "profile", id: incomingProfile.id } as const }
+          : {}),
+      });
+      if (withRoles) {
+        const role: GatewayOperatorRoleDefinition = {
+          scopes: ["operator.read", "operator.write"],
+          sessions: { others: "write" },
+          agents: ["main", "other"],
+          modelPolicy: { allow: ["openai/gpt-test"] },
+        };
+        const cfg = fixture.context.getRuntimeConfig();
+        const roleConfig: typeof cfg = {
+          ...cfg,
+          gateway: {
+            ...cfg.gateway,
+            roles: {
+              definitions: {
+                writer: role,
+                participant: {
+                  ...role,
+                  sessions: {
+                    others:
+                      scenario === "different role session caps across profiles" ? "view" : "write",
+                  },
+                  agents:
+                    scenario === "different role agents across profiles"
+                      ? ["main"]
+                      : scenario === "same role permissions across profiles"
+                        ? ["other", "main"]
+                        : role.agents,
+                  sandbox:
+                    scenario === "different role sandbox across profiles"
+                      ? "required"
+                      : scenario === "same role permissions across profiles"
+                        ? "inherit"
+                        : role.sandbox,
+                },
+              },
+            },
+          },
+        };
+        fixture.context.getRuntimeConfig = () => roleConfig;
+        fixture.client.connect.scopes = role.scopes;
+        setUserProfileRole(profile.id, "writer");
+        setUserProfileRole(incomingProfile.id, "participant");
+      }
+      const accepted =
+        scenario === "same grant" ||
+        scenario === "same permissions across profiles" ||
+        scenario === "same role permissions across profiles";
+      const queued = scenario === "changed grant" || scenario.startsWith("different");
       const originalGrant = new AbortController();
       const incomingGrant = new AbortController();
       const client = (connId: string, controller: AbortController, grantId: string) => ({
@@ -193,7 +247,7 @@ describe("steering input custody", () => {
           chatType: "direct",
           clientCaps: ["ui-commands"],
           gatewayUiCommandTarget: { connId: originalClient.connId, profileId: profile.id },
-          traceAuthorized: true,
+          traceAuthorized: !withRoles,
           senderIsOwner: resolveCommandAuthorization({
             cfg,
             ctx: resolveChatSendCallerContext(originalClient),
@@ -293,6 +347,9 @@ describe("steering input custody", () => {
           },
           reconnectedClient,
         );
+        if (accepted || queued) {
+          expect(dispatch.send).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+        }
         if (accepted) {
           expect(session.getSteeringMessages()).toEqual([
             expect.stringContaining(fixture.params.message),
