@@ -40,11 +40,11 @@ export async function buildTokenSharingCatalog(params: {
         ttlMs: 60_000,
         auditContext: "openai-model-discovery",
         readRows: (body) => {
-          const models = asOptionalRecord(body)?.models;
-          if (!Array.isArray(models)) {
+          const bodyModels = asOptionalRecord(body)?.models;
+          if (!Array.isArray(bodyModels)) {
             throw new Error("SIWC model discovery response must be { models: [] }");
           }
-          return models;
+          return bodyModels;
         },
       });
       // A successful account list owns visibility, display names and order.
