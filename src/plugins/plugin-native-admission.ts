@@ -242,10 +242,6 @@ export function createPluginNativeAdmission(
     });
     // Overlapping managed namespaces share inodes; a new hardlink changes earlier captures too.
     for (const namespace of state.namespaces.values()) {
-      // Persisted receipts can outlive their captures; missing namespaces require fresh admission.
-      if (!fs.statSync(pluginNativeNamespaceDirectory(namespace), { throwIfNoEntry: false })) {
-        continue;
-      }
       for (const [relative, member] of Object.entries(namespace.members)) {
         const identity = changed.get(member.source);
         const sourceChanged =
@@ -256,6 +252,10 @@ export function createPluginNativeAdmission(
           pluginSourceIdentityChangedOnlyByCtime(member.capturedIdentity, identity);
         if (!identity || (!sourceChanged && !captureChanged)) {
           continue;
+        }
+        // Persisted receipts can outlive their captures; missing namespaces require fresh admission.
+        if (!fs.statSync(pluginNativeNamespaceDirectory(namespace), { throwIfNoEntry: false })) {
+          break;
         }
         if (namespace !== previous || !captureChanged) {
           const capturedHash = hashPluginSourceFile(
