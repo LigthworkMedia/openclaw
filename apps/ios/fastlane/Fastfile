@@ -255,9 +255,6 @@ def with_screenshot_simulator(template, diagnostics: nil)
 
   begin
     screenshot_phase(diagnostics, "boot", device: name, udid: udid) do
-      unless ENV.fetch("OPENCLAW_CI_SIMSLIM_BINARY", "").empty? || name.start_with?("Apple Watch")
-        sh("/bin/bash", File.expand_path("../../../scripts/ios-simulator-prepare.sh", __dir__), udid)
-      end
       sh("xcrun", "simctl", "bootstatus", udid, "-b")
       require_exclusive_screenshot_simulator!(udid, diagnostics)
     end

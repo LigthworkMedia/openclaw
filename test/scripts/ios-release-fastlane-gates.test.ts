@@ -1294,9 +1294,7 @@ end
 def sh(command, *arguments, **_options)
   args = arguments.empty? ? Shellwords.split(command) : [command, *arguments]
   @commands << args
-  if args.any? { |arg| arg.end_with?("/ios-simulator-prepare.sh") }
-    raise "preparing unrelated device" unless @owned.key?(args.last)
-  elsif args[0, 3] == ["xcrun", "simctl", "create"]
+  if args[0, 3] == ["xcrun", "simctl", "create"]
     raise "new device before old cleanup" unless @owned.empty?
     @created += 1
     udid = "00000000-0000-0000-0000-%012d" % @created
@@ -1322,12 +1320,11 @@ def sh(command, *arguments, **_options)
   end
 end
 
-results = %w[combined diagnostics prepared iphone standalone standalone-build-failure missing invalid-plist invalid-install build-failure busy boot-failure capture-failure capture-cleanup-failure cleanup-failure].map do |scenario|
+results = %w[combined diagnostics iphone standalone standalone-build-failure missing invalid-plist invalid-install build-failure busy boot-failure capture-failure capture-cleanup-failure cleanup-failure].map do |scenario|
   Dir.mktmpdir("openclaw-watch-build-") do |root|
     @root, @scenario, @builds, @commands, @installed = root, scenario, [], [], nil
     @owned, @created = {}, 0
     ENV["HOME"] = root
-    ENV["OPENCLAW_CI_SIMSLIM_BINARY"] = scenario == "prepared" ? "/fixture/simslim" : ""
     ENV["OPENCLAW_SNAPSHOT_DIAGNOSTICS"] = scenario == "diagnostics" ? "1" : "0"
     logs = File.join(ios_root, "build", "SnapshotLogs")
     FileUtils.mkdir_p(logs)
@@ -1358,7 +1355,6 @@ results = %w[combined diagnostics prepared iphone standalone standalone-build-fa
     {
       scenario: scenario, builds: @builds, error: error, installed: @installed,
       owned: @owned.keys,
-      prepared: @commands.select { |args| args.any? { |arg| arg.end_with?("/ios-simulator-prepare.sh") } }.map(&:last),
       lifecycle: @commands.select { |args| args[0, 2] == ["xcrun", "simctl"] && %w[create bootstatus shutdown delete].include?(args[2]) }.map { |args| args.drop(2) },
       pngs: Dir[File.join(ios_root, "fastlane", "screenshots", "en-US", "*.png")].length,
       xcresults: Dir[File.join(ios_root, "build", "SnapshotTestResults", "*.xcresult")].length,
@@ -1390,7 +1386,6 @@ puts JSON.generate(results)
       logs: string[];
       versions: string[][];
       owned: string[];
-      prepared: string[];
       lifecycle: string[][];
     }[];
     const row = (scenario: string) => rows.find((entry) => entry.scenario === scenario)!;
@@ -1493,11 +1488,6 @@ puts JSON.generate(results)
         .lifecycle.filter(([operation]) => operation === "create")
         .map(([, name]) => name),
     ).toEqual(["iPhone 17 Pro Max", "iPad Pro 13-inch", "Apple Watch Ultra 3 (49mm)"]);
-    expect(row("prepared").error).toBeNull();
-    expect(row("prepared").prepared).toEqual([
-      "00000000-0000-0000-0000-000000000001",
-      "00000000-0000-0000-0000-000000000002",
-    ]);
     expect(row("busy").error).toContain("shut down the 1 active simulator");
     expect(row("busy").lifecycle).toEqual([]);
     expect(row("boot-failure").error).toBe("boot failed");
