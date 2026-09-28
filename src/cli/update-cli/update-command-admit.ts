@@ -70,7 +70,10 @@ async function inspectUpdateAdmission(
     delete env.OPENCLAW_BUNDLED_PLUGINS_DIR;
     return await withOwnedManagedUpdateEnv(env, async () => {
       const timeoutMs = context.request.timeoutMs ?? 120_000;
-      const checks: UpdateAdmissionVerdict["facts"]["checks"] = [];
+      const checks = new Map<
+        string,
+        Omit<UpdateAdmissionVerdict["facts"]["checks"][number], "name">
+      >();
       const reasons: UpdateAdmissionVerdict["reasons"] = [];
       const warnings: UpdateAdmissionVerdict["warnings"] = [];
       const legacyConfigWarning = {
@@ -79,7 +82,7 @@ async function inspectUpdateAdmission(
           "Configuration contains legacy fields that candidate Doctor can repair after installation.",
       };
       const refuse = (name: string, code: string, message: string, nextAction?: string) => {
-        checks.push({ name, status: "refuse", detail: message });
+        checks.set(name, { status: "refuse", detail: message });
         reasons.push({ code, message, ...(nextAction ? { nextAction } : {}) });
       };
       let databaseContext:
@@ -102,7 +105,7 @@ async function inspectUpdateAdmission(
         if (legacyConfigPlan) {
           warnings.push(legacyConfigWarning);
         }
-        checks.push({ name: "config", status: warnings.length ? "warn" : "ok" });
+        checks.set("config", { status: warnings.length ? "warn" : "ok" });
       } catch (error) {
         if (!(error instanceof UpdatePreMutationError)) {
           throw error;
@@ -132,9 +135,7 @@ async function inspectUpdateAdmission(
               formatSchemaRefusalLines(schemas).join("\n"),
             );
           } else {
-            if (!checks.some((check) => check.name === "database-schema")) {
-              checks.push({ name: "database-schema", status: "ok" });
-            }
+            checks.set("database-schema", { status: "ok" });
             return true;
           }
         } catch (error) {
@@ -177,18 +178,13 @@ async function inspectUpdateAdmission(
             })),
           );
           if (snapshot.warnings.length || databaseContext.legacyConfigPlan) {
-            checks[0] = { name: "config", status: "warn" };
+            checks.set("config", { status: "warn" });
           }
         } catch (error) {
           if (!(error instanceof UpdatePreMutationError)) {
             throw error;
           }
-          checks[0] = { name: "config", status: "refuse", detail: error.message };
-          reasons.push({
-            code: error.reason,
-            message: error.message,
-            nextAction: error.nextAction,
-          });
+          refuse("config", error.reason, error.message, error.nextAction);
           databaseContext = undefined;
         }
       }
@@ -199,8 +195,7 @@ async function inspectUpdateAdmission(
       const runtimeCompatible =
         !nodeEngines || nodeVersionSatisfiesEngine(process.versions.node, nodeEngines) === true;
       // Selection and provisioning require the installed supervisor's execution authority.
-      checks.push({
-        name: "node-runtime",
+      checks.set("node-runtime", {
         status: runtimeCompatible ? "ok" : "warn",
         ...(!runtimeCompatible
           ? {
@@ -228,14 +223,19 @@ async function inspectUpdateAdmission(
             message: warning.message,
           })),
         );
-        checks.push({ name: "plugin-availability", status: pluginWarnings.length ? "warn" : "ok" });
+        checks.set("plugin-availability", { status: pluginWarnings.length ? "warn" : "ok" });
       }
       return {
         protocol: UPDATE_ADMISSION_PROTOCOL,
         verdict: reasons.length ? "refuse" : "admit",
         reasons,
         warnings,
-        facts: { candidateVersion, installedVersion, nodeEngines, checks },
+        facts: {
+          candidateVersion,
+          installedVersion,
+          nodeEngines,
+          checks: Array.from(checks, ([name, check]) => ({ name, ...check })),
+        },
       };
     });
   });
