@@ -21,6 +21,7 @@ export type PublishedModelCatalogOwnerCandidate = Readonly<{
   /** Reports whether this exact lifecycle generation is still published. */
   isCurrent: () => boolean;
   modelCatalog: ModelCatalogSnapshot;
+  accountCatalog?: import("./prepared-model-runtime-auth.js").PreparedAccountCatalogAccess;
 }>;
 
 export type ResolvedPublishedModelCatalogOwner = Readonly<

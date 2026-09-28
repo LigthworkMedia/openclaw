@@ -6262,7 +6262,7 @@ describe("chat model controls", () => {
       ),
     ).find((button) => button.getAttribute("aria-selected") === "false");
     modelOption?.click();
-    container.querySelector<HTMLButtonElement>("[data-chat-speed-toggle]")?.click();
+    container.querySelector<HTMLButtonElement>('[data-chat-speed-option="on"]')?.click();
     getThinkingSlider(container)?.dispatchEvent(new Event("change", { bubbles: true }));
 
     expect(onFastModeSelect).not.toHaveBeenCalled();
@@ -6538,9 +6538,9 @@ describe("chat model controls", () => {
     }
     expect(onThinkingSelect).toHaveBeenCalledWith("low", "main");
 
-    const speedToggle = container.querySelector<HTMLButtonElement>("[data-chat-speed-toggle]");
-    expect(speedToggle).toBeInstanceOf(HTMLButtonElement);
-    speedToggle?.click();
+    const fastOption = container.querySelector<HTMLButtonElement>('[data-chat-speed-option="on"]');
+    expect(fastOption).toBeInstanceOf(HTMLButtonElement);
+    fastOption?.click();
     expect(onFastModeSelect).toHaveBeenCalledWith("on", "main");
   });
 
@@ -7285,10 +7285,10 @@ describe("chat model controls", () => {
     }
     expect(onThinkingSelect).toHaveBeenCalledWith("low", "main");
 
-    const speedToggle = container.querySelector<HTMLButtonElement>("[data-chat-speed-toggle]");
-    expect(speedToggle).toBeInstanceOf(HTMLButtonElement);
-    await waitForFast(() => expect(speedToggle?.disabled).toBe(false));
-    speedToggle?.click();
+    const fastOption = container.querySelector<HTMLButtonElement>('[data-chat-speed-option="on"]');
+    expect(fastOption).toBeInstanceOf(HTMLButtonElement);
+    await waitForFast(() => expect(fastOption?.disabled).toBe(false));
+    fastOption?.click();
     expect(onFastModeSelect).toHaveBeenCalledWith("on", "main");
   });
 
@@ -7301,9 +7301,9 @@ describe("chat model controls", () => {
     // The session row still describes the previous model while the switch is
     // pending, so committing reasoning/speed then would target stale levels.
     expect(getThinkingSlider(container)?.disabled).toBe(true);
-    const speedToggle = container.querySelector<HTMLButtonElement>("[data-chat-speed-toggle]");
-    expect(speedToggle).toBeInstanceOf(HTMLButtonElement);
-    expect(speedToggle?.disabled).toBe(true);
+    const fastOption = container.querySelector<HTMLButtonElement>('[data-chat-speed-option="on"]');
+    expect(fastOption).toBeInstanceOf(HTMLButtonElement);
+    expect(fastOption?.disabled).toBe(true);
   });
 
   it("orders model-dependent patches after a pending model switch", async () => {
@@ -7546,7 +7546,7 @@ describe("chat model controls", () => {
     expect(row?.fastMode).toBe(false);
   });
 
-  it("keeps the speed toggle visible and disabled for unsupported providers", () => {
+  it("hides speed choices for unsupported providers", () => {
     const { state } = createChatHeaderState({
       model: "local-model",
       modelProvider: "ollama",
@@ -7555,10 +7555,8 @@ describe("chat model controls", () => {
     });
     const container = renderModelControls(state);
 
-    const speedToggle = container.querySelector<HTMLButtonElement>("[data-chat-speed-toggle]");
-    expect(speedToggle).toBeInstanceOf(HTMLButtonElement);
-    expect(speedToggle?.getAttribute("aria-label")).toContain("Default");
-    expect(speedToggle?.disabled).toBe(true);
+    expect(container.querySelector("[data-chat-speed-option]")).toBeNull();
+    expect(getThinkingSlider(container)).toBeInstanceOf(HTMLInputElement);
   });
 
   it("uses default thinking options when the active session is absent", () => {

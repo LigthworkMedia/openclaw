@@ -194,6 +194,7 @@ export type ModelCatalogDecisionParams = {
   pinnedProfileId?: string;
   profileProvider?: string;
   runtimeOverride?: string;
+  accountCatalog?: import("./prepared-model-runtime-auth.js").PreparedAccountCatalogAccess;
   routeResolverFactory?: typeof createOpenAIModelRoutesResolver;
   isCurrent?: () => boolean;
 };
@@ -278,6 +279,19 @@ export function createModelCatalogDecisions(params: ModelCatalogDecisionParams) 
       ),
     };
   }
+  // Selected-account discovery is private to this prepared projection, never the shared inventory.
+  const providerOutcomes = [...(snapshot.providerOutcomes ?? [])];
+  const statusSource = snapshot;
+  snapshot = {
+    ...snapshot,
+    providerOutcomes,
+    get refreshFailed() {
+      return statusSource.refreshFailed;
+    },
+    get pendingProviders() {
+      return statusSource.pendingProviders;
+    },
+  };
   const nativeEvaluator = prepareModelCatalogView({
     ...params,
     snapshot,
@@ -319,7 +333,7 @@ export function createModelCatalogDecisions(params: ModelCatalogDecisionParams) 
   });
   const evaluateStoredEntry = createModelsListEntryEvaluator({
     authResolver,
-    providerOutcomes: params.snapshot.providerOutcomes,
+    providerOutcomes,
     preferredProfilesByProvider,
     runtimeOverride: params.runtimeOverride,
     normalizeAuthProvider: (provider) =>
@@ -344,9 +358,72 @@ export function createModelCatalogDecisions(params: ModelCatalogDecisionParams) 
               routeResolution: null,
             }
     : evaluateStoredEntry;
+  const accountObservations: Array<() => boolean> = [];
   const isCurrent = () =>
-    Date.now() < authValidUntil && (params.isCurrent?.() ?? params.observationConfig === undefined);
+    Date.now() < authValidUntil &&
+    (params.isCurrent?.() ?? params.observationConfig === undefined) &&
+    accountObservations.every((current) => current());
+  const prepareSelectedAccountCatalog = async (
+    assertCurrent: () => void,
+    options: { allowDiscovery: boolean; refresh?: boolean },
+  ): Promise<void> => {
+    if (!params.accountCatalog) {
+      return;
+    }
+    const selections = new Map(preferredProfilesByProvider);
+    if (selectedProfileId && profileProvider) {
+      selections.set(normalizeProviderId(profileProvider), selectedProfileId);
+    }
+    for (const [providerId, profileId] of selections) {
+      assertCurrent();
+      const credential = authStore.profiles[profileId];
+      if (!credential) {
+        continue;
+      }
+      const acquired = await params.accountCatalog.acquire({
+        profileId,
+        credential,
+        ...options,
+        load: async () => {
+          assertCurrent();
+          const provider = params.pluginRegistry?.providers.find(
+            ({ provider: candidate }) => normalizeProviderId(candidate.id) === providerId,
+          )?.provider;
+          if (!provider?.catalog) {
+            return [];
+          }
+          const { loadSelectedProviderAccountCatalog } =
+            await import("./models-config.providers.catalog-context.js");
+          assertCurrent();
+          return loadSelectedProviderAccountCatalog({
+            provider,
+            providerId,
+            profileId,
+            authStore,
+            config: params.cfg,
+            agentDir: params.agentDir ?? resolveAgentDir(params.cfg, params.agentId),
+            workspaceDir,
+            isCurrent,
+            assertCurrent,
+          });
+        },
+      });
+      assertCurrent();
+      accountObservations.push(acquired.isCurrent);
+      providerOutcomes.splice(
+        0,
+        providerOutcomes.length,
+        ...providerOutcomes.filter(
+          (outcome) =>
+            normalizeProviderId(outcome.provider) !== providerId || outcome.profileId !== profileId,
+        ),
+        ...acquired.outcomes,
+      );
+    }
+  };
   return {
+    accountCatalog: params.accountCatalog,
+    prepareSelectedAccountCatalog,
     evaluateEntry,
     evaluateNative,
     snapshot,

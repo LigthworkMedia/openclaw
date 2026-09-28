@@ -1,9 +1,11 @@
 import { parseStrictPositiveInteger } from "@openclaw/normalization-core/number-coercion";
 import {
+  normalizeFastMode,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { html, nothing } from "lit";
+import { formatFastModeValue } from "../../../../src/shared/fast-mode.js";
 import type {
   AgentIdentityResult,
   GatewaySessionRow,
@@ -1107,14 +1109,7 @@ function renderSessionDetailsRow(params: {
   const labelDisabledReason = props.labelDisabledReason?.(row);
   const rawThinking = row.thinkingLevel ?? "";
   const thinking = rawThinking ? normalizeThinkingOptionValue(rawThinking) : "";
-  const fastMode =
-    row.fastMode === "auto"
-      ? "auto"
-      : row.fastMode === true
-        ? "on"
-        : row.fastMode === false
-          ? "off"
-          : "";
+  const fastMode = row.fastMode === undefined ? "" : formatFastModeValue(row.fastMode);
   const overrides: Array<
     Omit<Parameters<typeof renderOverrideSelect>[0], "disabled" | "disabledReason">
   > = [
@@ -1130,7 +1125,7 @@ function renderSessionDetailsRow(params: {
       options: buildSessionLevelOptions(FAST_LEVEL_VALUES),
       onChange: (value) =>
         props.onPatch(row.key, {
-          fastMode: value === "" ? null : value === "auto" ? "auto" : value === "on",
+          fastMode: normalizeFastMode(value) ?? null,
         }),
     },
     {

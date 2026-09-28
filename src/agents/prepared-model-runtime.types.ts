@@ -84,6 +84,7 @@ export type PreparedModelRuntimeSnapshot = Readonly<{
   /** Session active project set, ordered most-recent first; empty before run binding. */
   activeProjectKeys: readonly string[];
   config: OpenClawConfig;
+  accountCatalog?: import("./prepared-model-runtime-auth.js").PreparedAccountCatalogAccess;
   /** Native observations retain preparation identity across model-neutral config publications. */
   observationConfig: OpenClawConfig;
   isCurrent: () => boolean;

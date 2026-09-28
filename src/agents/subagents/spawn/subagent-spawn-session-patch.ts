@@ -71,7 +71,12 @@ function buildDirectChildSessionPatch(patch: Record<string, unknown>): Partial<S
     entry.authProfileOverride = authProfileOverride;
     entry.authProfileOverrideSource = patch.authProfileOverrideSource === "auto" ? "auto" : "user";
   }
-  if (patch.fastMode === true || patch.fastMode === false || patch.fastMode === "auto") {
+  if (
+    patch.fastMode === true ||
+    patch.fastMode === false ||
+    patch.fastMode === "auto" ||
+    patch.fastMode === "ultrafast"
+  ) {
     entry.fastMode = patch.fastMode;
   }
   if (typeof patch.swarmGroupId === "string" && patch.swarmGroupId.trim()) {

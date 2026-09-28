@@ -72,16 +72,19 @@ describe("subagent spawn model + thinking plan", () => {
     expect(plan.initialSessionPatch.thinkingLevel).toBe("high");
   });
 
-  it("threads explicit fast mode into the initial child session patch", async () => {
-    const plan = expectOkPlan(
-      await resolveSubagentModelAndThinkingPlan({
-        cfg: createConfig(),
-        targetAgentId: "research",
-        fastMode: "auto",
-      }),
-    );
-    expect(plan.initialSessionPatch.fastMode).toBe("auto");
-  });
+  it.each(["auto", "ultrafast"] as const)(
+    "threads explicit %s into the initial child session patch",
+    async (fastMode) => {
+      const plan = expectOkPlan(
+        await resolveSubagentModelAndThinkingPlan({
+          cfg: createConfig(),
+          targetAgentId: "research",
+          fastMode,
+        }),
+      );
+      expect(plan.initialSessionPatch.fastMode).toBe(fastMode);
+    },
+  );
 
   it("rejects invalid thinking levels before any runtime work", async () => {
     const plan = await resolveSubagentModelAndThinkingPlan({

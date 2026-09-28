@@ -389,6 +389,7 @@ public enum OpenClawChatGatewayRequests {
         case .off: AnyCodable(false)
         case .on: AnyCodable(true)
         case .automatic: AnyCodable("auto")
+        case .ultrafast: AnyCodable("ultrafast")
         }
     }
 

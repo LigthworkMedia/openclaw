@@ -190,3 +190,70 @@ export async function reportProviderCatalogSecretFailure(
   }
   return true;
 }
+
+/** An authorized selected profile reuses normal bounded provider discovery without failover. */
+export async function loadSelectedProviderAccountCatalog(params: {
+  provider: ProviderPlugin;
+  providerId: string;
+  profileId: string;
+  authStore: AuthProfileStore;
+  config: OpenClawConfig;
+  agentDir: string;
+  workspaceDir: string;
+  isCurrent: () => boolean;
+  assertCurrent: () => void;
+}): Promise<readonly ProviderCatalogOutcome[]> {
+  const { providerId, profileId, authStore, assertCurrent } = params;
+  const credential = authStore.profiles[profileId];
+  if (!credential) {
+    return [];
+  }
+  const [{ runProviderCatalogWithTimeout }, { createProviderAuthResolver }] = await Promise.all([
+    import("./models-config.providers.implicit.js"),
+    import("./models-config.providers.secrets.js"),
+  ]);
+  assertCurrent();
+  const selectedStore = { ...authStore, profiles: { [profileId]: credential } };
+  const selectedConfig = {
+    ...params.config,
+    auth: {
+      ...params.config.auth,
+      order: { ...params.config.auth?.order, [providerId]: [profileId] },
+    },
+  };
+  const resolveAuth = createProviderAuthResolver(process.env, selectedStore, selectedConfig);
+  const lockedAuth: typeof resolveAuth = (requested, options) => {
+    assertCurrent();
+    const auth = resolveAuth(requested, options);
+    return auth.profileId === profileId
+      ? auth
+      : { apiKey: undefined, mode: "none", source: "none", preparationFailed: true };
+  };
+  const acquired: ProviderCatalogOutcome[] = [];
+  await runProviderCatalogWithTimeout({
+    provider: params.provider,
+    providerIds: [providerId],
+    config: params.config,
+    agentDir: params.agentDir,
+    workspaceDir: params.workspaceDir,
+    env: process.env,
+    authStore: selectedStore,
+    timeoutMs: 5_000,
+    resolveProviderAuth: (requested, options) => lockedAuth(requested ?? providerId, options),
+    resolveProviderApiKey: (requested) => {
+      const { mode, ...auth } = lockedAuth(requested ?? providerId);
+      return {
+        ...auth,
+        ...(mode === "api_key" || mode === "oauth" || mode === "token" ? { mode } : {}),
+      };
+    },
+    isActive: params.isCurrent,
+    reportCatalogOutcome: (outcome) => {
+      if (normalizeProviderId(outcome.provider) === providerId && outcome.profileId === profileId) {
+        acquired.push(outcome);
+      }
+    },
+  });
+  assertCurrent();
+  return acquired;
+}

@@ -429,7 +429,7 @@ function* projectSessionPatchSteps(
   } else if (rawFastMode !== undefined) {
     const normalized = normalizeFastMode(rawFastMode);
     if (normalized === undefined) {
-      return invalid('invalid fastMode (use true, false, or "auto")');
+      return invalid('invalid fastMode (use true, false, "auto", or "ultrafast")');
     }
     next.fastMode = normalized;
   }
