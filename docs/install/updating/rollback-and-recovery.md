@@ -112,7 +112,9 @@ Rollback, failed or unverified completion, and refused restoration retain them.
 If cleanup cannot finish, the update reports a maintenance warning with the
 retained path. Older snapshot directories are not automatically removed: their
 ownership and successful outcome cannot be proven from existing receipts.
-Inspect the corresponding update report and recovery state before manual cleanup.
+Doctor reports older npm snapshot directories with their size and removal command.
+Confirm no update is in progress and inspect the corresponding update report and
+recovery state before manual cleanup.
 If the Gateway was confirmed stopped during capture, a failed candidate
 that was never allowed to start can restore those databases before package
 rollback when Doctor's recorded write fingerprints still match. A change between
