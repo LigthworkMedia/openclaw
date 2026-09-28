@@ -199,6 +199,20 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     inCall = false;
     authorityLost = true;
   }
+  // Channel ids are workspace-scoped: a channel-only session binds to the workspace where it first
+  // proved membership (the page identity then rejects other workspaces) until no call is live.
+  if (canMutateSession && expectedIdentity && !/^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity)) {
+    const workspaces = (window.__openclawSlackHuddleWorkspaces ||= {});
+    let pageTeam;
+    try {
+      pageTeam = new URL(location.href).pathname.match(/^\\/(?:client|huddle)\\/([TE][A-Z0-9]{8,})\\//)?.[1];
+    } catch {}
+    if (inCall && pageTeam && !workspaces[expectedIdentity]) {
+      workspaces[expectedIdentity] = pageTeam;
+    } else if (!inCallControl && !joinSettling) {
+      delete workspaces[expectedIdentity];
+    }
+  }
   if (authorityLost) {
     notes.push("Slack huddle state changed during status; later controls were left untouched.");
     const promptNow = firstRaw(selectors.multiDevice) || firstRaw(selectors.confirmation);

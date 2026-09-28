@@ -31,6 +31,8 @@ function pageIdentityFunctionSource(expectedIdentity: string | undefined): strin
       const key = ${teamScoped} ? (match[1] || "unknown-team") + ":" + match[2] : match[2];
       const identity = "slack-huddle:" + key;
       if (rawUrl !== location.href) return identity;
+      const boundWorkspace = window.__openclawSlackHuddleWorkspaces?.[identity];
+      if (boundWorkspace && match[1] !== boundWorkspace) return "slack-huddle-other-workspace:" + key;
       // The URL names only the viewed channel. While a call is live, only Slack's membership header for
       // that channel (or this session's own settling Join) vouches for it; anything else fails closed.
       const hooks = ${ownershipHooks};
