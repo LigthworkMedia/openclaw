@@ -218,6 +218,22 @@ describe("install runtime enforcement", () => {
       accepted: false,
       error: "detected Node missing",
     },
+    {
+      name: "same Bun-backed node before supported Node without marker",
+      launcher: undefined,
+      bun: "1.3.9",
+      persistent: "same-bun",
+      accepted: false,
+      error: "detected Node missing",
+    },
+    {
+      name: "same Bun-backed node before supported Node with marker",
+      launcher: "/opt/bun/bin/bun",
+      bun: "1.3.9",
+      persistent: "same-bun",
+      accepted: false,
+      error: "detected Node missing",
+    },
   ])(
     "enforces the explicit Bun launcher contract: $name",
     ({ launcher, bun, persistent, accepted, error }) => {
@@ -234,8 +250,13 @@ describe("install runtime enforcement", () => {
           return {
             status: 0,
             stdout: JSON.stringify({
-              version: persistent === "old-node" ? "24.14.1" : "24.3.0",
-              bunVersion: persistent === "old-node" ? null : bun,
+              version:
+                _command === "/opt/node/bin/node"
+                  ? persistent === "old-node"
+                    ? "24.14.1"
+                    : "24.16.0"
+                  : "24.3.0",
+              bunVersion: _command === "/opt/node/bin/node" ? null : bun,
               execPath: _command,
             }),
           };
@@ -250,7 +271,9 @@ describe("install runtime enforcement", () => {
               cwd: "/work/openclaw",
               execPath: "/opt/bun/bin/bun",
               realpath: (candidate) =>
-                candidate === "/tmp/bun-node-fixture/node" ? "/opt/bun/bin/bun" : candidate,
+                candidate === "/tmp/bun-node-ddfce5d01/node" || candidate === "/opt/bun/bin/node"
+                  ? "/opt/bun/bin/bun"
+                  : candidate,
               platform: "linux",
               env: {
                 OPENCLAW_PACKAGE_BUN_LAUNCHER: launcher,
@@ -262,7 +285,8 @@ describe("install runtime enforcement", () => {
                 "/work/node_modules/.bin",
                 "/node_modules/.bin",
                 ...(persistent === "other-bun" ? ["/other-bun/bin"] : []),
-                "/tmp/bun-node-fixture",
+                ...(persistent === "same-bun" ? ["/opt/bun/bin", "/opt/node/bin"] : []),
+                "/tmp/bun-node-ddfce5d01",
                 ...(persistent === "old-node" ? ["/opt/node/bin"] : []),
               ].join(":"),
               run,
@@ -281,9 +305,11 @@ describe("install runtime enforcement", () => {
           ? ["/opt/node/bin/node"]
           : persistent === "other-bun"
             ? ["/other-bun/bin/node"]
-            : launcher?.startsWith("/")
-              ? [launcher]
-              : [],
+            : persistent === "same-bun"
+              ? ["/opt/bun/bin/node"]
+              : launcher?.startsWith("/")
+                ? [launcher]
+                : [],
       );
     },
   );

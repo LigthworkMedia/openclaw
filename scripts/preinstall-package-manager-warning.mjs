@@ -219,8 +219,11 @@ export function probePackageCliNodeRuntime(options = {}) {
     }
     seen.add(candidate);
     try {
-      // Bun's temporary lifecycle node shim will disappear after installation.
-      if (realpath(candidate) === realpath(execPath)) {
+      // Skip only Bun's temporary lifecycle shim, not persistent node aliases.
+      if (
+        /^bun-node-[0-9a-f]+$/u.test(pathApi.basename(pathApi.dirname(candidate))) &&
+        realpath(candidate) === realpath(execPath)
+      ) {
         continue;
       }
     } catch {
