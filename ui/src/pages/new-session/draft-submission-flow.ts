@@ -403,12 +403,12 @@ export class DraftSubmissionFlow {
       this.noteBlockedSubmitAttempt();
       return;
     }
-    const preparedTitle = this.callbacks.takePreparedTitle?.();
     this.blockedSubmitGate = null;
     const input = prepareDraftSubmission(context, this, this.place, startup, background);
     if (!input) {
       return;
     }
+    const preparedTitle = this.callbacks.takePreparedTitle?.();
     const requestId = ++this.submitRequestToken;
     const submittedDraft = this.draftPersistence.captureSubmission();
     const submittedAt = startup?.startedAt ?? Date.now();

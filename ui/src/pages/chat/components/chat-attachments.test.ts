@@ -5,18 +5,60 @@ import { render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ChatAttachment } from "../../../lib/chat/chat-types.ts";
 import * as payloads from "../attachment-payload-store.ts";
+import {
+  chatAttachmentBatchBytes,
+  resolveChatAttachmentLimits,
+} from "./chat-attachment-admission.ts";
 import { ChatAttachmentReadLifecycle } from "./chat-attachment-reads.ts";
 import {
+  appendChatAttachmentFiles,
   chatAttachmentFromDataUrl,
   handleChatAttachmentPaste,
   renderAttachmentPreview,
 } from "./chat-attachments.ts";
 
+it("memoizes each advertised policy and derives the default decoded frame budget", () => {
+  const policy = {
+    maxPayload: 25 * 1024 * 1024,
+    attachments: { maxBytes: 20 * 1024 * 1024, maxImageBytes: 6 * 1024 * 1024 },
+  };
+  const limits = resolveChatAttachmentLimits(policy);
+  expect(limits).toEqual({ ...policy.attachments, maxBatchBytes: 19_464_192 });
+  expect(resolveChatAttachmentLimits(policy)).toBe(limits);
+  expect(resolveChatAttachmentLimits({ ...policy, maxPayload: 256 * 1024 })).toEqual({
+    ...policy.attachments,
+    maxBatchBytes: 0,
+  });
+  expect(resolveChatAttachmentLimits(undefined)).toBeUndefined();
+  expect(resolveChatAttachmentLimits({ maxPayload: policy.maxPayload })).toBeUndefined();
+});
+
+it("counts restored payload bytes when size metadata is absent or invalid", () => {
+  const attachments: ChatAttachment[] = [
+    { id: "size", mimeType: "text/plain", sizeBytes: 4, dataUrl: "data:text/plain;base64,aGk=" },
+    { id: "missing", mimeType: "text/plain", dataUrl: "data:text/plain;base64,aGk=" },
+    {
+      id: "invalid",
+      mimeType: "text/plain",
+      sizeBytes: NaN,
+      dataUrl: "data:text/plain;base64,YQ==",
+    },
+    {
+      id: "negative",
+      mimeType: "text/plain",
+      sizeBytes: -1,
+      dataUrl: "data:text/plain;base64,YWJj",
+    },
+    { id: "unavailable", mimeType: "text/plain", sizeBytes: Infinity },
+  ];
+  expect(chatAttachmentBatchBytes(attachments)).toBe(10);
+});
+
 it("admits same-name image payloads with independent identities", () => {
   const sources = ["data:image/png;base64,YmVmb3Jl", "data:image/png;base64,YWZ0ZXIh"];
   const attachments = sources.map((source) => {
     const attachment = expectDefined(
-      chatAttachmentFromDataUrl(source, "capture.png"),
+      chatAttachmentFromDataUrl(source, "capture.png", undefined, 0),
       "admitted image attachment",
     );
     onTestFinished(() => payloads.releaseChatAttachmentPayload(attachment.id));
@@ -274,9 +316,70 @@ describe("chat attachment read failures", () => {
     expect(container.querySelector(".chat-attachment-thumb")).toBeNull();
   });
 
+  it("rejects batch overflow by name and admits a later smaller file before reading", async () => {
+    vi.useFakeTimers();
+    const reads = new ChatAttachmentReadLifecycle(() => {});
+    onTestFinished(() => {
+      reads.abortReads();
+      vi.useRealTimers();
+    });
+    const files = [
+      new File(["1234"], "first.png", { type: "image/png" }),
+      new File(["5678"], "second.png", { type: "image/png" }),
+      new File(["90"], "third.png", { type: "image/png" }),
+    ];
+    StubFileReader.heldNames = new Set(files.map((file) => file.name));
+    const admitted = appendChatAttachmentFiles(files, {
+      attachmentLimits: { maxBytes: 8, maxImageBytes: 8, maxBatchBytes: 6 },
+      attachmentReads: reads,
+      attachments: [],
+      onAttachmentsChange: vi.fn(),
+    });
+    expect(admitted).toBe(2);
+    expect(reads.project([]).map(({ attachment }) => attachment.fileName)).toEqual([
+      "first.png",
+      "third.png",
+    ]);
+    await toastHost.updateComplete;
+    expect(toastHost.querySelectorAll(".app-toast")).toHaveLength(1);
+    expect(toastHost.querySelector(".app-toast__message")?.textContent).toBe(
+      "Too large to send: second.png",
+    );
+  });
+
+  it("reserves the batch budget for ready attachments and overlapping in-flight reads", async () => {
+    vi.useFakeTimers();
+    const reads = new ChatAttachmentReadLifecycle(() => {});
+    onTestFinished(() => {
+      reads.abortReads();
+      vi.useRealTimers();
+    });
+    StubFileReader.heldNames = new Set(["reading.png", "overflow.png"]);
+    const attachments: ChatAttachment[] = [{ id: "ready", mimeType: "image/png", sizeBytes: 3 }];
+    const props = {
+      attachmentLimits: { maxBytes: 8, maxImageBytes: 8, maxBatchBytes: 8 },
+      attachmentReads: reads,
+      attachments,
+      onAttachmentsChange: vi.fn(),
+    };
+    expect(
+      appendChatAttachmentFiles([new File(["123"], "reading.png", { type: "image/png" })], props),
+    ).toBe(1);
+    expect(
+      appendChatAttachmentFiles([new File(["456"], "overflow.png", { type: "image/png" })], props),
+    ).toBe(0);
+    expect(
+      reads.project(attachments).map(({ attachment }) => attachment.fileName ?? attachment.id),
+    ).toEqual(["ready", "reading.png"]);
+    await toastHost.updateComplete;
+    expect(toastHost.querySelector(".app-toast__message")?.textContent).toBe(
+      "Too large to send: overflow.png",
+    );
+  });
+
   it("rejects oversized files against hello policy before encoding", async () => {
     const onAttachmentsChange = vi.fn();
-    const limits = { maxBytes: 8, maxImageBytes: 4 };
+    const limits = { maxBytes: 8, maxImageBytes: 4, maxBatchBytes: 8 };
     handleChatAttachmentPaste(
       pasteEventWithFiles([
         new File(["tiny"], "small.png", { type: "image/png" }),
@@ -300,7 +403,7 @@ describe("chat attachment read failures", () => {
     handleChatAttachmentPaste(
       pasteEventWithFiles([new File(["way-too-big"], "huge.png", { type: "image/png" })]),
       {
-        attachmentLimits: { maxBytes: 1024, maxImageBytes: 4 },
+        attachmentLimits: { maxBytes: 1024, maxImageBytes: 4, maxBatchBytes: 1024 },
         attachments: [],
         onAttachmentsChange,
       },
@@ -337,7 +440,7 @@ describe("chat attachment read failures", () => {
         },
       } as unknown as ClipboardEvent,
       {
-        attachmentLimits: { maxBytes: 1024, maxImageBytes: 1024 },
+        attachmentLimits: { maxBytes: 1024, maxImageBytes: 1024, maxBatchBytes: 1024 },
         attachments: [],
         onAttachmentsChange,
       },
@@ -362,7 +465,7 @@ describe("chat attachment read failures", () => {
         },
       } as unknown as ClipboardEvent,
       {
-        attachmentLimits: { maxBytes: 1024, maxImageBytes: 16 },
+        attachmentLimits: { maxBytes: 1024, maxImageBytes: 16, maxBatchBytes: 1024 },
         attachments: [],
         onAttachmentsChange,
       },

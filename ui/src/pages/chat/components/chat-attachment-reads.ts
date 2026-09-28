@@ -39,6 +39,13 @@ export class ChatAttachmentReadLifecycle {
     return this.controller.signal;
   }
 
+  pendingBytes(): number {
+    return this.entries.reduce(
+      (total, entry) => total + (entry.state === "reading" ? (entry.attachment.sizeBytes ?? 0) : 0),
+      0,
+    );
+  }
+
   updatePending(readSignal: AbortSignal, delta: 1 | -1): void {
     if (this.controller.signal !== readSignal) {
       return;

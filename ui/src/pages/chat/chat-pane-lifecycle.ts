@@ -158,7 +158,14 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionObservation {
 
   /** Receives one complete browser annotation without mixing generated context into the user's draft. */
   protected receiveBrowserAnnotation(event: Event): void {
-    if (!admitBrowserAnnotation(this.state, this.active && this.presented, event)) {
+    if (
+      !admitBrowserAnnotation(
+        this.state,
+        this.active && this.presented,
+        event,
+        this.chatState.attachmentReads.pendingBytes(),
+      )
+    ) {
       return;
     }
     // A null mount binds only when its first annotation ownership begins.
