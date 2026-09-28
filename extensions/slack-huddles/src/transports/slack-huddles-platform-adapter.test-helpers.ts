@@ -290,11 +290,11 @@ export function fixture(params: {
       const result = await runInNewContext(`(${source})()`, sandbox);
       return JSON.parse(result) as Record<string, unknown>;
     },
-    leave(leaveInitiated = false) {
+    leave(leaveInitiated = false, meetingUrl = HUDDLE_URL) {
       const source = SLACK_HUDDLES_PLATFORM_ADAPTER.browser.buildSessionLeaveScript?.({
         leaveInitiated,
         meetingSessionId: "session-1",
-        meetingUrl: HUDDLE_URL,
+        meetingUrl,
       });
       if (!source) {
         throw new Error("Missing session-owned leave script");

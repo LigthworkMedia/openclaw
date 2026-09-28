@@ -130,8 +130,12 @@ export function slackHuddleLeaveScript(params: {
     // Leave buttons are global: only Slack's membership header for the requested channel authorizes
     // them, and departure needs proof too, so a view without that header keeps the session in the call.
     controlSource: `const firstMatch = (list) => list.map((selector) => document.querySelector(selector)).find(Boolean);
-  const member = Boolean(expectedIdentity && currentIdentity === expectedIdentity &&
+  const headerInHuddle = Boolean(expectedIdentity && currentIdentity === expectedIdentity &&
     firstMatch(selectors.channelHeaderInHuddle));
+  // A channel-only session must still hold its workspace binding (lost on reload) to press Leave.
+  const workspaceBound = /^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity || "") ||
+    Boolean(window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]);
+  const member = headerInHuddle && workspaceBound;
   const switchPrompt = Boolean(firstMatch(selectors.confirmation) || firstMatch(selectors.multiDevice));
   const leave = member && !switchPrompt ? firstMatch(selectors.leave) : undefined;
   const confirmation = undefined;
@@ -139,7 +143,7 @@ export function slackHuddleLeaveScript(params: {
   // with no Join outstanding, proves the account left.
   const joinSettling = state?.identity === expectedIdentity && state.joinRequested === true &&
     Date.now() - (state.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
-  const provenDeparted = Boolean(firstMatch(selectors.channelHeader)) && !member && !joinSettling;
+  const provenDeparted = Boolean(firstMatch(selectors.channelHeader)) && !headerInHuddle && !joinSettling;
   const currentUrlMatches = Boolean(expectedIdentity && currentIdentity === expectedIdentity);`,
     departedMarkerSource: "provenDeparted",
     expectedIdentity: normalizeSlackHuddleUrlForReuse(params.meetingUrl),

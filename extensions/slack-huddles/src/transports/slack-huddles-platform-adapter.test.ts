@@ -468,6 +468,15 @@ describe("Slack huddle browser adapter", () => {
     });
   });
 
+  it("does not press Leave for a channel-only session that lost its workspace binding", () => {
+    const { document, marker } = inCall();
+    const browser = fixture({ document, currentUrl: CLIENT_URL });
+    expect(browser.leave(false, "https://app.slack.com/huddle/C0123ABCD")).toMatchObject({
+      departed: false,
+    });
+    expect(marker.clicks).toBe(0);
+  });
+
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {
     const { document } = inCall(undefined, false, false);
     document.body.append(channelHeader(true));
