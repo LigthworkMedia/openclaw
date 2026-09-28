@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { toUSVString } from "node:util";
-import type { Selectable } from "kysely";
+import { sql, type Selectable } from "kysely";
 import {
   getNodeSqliteKysely,
   executeSqliteQuerySync,
@@ -36,13 +36,18 @@ import {
   type CanonicalSessionValidationRow,
 } from "./session-canonical-row.js";
 import {
+  sessionEntrySnapshotColumns,
+  type SessionEntrySnapshotRow,
+} from "./session-entry-snapshots.js";
+import {
   collectSessionEntryLookupKeys,
   resolveDeliveryProvenCanonicalSessionKey,
 } from "./store-entry.js";
 import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 type OpenClawAgentDatabaseReader = Pick<OpenClawAgentDatabase, "agentId" | "db">;
-type SessionEntryRow = Selectable<OpenClawAgentKyselyDatabase["session_nodes"]>;
+type SessionEntryRow = Selectable<OpenClawAgentKyselyDatabase["session_nodes"]> &
+  SessionEntrySnapshotRow;
 
 function prepareExactSessionEntryQueries(database: DatabaseSync) {
   const db = getNodeSqliteKysely<OpenClawAgentKyselyDatabase>(database);
@@ -59,23 +64,12 @@ function prepareExactSessionEntryQueries(database: DatabaseSync) {
       db
         .selectFrom("session_nodes")
         .selectAll()
+        .select(sessionEntrySnapshotColumns)
         .where(
           "session_key",
           "=",
           parameter((key) => key),
         ),
-    ),
-    json: prepareSqliteQueryTakeFirstSync<string, Pick<SessionEntryRow, "entry_json">>(
-      database,
-      (parameter) =>
-        db
-          .selectFrom("session_nodes")
-          .select("entry_json")
-          .where(
-            "session_key",
-            "=",
-            parameter((key) => key),
-          ),
     ),
     metadata: (key: string) => {
       const ownerColumns = hasSqliteSessionOwnerColumns(database);
@@ -86,7 +80,10 @@ function prepareExactSessionEntryQueries(database: DatabaseSync) {
           (parameter) =>
             selectSessionEntryRows({ db: database }, "list", [], ownerColumns)
               .select(["current_session_id", "updated_at"])
-              .select((eb) => eb.cast<string>("session_nodes.rowid", "text").as("rowid"))
+              .select(
+                /* kysely-allow-raw: implicit SQLite rowid is absent from declared-column types. */
+                sql<string>`CAST(session_nodes.rowid AS TEXT)`.as("rowid"),
+              )
               .where(
                 "session_key",
                 "=",
@@ -105,14 +102,15 @@ function prepareExactSessionEntryQueries(database: DatabaseSync) {
           string,
           CanonicalSessionValidationRow & ResolvedSessionEntryRow["row"]
         >(database, (parameter) =>
-          canonicalSessionValidationQuery(
-            { db: database },
-            { fullEntries: projection === "full", metadata: true },
-          ).where(
-            "session_nodes.session_key",
-            "=",
-            parameter((value) => value),
-          ),
+          canonicalSessionValidationQuery({ db: database }, { metadata: true })
+            .$if(projection === "full", (selection) =>
+              selection.select(sessionEntrySnapshotColumns),
+            )
+            .where(
+              "session_nodes.session_key",
+              "=",
+              parameter((value) => value),
+            ),
         );
         canonicalQueries.set(shape, query);
       }
@@ -140,7 +138,8 @@ function getExactSessionEntryQueries(database: DatabaseSync) {
 export type ResolvedSessionEntryRow = {
   entry: SessionEntry;
   row: Pick<SessionEntryRow, "current_session_id" | "entry_json" | "session_key" | "updated_at"> &
-    SqliteSessionOwnerRow & { rowid?: string } & Partial<
+    SqliteSessionOwnerRow &
+    SessionEntrySnapshotRow & { rowid?: string } & Partial<
       Pick<SessionEntryRow, "legacy_acp_migration_json">
     >;
 };
@@ -271,7 +270,8 @@ function selectReadableSessionEntryRows(
     ? selectSessionEntryRows(database, projection).select(["current_session_id", "updated_at"])
     : getNodeSqliteKysely<OpenClawAgentKyselyDatabase>(database.db)
         .selectFrom("session_nodes")
-        .selectAll();
+        .selectAll()
+        .select(sessionEntrySnapshotColumns);
 }
 
 function scanSessionEntryRows(
@@ -380,13 +380,6 @@ export function prepareExactSessionEntryRowReads(
         return entry ? { entry, row } : undefined;
       });
   });
-}
-
-export function readExactSessionEntryJson(
-  database: Pick<OpenClawAgentDatabase, "db">,
-  sessionKey: string,
-): string | undefined {
-  return getExactSessionEntryQueries(database.db).json(sessionKey)?.entry_json;
 }
 
 export function readExactSessionEntryRowValidated(

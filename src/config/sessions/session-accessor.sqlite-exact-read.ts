@@ -472,6 +472,7 @@ function groupExactSessionEntryReadRequests(scopes: readonly ExactSessionEntryBa
     {
       options: OpenClawAgentDatabaseOptions;
       projection: SessionEntryReadScope["projection"];
+      clone: boolean;
       requests: Array<{ index: number; sessionKeys: string[] }>;
     }
   >();
@@ -488,8 +489,14 @@ function groupExactSessionEntryReadRequests(scopes: readonly ExactSessionEntryBa
         options.agentId,
         resolveOpenClawAgentSqlitePath(options),
         scope.projection ?? "full",
+        scope.clone !== false,
       ].join("\u0000");
-      const group = groups.get(groupKey) ?? { options, projection: scope.projection, requests: [] };
+      const group = groups.get(groupKey) ?? {
+        options,
+        projection: scope.projection,
+        clone: scope.clone !== false,
+        requests: [],
+      };
       group.requests.push({ index, sessionKeys });
       groups.set(groupKey, group);
     } catch (error) {
@@ -516,6 +523,7 @@ export function loadExactSessionEntryCandidatesReadOnlyBatch(
               database,
               group.requests.map((request) => request.sessionKeys),
               group.projection,
+              { clone: group.clone },
             );
             for (const [ordinal, request] of group.requests.entries()) {
               const result = grouped[ordinal]!;
