@@ -182,6 +182,7 @@ export async function startNodeWorkerLaunchTransport(params: {
   adapter: NodeWorkerChildAdapter;
   descriptor: WorkerLaunchDescriptor;
   container?: NodeWorkerContainerIdentity;
+  idleRetention?: boolean;
   isCurrent: () => boolean;
 }): Promise<void> {
   if (!params.isCurrent()) {
@@ -193,7 +194,10 @@ export async function startNodeWorkerLaunchTransport(params: {
   if (!params.isCurrent()) {
     throw new Error("node worker admission closed before descriptor dispatch");
   }
-  await sendNodeWorkerInput(params.adapter, buildWorkerProcessTurn(params.descriptor));
+  await sendNodeWorkerInput(
+    params.adapter,
+    buildWorkerProcessTurn(params.descriptor, params.idleRetention),
+  );
 }
 
 export async function sendNodeWorkerInput(

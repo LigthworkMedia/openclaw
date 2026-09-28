@@ -12,6 +12,29 @@ import {
 } from "./runtime.test-support.js";
 
 describe("node-host update pause", () => {
+  it("retires idle workers before update admission while holding new invokes", async () => {
+    const retirement = createDeferred();
+    const entered = createDeferred();
+    mocks.retireIdleWorkers.mockImplementationOnce(async () => {
+      entered.resolve();
+      await retirement.promise;
+    });
+    const runtime = await startRuntime();
+    const pausing = runtime.tryPauseForUpdate();
+    try {
+      await entered.promise;
+      await runtime.invoke(frame);
+      expect(mocks.handleInvoke).not.toHaveBeenCalled();
+      retirement.resolve();
+      expect(await pausing).toBe(true);
+      expect(mocks.retireIdleWorkers).toHaveBeenCalledOnce();
+    } finally {
+      retirement.resolve();
+      await pausing;
+      await runtime.close();
+    }
+  });
+
   it.each(["idle", "busy", "error", "plugin", "disconnect", "close"] as const)(
     "holds invoke admission through a delayed worker idle read ending in %s",
     async (outcome) => {

@@ -825,16 +825,22 @@ describe("node worker supervisor", () => {
         );
 
         if (retryJournal) {
-          const finish = vi.spyOn(NodeWorkerTurnStore.prototype, "finish");
-          finish
-            .mockImplementationOnce(async () => {
-              throw new Error("injected cancellation journal failure");
-            })
-            .mockImplementation(async function (this: NodeWorkerTurnStore, params) {
+          const execute = NodeWorkerJournalWorker.prototype.execute;
+          let firstFinish = true;
+          const finish = vi
+            .spyOn(NodeWorkerJournalWorker.prototype, "execute")
+            .mockImplementation(async function (this: NodeWorkerJournalWorker, command, authority) {
+              if (command.type !== "nodeWorker.turn.finish") {
+                return execute.call(this, command, authority);
+              }
+              if (firstFinish) {
+                firstFinish = false;
+                throw new Error("injected cancellation journal failure");
+              }
               retryStarted.resolve();
               await releaseRetry.promise;
               finish.mockRestore();
-              return this.finish(params);
+              return this.execute(command, authority);
             });
         }
         cancellation = supervisor.cancel(testNodeWorkerLaunchIdentity(input));

@@ -63,6 +63,7 @@ export async function startNodeWorkerChild(
     supervisor: NodeWorkerProcessIdentity;
     claim: NodeWorkerLaunchClaim;
     signal?: AbortSignal;
+    idleGeneration?: number;
   },
 ): Promise<NodeWorkerLaunchReceipt> {
   const sensitiveValues = nodeWorkerDescriptorSecrets(params.descriptor);
@@ -150,6 +151,7 @@ export async function startNodeWorkerChild(
     binding: nodeWorkerEnvironmentBinding(params.input),
     turn: createNodeWorkerActiveTurn(params.claim),
     retiring: false,
+    idleGeneration: params.idleGeneration,
     adapter,
     journalReady,
     gatewayNamespace: params.input.gatewayNamespace,
@@ -213,6 +215,7 @@ export async function startNodeWorkerChild(
       adapter,
       descriptor: params.descriptor,
       container,
+      idleRetention: active.idleGeneration !== undefined,
       isCurrent: () =>
         context.active.get(active.launchId) === active &&
         !context.isClosed() &&
@@ -263,6 +266,10 @@ export async function stopNodeWorkerChild(
   state: NodeWorkerStopState | undefined,
   lifecycle?: NodeWorkerContainerLifecycle,
 ): Promise<void> {
+  active.retiring = true;
+  if (active.retention?.reason === "idle") {
+    clearTimeout(active.retention.timer);
+  }
   active.stopState ??= state;
   if (active.container) {
     // The attach client owns no workload; fence the container and prove its
