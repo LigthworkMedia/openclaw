@@ -22,7 +22,11 @@ import {
   kickFollowupDrainIfIdle,
   rememberFollowupDrainCallback,
 } from "./drain.js";
-import { completeFollowupRunLifecycle, markFollowupRunEnqueued } from "./lifecycle.js";
+import {
+  completeFollowupRunLifecycle,
+  isFollowupRunPending,
+  markFollowupRunEnqueued,
+} from "./lifecycle.js";
 import {
   peekRecentQueueMessageId,
   recordRecentQueueMessageId,
@@ -165,11 +169,7 @@ export function enqueueFollowupRun(
       return false;
     }
     if (options.steerCandidate) {
-      const { promise: acceptance, resolve: settle } = createDeferredCore<boolean>();
-      run.steerPending = { phase: "waiting", predecessor: queue.steerAcceptanceTail, settle };
-      // A canceled waiter can settle before its predecessor. Its successors
-      // must still wait for every earlier attempt to settle.
-      queue.steerAcceptanceTail = queue.steerAcceptanceTail.then(() => acceptance);
+      reserveSteerAcceptance(queue, run);
     }
     appendQueueItem({
       key,
@@ -358,7 +358,8 @@ function consumeParkedFollowupRun(
   return true;
 }
 
-type ParkedSteerReservation = {
+export type ParkedSteerReservation = {
+  assertCurrent: () => void;
   admit: () => Promise<"steer" | "fallback" | "cancelled">;
   accepted: (accepted: boolean) => void;
   fallback: () => void;
@@ -387,9 +388,55 @@ export function parkSteerCandidate(
     },
     false,
   );
+  return createParkedSteerReservation(key, run);
+}
+
+function reserveSteerAcceptance(
+  queue: ReturnType<typeof getFollowupQueue>,
+  run: FollowupRun,
+): void {
+  const { promise: acceptance, resolve: settle } = createDeferredCore<boolean>();
+  run.steerPending = { phase: "waiting", predecessor: queue.steerAcceptanceTail, settle };
+  // Canceled waiters must not release successors before their own predecessors.
+  queue.steerAcceptanceTail = queue.steerAcceptanceTail.then(() => acceptance);
+}
+
+/** Reserve existing custody without enqueueing, readmitting, or changing FIFO position. */
+export function reserveQueuedSteerCandidate(
+  key: string,
+  run: FollowupRun,
+): ParkedSteerReservation | undefined {
+  const queue = getExistingFollowupQueue(key);
+  if (
+    !queue?.items.includes(run) ||
+    queue.inFlight.has(run) ||
+    queue.activeSummarySources.has(run) ||
+    run.steerPending ||
+    isFollowupRunAborted(run) ||
+    !isFollowupRunPending(run)
+  ) {
+    return undefined;
+  }
+  run.operatorAuthority?.assertCurrent();
+  reserveSteerAcceptance(queue, run);
+  return createParkedSteerReservation(key, run);
+}
+
+function createParkedSteerReservation(key: string, run: FollowupRun): ParkedSteerReservation {
+  const queue = getExistingFollowupQueue(key);
+  const pending = run.steerPending;
+  const ownsReservation = () =>
+    getExistingFollowupQueue(key) === queue &&
+    isParkedFollowupRunOwned(key, run) &&
+    run.steerPending === pending;
   return {
+    assertCurrent() {
+      if (!ownsReservation() || isFollowupRunAborted(run)) {
+        throw new Error("Queued steering source is no longer current");
+      }
+      run.operatorAuthority?.assertCurrent();
+    },
     async admit() {
-      const pending = run.steerPending;
       await racePromiseWithAbortSignal(
         pending?.predecessor ?? Promise.resolve(true),
         resolveFollowupAbortSignal(run),
@@ -399,7 +446,7 @@ export function parkSteerCandidate(
         }
         throw error;
       });
-      if (isFollowupRunAborted(run) || !isParkedFollowupRunOwned(key, run)) {
+      if (isFollowupRunAborted(run) || !ownsReservation()) {
         return "cancelled";
       }
       if (!pending || run.steerPending !== pending) {
@@ -409,9 +456,21 @@ export function parkSteerCandidate(
       pending.phase = "injecting";
       return "steer";
     },
-    accepted: (accepted) => settleParkedSteerAcceptance(key, run, accepted),
-    fallback: () => settleParkedSteerAcceptance(key, run, false),
-    consume: (disposition) => consumeParkedFollowupRun(key, run, disposition),
+    accepted: (accepted) => {
+      if (ownsReservation()) {
+        settleParkedSteerAcceptance(key, run, accepted);
+      }
+    },
+    fallback: () => {
+      if (ownsReservation()) {
+        settleParkedSteerAcceptance(key, run, false);
+      }
+    },
+    consume: (disposition) => {
+      if (ownsReservation()) {
+        consumeParkedFollowupRun(key, run, disposition);
+      }
+    },
   };
 }
 

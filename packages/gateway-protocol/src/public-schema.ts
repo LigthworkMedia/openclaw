@@ -619,6 +619,7 @@ export {
   ChatStartupParamsSchema,
   ChatMetadataParamsSchema,
   ChatSendParamsSchema,
+  ChatSteerParamsSchema,
   ChatInjectParamsSchema,
   ChatToolTitlesParamsSchema,
   ChatToolTitlesResultSchema,
