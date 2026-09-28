@@ -1,6 +1,7 @@
 // Render contract between the transcript projection and the per-session
 // virtualizer host owned by ChatTranscriptController.
-import type { TemplateResult } from "lit";
+import type { Virtualizer } from "@tanstack/virtual-core";
+import type { ReactiveController, ReactiveControllerHost, TemplateResult } from "lit";
 import type { AssistantMessageExpansionState } from "../chat-message-recovery.ts";
 import type { ChatSessionScrollPosition } from "../scroll.ts";
 import type { ChatMessageEntryAnimations } from "./chat-message-entry.ts";
@@ -29,6 +30,8 @@ export type TranscriptCallbacks = {
 
 export const CHAT_TRANSCRIPT_ESTIMATED_ROW_PX = 120;
 export const CHAT_TRANSCRIPT_OVERSCAN = 6;
+// A row can contain a whole assistant turn; keep the first presented commit small.
+export const CHAT_TRANSCRIPT_INITIAL_OVERSCAN = 2;
 // Initial virtual rows can correct their estimates for several frames. Observe
 // the range for ~200ms before accepting a saved offset that remains unreachable.
 export const CHAT_TRANSCRIPT_SCROLL_RESTORE_STABLE_FRAMES = 12;
@@ -90,3 +93,97 @@ export type TranscriptRenderSnapshot<T> = {
   renderKeyRows: ReadonlyMap<string, string>;
   entryKeys: ChatMessageEntryAnimations["projectedKeys"];
 };
+
+/** Session-owned frame work for presentation and deferred row measurement. */
+export class TranscriptPresentation implements ReactiveController {
+  private presented = false;
+  private renderedRows = false;
+  private overscanFrame: number | null = null;
+  private measureFrame: number | null = null;
+
+  constructor(
+    private readonly host: ReactiveControllerHost & {
+      readonly scrollElement: HTMLDivElement | null;
+    },
+    private readonly virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
+    private readonly callbacks: TranscriptCallbacks,
+    private readonly measureConnectedRows: () => boolean,
+  ) {
+    host.addController(this);
+  }
+
+  prepare(): void {
+    const presented = this.callbacks.visuallyPresented?.() ?? true;
+    if (presented === this.presented) {
+      return;
+    }
+    this.presented = presented;
+    if (this.overscanFrame !== null) {
+      cancelAnimationFrame(this.overscanFrame);
+      this.overscanFrame = null;
+    }
+    if (presented) {
+      this.virtualizer.setOptions({
+        ...this.virtualizer.options,
+        overscan: CHAT_TRANSCRIPT_INITIAL_OVERSCAN,
+      });
+    }
+  }
+
+  didRenderRows(count: number): void {
+    this.renderedRows = count > 0;
+  }
+
+  hostUpdated(): void {
+    this.prepare();
+    const renderedRows = this.renderedRows;
+    this.renderedRows = false;
+    const element = this.host.scrollElement;
+    if (
+      !renderedRows ||
+      !this.presented ||
+      !element ||
+      this.virtualizer.options.overscan !== CHAT_TRANSCRIPT_INITIAL_OVERSCAN ||
+      this.overscanFrame !== null
+    ) {
+      return;
+    }
+    this.overscanFrame = requestAnimationFrame(() => {
+      this.overscanFrame = null;
+      this.prepare();
+      if (this.presented && element === this.host.scrollElement) {
+        this.virtualizer.setOptions({
+          ...this.virtualizer.options,
+          overscan: CHAT_TRANSCRIPT_OVERSCAN,
+        });
+        this.host.requestUpdate();
+      }
+    });
+  }
+
+  queueRowMeasure(): void {
+    if (this.measureFrame !== null) {
+      return;
+    }
+    const element = this.host.scrollElement;
+    this.measureFrame = requestAnimationFrame(() => {
+      this.measureFrame = null;
+      if (element === this.host.scrollElement) {
+        this.measureConnectedRows();
+      }
+    });
+  }
+
+  hostDisconnected(): void {
+    if (this.overscanFrame !== null) {
+      cancelAnimationFrame(this.overscanFrame);
+      this.overscanFrame = null;
+    }
+    if (this.measureFrame !== null) {
+      cancelAnimationFrame(this.measureFrame);
+      this.measureFrame = null;
+    }
+    this.presented = false;
+    this.renderedRows = false;
+  }
+}
