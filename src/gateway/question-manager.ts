@@ -53,7 +53,9 @@ type QuestionManagerRequest = {
   sessionKey?: string;
   runId?: string;
   timeoutMs: number;
-  onResolved?: (event: QuestionResolvedEvent, observation: QuestionObservation) => void;
+  onResolved?:
+    | ((event: QuestionResolvedEvent, observation: QuestionObservation) => void)
+    | ((event: QuestionResolvedEvent, observation: QuestionObservation) => Promise<void>);
   sessionAccess?: QuestionSessionAccess;
   isRequesterActive?: () => boolean;
   requesterRun?: OperationalRunInstanceRef;
