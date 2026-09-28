@@ -30,7 +30,7 @@ import { createDeferredCore } from "../../../shared/deferred.js";
 import { prepareUserProfileSelectionAuthority } from "../../../state/user-channel-identity-operations.js";
 import { ensureProfileForEmail } from "../../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
-import { resolveGatewayAuthPolicyGeneration } from "../../auth-policy.js";
+import { captureGatewayAuthPolicy } from "../../auth-policy.js";
 import { publishOperatorRoleConfigChange } from "../../operator-role-policy.js";
 import { captureGatewayOperatorRunAuthority } from "../../operator-run-authority.js";
 import { createDirectChatContext } from "../../server-chat.agent-events.test-helpers.js";
@@ -88,7 +88,7 @@ describe("authenticated request mutation custody", () => {
       };
       setRuntimeConfigSnapshot(committedConfig);
       const client = createOperatorWsClient();
-      client.authPolicyGeneration = resolveGatewayAuthPolicyGeneration(committedConfig);
+      client.authPolicy = captureGatewayAuthPolicy(committedConfig, null);
       client.internal = { operatorRoleActor: { kind: "operator", profileId: profile.id } };
       const context = createDirectChatContext({
         getRuntimeConfig: () => committedConfig,
@@ -233,7 +233,7 @@ describe("authenticated request mutation custody", () => {
       });
       client.usesSharedGatewayAuth = true;
       client.sharedGatewaySessionGeneration = "generation-a";
-      client.authPolicyGeneration = resolveGatewayAuthPolicyGeneration(committedConfig);
+      client.authPolicy = captureGatewayAuthPolicy(committedConfig, null);
       client.connectionSignal = connection.signal;
       client.internal = {
         operatorRoleActor: {
@@ -363,7 +363,7 @@ describe("authenticated request mutation custody", () => {
     client.usesSharedGatewayAuth = true;
     client.sharedGatewaySessionGeneration = "generation-a";
     setRuntimeConfigSnapshot({});
-    client.authPolicyGeneration = resolveGatewayAuthPolicyGeneration({});
+    client.authPolicy = captureGatewayAuthPolicy({}, null);
     client.connectionSignal = connection.signal;
     client.authenticatedUserProfile = {
       profileId: "profile-owner",
