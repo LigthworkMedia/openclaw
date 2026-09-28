@@ -7,6 +7,7 @@ import {
   setEmbeddedQuestionBroker,
 } from "../../infra/embedded-question-broker.js";
 import { createDeferredCore as deferred } from "../../shared/deferred.js";
+import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import {
   createAskUserTool,
   isAskUserPromptPending,
@@ -52,7 +53,7 @@ async function withEmbeddedBroker(
   run: (broker: EmbeddedQuestionBroker) => Promise<void>,
 ) {
   const previousMode = isEmbeddedMode();
-  const broker = new EmbeddedQuestionBroker();
+  const broker = new EmbeddedQuestionBroker(createTestGatewayScheduler());
   setEmbeddedMode(embedded);
   if (registered) {
     setEmbeddedQuestionBroker(broker);

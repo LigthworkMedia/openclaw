@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import type {
   QuestionRecord,
   QuestionResolvedEvent,
@@ -9,6 +10,7 @@ import {
   captureAsyncWorkTracker,
   getAsyncWorkSignal,
 } from "../shared/async-work-scope.js";
+import type { GatewayScheduler, GatewayScheduledJob } from "./gateway-scheduler.js";
 
 const TERMINAL_DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
@@ -21,11 +23,12 @@ type QuestionChannelEntry = {
   terminal?: QuestionResolvedEvent;
   deliveries: Map<string, QuestionDeliveryFinalizer>;
   finalizedDeliveryIds: Set<string>;
-  cleanupTimer?: ReturnType<typeof setTimeout>;
+  scheduler: GatewayScheduler;
+  cleanupJob?: GatewayScheduledJob;
 };
 
 type QuestionChannelRuntime = {
-  handleRequested: (record: QuestionRecord) => void;
+  handleRequested: (record: QuestionRecord, scheduler: GatewayScheduler) => void;
   handleResolved: (event: QuestionResolvedEvent) => void;
   runWithDeliveries: <T>(
     questionIds: readonly (string | undefined)[],
@@ -75,7 +78,6 @@ function formatQuestionTerminalStatusLine(params: {
 export function createQuestionChannelRuntime(
   options: {
     onFinalizeError?: (error: unknown, questionId: string, deliveryId: string) => void;
-    terminalRetentionMs?: number;
   } = {},
 ): QuestionChannelRuntime {
   const entries = new Map<string, QuestionChannelEntry>();
@@ -89,7 +91,6 @@ export function createQuestionChannelRuntime(
   const retiredGateways = new WeakSet<AbortSignal>();
   let finalizers = new AsyncWorkScope();
   let clearing: Promise<void> | undefined;
-  const terminalRetentionMs = options.terminalRetentionMs ?? TERMINAL_DELIVERY_RETENTION_MS;
 
   const runFinalizer = (
     questionId: string,
@@ -127,21 +128,24 @@ export function createQuestionChannelRuntime(
     if (entries.get(entry.record.id) === entry) {
       entries.delete(entry.record.id);
     }
-    clearTimeout(entry.cleanupTimer);
+    entry.cleanupJob?.cancel();
     entry.deliveries.clear();
     entry.finalizedDeliveryIds.clear();
   };
 
   const scheduleCleanup = (entry: QuestionChannelEntry) => {
-    if (entry.cleanupTimer || !retainedEntries.has(entry)) {
+    if (entry.cleanupJob || !retainedEntries.has(entry)) {
       return;
     }
-    entry.cleanupTimer = setTimeout(() => releaseEntry(entry), terminalRetentionMs);
-    entry.cleanupTimer.unref?.();
+    entry.cleanupJob = entry.scheduler.schedule({
+      id: `question-delivery:${randomUUID()}`,
+      delayMs: TERMINAL_DELIVERY_RETENTION_MS,
+      run: () => releaseEntry(entry),
+    });
   };
 
   return {
-    handleRequested(record) {
+    handleRequested(record, scheduler) {
       const owner = getAsyncWorkSignal();
       if (clearing || (owner && retiredGateways.has(owner))) {
         return;
@@ -154,6 +158,7 @@ export function createQuestionChannelRuntime(
         track: captureAsyncWorkTracker(),
         deliveries: new Map(),
         finalizedDeliveryIds: new Set(),
+        scheduler,
       };
       retainedEntries.add(entry);
       entries.set(record.id, entry);

@@ -10,6 +10,7 @@ import {
   tryBeginGatewayRootWorkAdmission,
   tryBeginGatewaySuspendAdmission,
 } from "../process/gateway-work-admission.js";
+import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import type { ExecApprovalManager } from "./exec-approval-manager.js";
 import { createTestApprovalManager } from "./exec-approval-manager.test-support.js";
 import { createPluginGatewayMethodDescriptor } from "./methods/descriptor.js";
@@ -286,7 +287,7 @@ describe("draining Gateway completion ownership", () => {
   it.each(completionDrainModes)(
     "admits exact question inspection and resolution during %s without admitting unrelated roots",
     async (mode) => {
-      const manager = new QuestionManager();
+      const manager = new QuestionManager(createTestGatewayScheduler());
       managerCleanups.push(() => manager.close());
       const client = createClient("operator");
       const context = createContext({ questionManager: manager });
@@ -402,7 +403,7 @@ describe("draining Gateway completion ownership", () => {
   )(
     "does not borrow a replacement question root for $method during $mode after synchronous expiry",
     async ({ mode, method }) => {
-      const manager = new QuestionManager();
+      const manager = new QuestionManager(createTestGatewayScheduler());
       managerCleanups.push(() => manager.close());
       const originalRoot = tryBeginGatewayRootWorkAdmission();
       const replacementRoot = tryBeginGatewayRootWorkAdmission();

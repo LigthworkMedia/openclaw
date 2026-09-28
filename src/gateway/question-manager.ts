@@ -14,6 +14,7 @@ import type {
   QuestionWaitAnswerResult,
 } from "../../packages/gateway-protocol/src/index.js";
 import type { OperationalRunInstanceRef } from "../agents/admitted-run-context.js";
+import type { GatewayScheduler, GatewayScheduledJob } from "../infra/gateway-scheduler.js";
 import {
   retainGatewayRootWorkAdmissionContinuationScope,
   type GatewayRootWorkAdmissionContinuationScope,
@@ -66,8 +67,7 @@ type QuestionEntry = {
   record: QuestionRecord;
   ordinary: boolean;
   resolutionId?: string;
-  expiryTimer: ReturnType<typeof setTimeout>;
-  cleanupTimer: ReturnType<typeof setTimeout> | null;
+  job: GatewayScheduledJob;
   waiters: Set<Waiter>;
   onResolved?: QuestionManagerRequest["onResolved"];
   sessionAccess?: QuestionSessionAccess;
@@ -114,8 +114,12 @@ export class QuestionManager {
   private readonly entries = new Map<string, QuestionEntry>();
   private closed = false;
   private readonly publications = new AsyncWorkScope();
+  private readonly scheduleId = `questions:${randomUUID()}`;
 
-  constructor(private readonly onPublicationError?: () => void) {}
+  constructor(
+    private readonly scheduler: GatewayScheduler,
+    private readonly onPublicationError?: () => void,
+  ) {}
 
   async drain(): Promise<void> {
     if (this.closed) {
@@ -138,7 +142,7 @@ export class QuestionManager {
         "the agent run that requested this question is no longer active",
       );
     }
-    const createdAtMs = Date.now();
+    const createdAtMs = this.scheduler.now();
     const timeoutMs = resolveTimerTimeoutMs(params.timeoutMs, 1);
     const expiresAtMs = resolveExpiresAtMsFromDurationMs(timeoutMs, { nowMs: createdAtMs });
     if (expiresAtMs === undefined) {
@@ -161,12 +165,20 @@ export class QuestionManager {
       expiresAtMs,
       status: "pending",
     };
-    const expiryTimer = setTimeout(() => this.expire(record.id), timeoutMs);
     const entry: QuestionEntry = {
       record,
       ordinary: !params.questions.some((question) => question.isSecret || question.secretStore),
-      expiryTimer,
-      cleanupTimer: null,
+      job: this.scheduler.schedule({
+        id: `${this.scheduleId}:${id}`,
+        delayMs: timeoutMs,
+        run: () => {
+          if (this.entries.get(id) !== entry) {
+            return;
+          }
+          this.expire(id);
+          return this.drain();
+        },
+      }),
       waiters: new Set(),
       onResolved: params.onResolved,
       sessionAccess: params.sessionAccess,
@@ -178,7 +190,6 @@ export class QuestionManager {
     entry.releaseHumanInputWait = params.registerHumanInputWait?.(
       () => this.get(id)?.status === "pending" && this.entries.get(id) === entry,
     );
-    entry.expiryTimer.unref?.();
     return record;
   }
 
@@ -187,7 +198,7 @@ export class QuestionManager {
     if (!entry) {
       return null;
     }
-    if (entry.record.status === "pending" && entry.record.expiresAtMs <= Date.now()) {
+    if (entry.record.status === "pending" && entry.record.expiresAtMs <= this.scheduler.now()) {
       this.expire(id);
     }
     this.refreshRequester(entry);
@@ -271,7 +282,7 @@ export class QuestionManager {
       !entry?.admissionContinuation ||
       entry.record !== record ||
       entry.record.status !== "pending" ||
-      entry.record.expiresAtMs <= Date.now()
+      entry.record.expiresAtMs <= this.scheduler.now()
     ) {
       return null;
     }
@@ -366,15 +377,12 @@ export class QuestionManager {
     this.entries.clear();
     for (const entry of entries) {
       entry.sessionAccess?.release();
-      clearTimeout(entry.expiryTimer);
+      entry.job.cancel();
       const releaseHumanInputWait = entry.releaseHumanInputWait;
       entry.releaseHumanInputWait = undefined;
       releaseHumanInputWait?.(false);
       entry.admissionContinuation?.release();
       entry.admissionContinuation = null;
-      if (entry.cleanupTimer) {
-        clearTimeout(entry.cleanupTimer);
-      }
       for (const waiter of entry.waiters) {
         waiter();
       }
@@ -474,7 +482,7 @@ export class QuestionManager {
   }
 
   private finish(entry: QuestionEntry): void {
-    clearTimeout(entry.expiryTimer);
+    entry.job.cancel();
     const continuation = entry.admissionContinuation;
     entry.admissionContinuation = null;
     let settled = false;
@@ -524,17 +532,16 @@ export class QuestionManager {
           // Worker preparation still needs this entry. Start grace only after
           // publication settles, and never resurrect an entry retired by a callback.
           if (this.entries.get(entry.record.id) === entry) {
-            const cleanupTimer = setTimeout(() => {
-              if (
-                entry.cleanupTimer === cleanupTimer &&
-                this.entries.get(entry.record.id) === entry
-              ) {
-                this.entries.delete(entry.record.id);
-                entry.sessionAccess?.release();
-              }
-            }, QUESTION_RESOLVED_ENTRY_GRACE_MS);
-            entry.cleanupTimer = cleanupTimer;
-            cleanupTimer.unref?.();
+            entry.job = this.scheduler.schedule({
+              id: `${this.scheduleId}:${entry.record.id}`,
+              delayMs: QUESTION_RESOLVED_ENTRY_GRACE_MS,
+              run: () => {
+                if (this.entries.get(entry.record.id) === entry) {
+                  this.entries.delete(entry.record.id);
+                  entry.sessionAccess?.release();
+                }
+              },
+            });
           }
         }
       })

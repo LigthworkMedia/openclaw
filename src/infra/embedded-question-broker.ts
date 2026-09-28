@@ -28,6 +28,7 @@ import {
   registerAgentRunDelegatedAuthorityClosedHandler,
   validateAgentRunDelegatedAuthority,
 } from "./agent-run-registry.js";
+import type { GatewayScheduler } from "./gateway-scheduler.js";
 
 const EMBEDDED_SECRET_STORE_REQUEST_BLOCKER =
   "Secret store requests need a running Gateway; ask the operator to run `openclaw secrets store` or use the Control UI.";
@@ -44,12 +45,16 @@ function invalidRequest(message: string): GatewayClientRequestError {
 
 /** Serves the question RPC contract for one embedded backend lifetime. */
 export class EmbeddedQuestionBroker {
-  private readonly manager = new QuestionManager();
+  private readonly manager: QuestionManager;
   private readonly listeners = new Set<(event: QuestionEvent) => void>();
   private stopped = false;
   private readonly removeAuthorityListener = registerAgentRunDelegatedAuthorityClosedHandler(() => {
     this.manager.cancelClosedAuthorities();
   });
+
+  constructor(scheduler: GatewayScheduler) {
+    this.manager = new QuestionManager(scheduler);
+  }
 
   subscribe(listener: (event: QuestionEvent) => void): () => void {
     this.listeners.add(listener);
