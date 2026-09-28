@@ -50,8 +50,10 @@ import {
 } from "./run-loop-shutdown-budget.js";
 import { formatBootCompletionContext, formatShutdownReason } from "./run-loop-shutdown-format.js";
 import {
+  createGatewayRestartRecovery,
   createGatewayStartupOperations,
   prepareGatewayRestartIteration,
+  type GatewayRestartStartupFailureHandler,
 } from "./run-loop-startup.js";
 import {
   armShutdownHardExitWatchdog,
@@ -84,7 +86,7 @@ export async function runGatewayLoop(params: {
   healthHost?: string;
   beginBoot?: (startedAtMs: number) => void | Promise<void>;
   completeBoot?: (completion: GatewayBootLifecycleCompletion) => void;
-  onRestartStartupFailure?: (error: unknown, signal: AbortSignal) => Promise<void>;
+  onRestartStartupFailure?: GatewayRestartStartupFailureHandler;
 }) {
   // macOS/BSD process inspection reports process.title instead of the original
   // argv. Give the long-running Gateway a verifiable identity for lock readers.
@@ -143,7 +145,7 @@ export async function runGatewayLoop(params: {
   let restartDrainingMarked = false;
   const observeSignal = loopLogs.createGatewaySignalObserver(gatewayLog);
   let startupFailedWithoutServerHandle = false;
-  let failureWork: { controller: AbortController; settled: Promise<void> } | undefined;
+  const restartRecovery = createGatewayRestartRecovery(params.onRestartStartupFailure, gatewayLog);
   const processInstanceId = randomUUID();
   const getManagedUpdateOwner = () =>
     (pendingStartupRequest ?? activeRestartRequest)?.restartIntent?.successorOwner;
@@ -800,9 +802,7 @@ export async function runGatewayLoop(params: {
       try {
         // A stop/restart cancels triage at admission and joins its existing cleanup
         // before process exit can strand an external fixing agent.
-        if (failureWork) {
-          await failureWork.settled;
-        }
+        await restartRecovery.waitForCleanup();
         shutdownStep = "active-work-drain";
         await drainGatewayActiveWork({
           request: acceptedRequest,
@@ -1006,7 +1006,7 @@ export async function runGatewayLoop(params: {
         eagerLifecycleRuntime.isForegroundUpdateHandoff(restartIntent.successorOwner),
       hostedStop,
     };
-    failureWork?.controller.abort();
+    restartRecovery.abort();
     if (shuttingDown) {
       const currentRestartRequest = pendingStartupRequest ?? activeRestartRequest;
       const upgradedRequest = resolveGatewayRunSignalRequestUpgrade(
@@ -1244,7 +1244,10 @@ export async function runGatewayLoop(params: {
     // Keep process alive; SIGUSR2 triggers an in-process restart (no supervisor required).
     // SIGTERM/SIGINT still exit after a graceful shutdown.
     let isFirstIteration = true;
+    let retryAfterTriage = false;
     for (;;) {
+      const isTriageRetry = retryAfterTriage;
+      retryAfterTriage = false;
       const iterationStartupOperations = isFirstIteration
         ? startupOperations
         : createGatewayStartupOperations();
@@ -1347,6 +1350,7 @@ export async function runGatewayLoop(params: {
         if (
           maintenanceRequired ||
           !isRestartIteration ||
+          isTriageRetry ||
           err instanceof GatewayStartupCleanupError
         ) {
           throw err;
@@ -1365,20 +1369,10 @@ export async function runGatewayLoop(params: {
         writeStabilityBundle("gateway.restart_startup_failed", err);
         gatewayLog.error(
           `gateway startup failed: ${errMsg}. ` +
-            `Process will stay alive; fix the issue and restart.${errStack}`,
+            `${params.onRestartStartupFailure ? "Attempting automatic triage before recovery." : "Process will stay alive; fix the issue and restart."}${errStack}`,
         );
-        const onRestartStartupFailure = params.onRestartStartupFailure;
-        if (!shuttingDown && onRestartStartupFailure) {
-          const controller = new AbortController();
-          failureWork = {
-            controller,
-            settled: Promise.resolve().then(() => onRestartStartupFailure(err, controller.signal)),
-          };
-          try {
-            await failureWork.settled;
-          } finally {
-            failureWork = undefined;
-          }
+        if (!shuttingDown) {
+          retryAfterTriage = (await restartRecovery.attempt(err)) && !shuttingDown;
         }
       }
       if (startupFailedBeforeServerHandle) {
@@ -1388,6 +1382,9 @@ export async function runGatewayLoop(params: {
             resolve();
           };
           flushPendingStartupRequest({ allowMissingServer: true });
+          if (retryAfterTriage && !shuttingDown) {
+            request("restart", "SIGUSR2", "gateway.triage_completed");
+          }
         });
       }
     }
