@@ -40,7 +40,13 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     if (canMutateSession) {
       routingBridges.forEach((entry) => retireAudioBridge(entry, false));
       retireOwnedAudioBridges();
-      routingSources.forEach(restoreAudioBridgeSource);
+      routingSources.forEach((source) => {
+        restoreAudioBridgeSource(source);
+        // A direct sink change can finish after ownership moved; return that exact source's playback.
+        if (bridgeSourceMatches(source.element, source) && source.element.sinkId !== source.sinkId) {
+          source.element.setSinkId(source.sinkId).catch(() => {});
+        }
+      });
     }
     audioOutputRouted = false;
     audioOutputRouteRetryable = true;
@@ -102,6 +108,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
               ${withLiveOwnership(`routingSources.push({
                 element,
                 muted: originalMuteBySource.get(element),
+                sinkId: element.sinkId,
                 stream: element.srcObject,
                 url: mediaSourceUrl(element),
               });

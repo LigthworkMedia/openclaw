@@ -40,7 +40,8 @@ function routingFixture() {
         muted = value;
       },
       setSinkId: vi.fn(async function (this: { sinkId: string }, sinkId: string) {
-        recordEffect("setSinkId");
+        // Returning playback to the physical output is the undo, not a new routing effect.
+        recordEffect(sinkId === "physical-out" ? "restore-sink" : "setSinkId");
         this.sinkId = sinkId;
       }),
       play: vi.fn(async () => recordEffect("play")),
@@ -162,6 +163,22 @@ describe("meeting status live ownership", () => {
     },
   );
 
+  it("returns a completed direct sink change to its original output when ownership ends", async () => {
+    const fixture = routingFixture();
+    fixture.first.setSinkId.mockImplementationOnce(async function (
+      this: { sinkId: string },
+      sinkId: string,
+    ) {
+      this.sinkId = sinkId;
+      fixture.loseOwnership();
+    });
+    expect(await fixture.status()).toMatchObject({ audioOutputRouted: false });
+    await Promise.resolve();
+    expect(fixture.first.sinkId).toBe("physical-out");
+    expect(fixture.first.muted).toBe(false);
+    expect(fixture.second.setSinkId).not.toHaveBeenCalled();
+  });
+
   it.each([
     "direct sink",
     "rejected direct sink",
@@ -194,7 +211,7 @@ describe("meeting status live ownership", () => {
       audioOutputRouteRetryable: true,
       notes: expect.arrayContaining([expect.stringContaining("ownership")]),
     });
-    expect(fixture.effectsAfterLoss).toEqual([]);
+    expect(fixture.effectsAfterLoss.filter((effect) => effect !== "restore-sink")).toEqual([]);
     expect(fixture.second.setSinkId).not.toHaveBeenCalled();
     expect(fixture.first.muted).toBe(false);
     expect(fixture.second.muted).toBe(false);

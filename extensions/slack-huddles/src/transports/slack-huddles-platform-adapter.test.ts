@@ -379,6 +379,61 @@ describe("Slack huddle browser adapter", () => {
     expect(marker.clicks).toBe(0);
   });
 
+  it("binds the workspace before awaited work so a mid-status switch cannot claim it", async () => {
+    const { document, mic } = inCall(undefined, true);
+    const browser = fixture({
+      document,
+      currentUrl: CLIENT_URL,
+      window: {
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          joinRequested: true,
+          joinRequestedAt: Date.now(),
+        },
+      },
+    });
+    const camera = new PageNode("button", {
+      role: "switch",
+      "aria-label": "Camera",
+      "aria-checked": "true",
+    });
+    camera.onClick = () => {
+      camera.setAttribute("aria-checked", "false");
+      browser.location.href = "https://app.slack.com/client/T9999ABCD/C0123ABCD";
+    };
+    document.body.append(camera);
+    await browser.status({ url: "https://app.slack.com/huddle/C0123ABCD", mode: "transcribe" });
+    expect(mic.clicks).toBe(0);
+    expect(browser.window).toMatchObject({
+      __openclawSlackHuddleWorkspaces: { "slack-huddle:C0123ABCD": "T0123ABCD" },
+    });
+  });
+
+  it("keeps the workspace binding through a toolbar rerender", async () => {
+    const { document, marker } = inCall();
+    const browser = fixture({
+      document,
+      currentUrl: CLIENT_URL,
+      window: {
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          joinRequested: true,
+          joinRequestedAt: Date.now(),
+        },
+      },
+    });
+    const channelOnly = { url: "https://app.slack.com/huddle/C0123ABCD" };
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: true });
+    marker.isConnected = false;
+    document.body.children.splice(document.body.children.indexOf(marker), 1);
+    await browser.status(channelOnly);
+    document.body.append(qaNode("huddle_toolbar__leave_button", "Leave Huddle"));
+    browser.location.href = "https://app.slack.com/client/T9999ABCD/C0123ABCD";
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: false });
+  });
+
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {
     const { document } = inCall(undefined, false, false);
     document.body.append(channelHeader(true));

@@ -35,6 +35,16 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const joinSettling = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true &&
     Date.now() - (priorMeeting.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS});
   let inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
+  // Channel ids are workspace-scoped: a channel-only session binds, before any await, to the workspace
+  // where it first proves membership; the page identity then rejects other workspaces.
+  const channelOnlySession = Boolean(expectedIdentity && !/^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity));
+  if (canMutateSession && channelOnlySession && inCall && !window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]) {
+    let pageTeam;
+    try {
+      pageTeam = new URL(location.href).pathname.match(/^\\/(?:client|huddle)\\/([TE][A-Z0-9]{8,})\\//)?.[1];
+    } catch {}
+    if (pageTeam) (window.__openclawSlackHuddleWorkspaces ||= {})[expectedIdentity] = pageTeam;
+  }
   // Status work awaits permission queries and UI settling, so authority is rechecked right before each
   // click: the in-call membership header, or the same preview with no other call live.
   const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity &&
@@ -199,19 +209,10 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     inCall = false;
     authorityLost = true;
   }
-  // Channel ids are workspace-scoped: a channel-only session binds to the workspace where it first
-  // proved membership (the page identity then rejects other workspaces) until no call is live.
-  if (canMutateSession && expectedIdentity && !/^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity)) {
-    const workspaces = (window.__openclawSlackHuddleWorkspaces ||= {});
-    let pageTeam;
-    try {
-      pageTeam = new URL(location.href).pathname.match(/^\\/(?:client|huddle)\\/([TE][A-Z0-9]{8,})\\//)?.[1];
-    } catch {}
-    if (inCall && pageTeam && !workspaces[expectedIdentity]) {
-      workspaces[expectedIdentity] = pageTeam;
-    } else if (!inCallControl && !joinSettling) {
-      delete workspaces[expectedIdentity];
-    }
+  // A workspace binding ends only on proven departure: Slack's header shows this device out of the huddle.
+  if (canMutateSession && channelOnlySession && !inCallControl && !joinSettling &&
+      firstRaw(selectors.channelHeader) && !firstRaw(selectors.channelHeaderInHuddle)) {
+    delete window.__openclawSlackHuddleWorkspaces?.[expectedIdentity];
   }
   if (authorityLost) {
     notes.push("Slack huddle state changed during status; later controls were left untouched.");
