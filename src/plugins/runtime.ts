@@ -158,8 +158,11 @@ export function disposePluginRegistryInstances(
       ),
     );
     // Cache initialization, not one caller's self-retirement acknowledgment.
-    wait = async (observation) =>
-      (await (await initialized)?.(observation)) ?? { cleanupCount: 0, failures: [] };
+    // Forward the waiter promise without retaining its async frame after settlement.
+    wait = (observation) =>
+      initialized.then(
+        (retirement) => retirement?.(observation) ?? { cleanupCount: 0, failures: [] },
+      );
     retirements.set(registry, wait);
     // Epoch abort observers can reenter retirement and must receive this same completion.
     quiescePluginRegistry(registry);
