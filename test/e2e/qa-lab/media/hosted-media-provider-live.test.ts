@@ -239,7 +239,12 @@ describe("hosted media provider live CLI", () => {
 
   it("supports suite-specific provider filters without auth narrowing", async () => {
     const plan = await buildRunPlan(
-      parseArgs(["video", "--video-providers", "fal,google,kie,runway,zai", "--all-providers"]),
+      parseArgs([
+        "video",
+        "--video-providers",
+        "fal,google,kie,novita,pixverse,runway,zai",
+        "--all-providers",
+      ]),
       {
         collectProviderApiKeysImpl: collectProviderApiKeysMock,
         getProviderEnvVarsImpl: (provider) => [`TEST_AUTH_${provider.toUpperCase()}`],
@@ -250,7 +255,15 @@ describe("hosted media provider live CLI", () => {
     expect(plan).toHaveLength(1);
     const [entry] = plan;
     expect(entry?.suite.id).toBe("video");
-    expect(entry?.providers).toEqual(["fal", "google", "kie", "runway", "zai"]);
+    expect(entry?.providers).toEqual([
+      "fal",
+      "google",
+      "kie",
+      "novita",
+      "pixverse",
+      "runway",
+      "zai",
+    ]);
   });
 
   it("forwards quiet flags separately from passthrough args", () => {

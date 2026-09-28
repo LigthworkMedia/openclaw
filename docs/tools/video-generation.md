@@ -1,5 +1,5 @@
 ---
-summary: "Generate videos via video_generate from text, image, or video references across 16 provider backends"
+summary: "Generate videos via video_generate from text, image, or video references across 18 provider backends"
 read_when:
   - Generating videos via the agent
   - Configuring video-generation providers and models
@@ -9,9 +9,10 @@ sidebarTitle: "Video generation"
 ---
 
 OpenClaw agents generate videos from text prompts, reference images, or
-existing videos through `video_generate`. Sixteen provider backends are
+existing videos through `video_generate`. Eighteen provider backends are
 supported; the agent picks the right one automatically based on config and
-available API keys.
+available API keys. The 18 provider IDs span 17 plugins; MiniMax registers
+separate API-key (`minimax`) and OAuth (`minimax-portal`) backends.
 
 <Note>
 `video_generate` only appears when at least one video-generation provider is
@@ -105,7 +106,9 @@ of failing the task if local persistence rejects an oversized file.
 | Google                | `veo-3.1-fast-generate-preview` |  ✓   | 1 image                                              | 1 video                                         | `GEMINI_API_KEY`                         |
 | Kie AI                | `kling-2.6/text-to-video`       |  ✓   | 1 local or remote image                              | -                                               | `KIE_API_KEY`                            |
 | MiniMax               | `MiniMax-Hailuo-2.3`            |  ✓   | 1 image                                              | -                                               | `MINIMAX_API_KEY` or MiniMax OAuth       |
+| Novita                | `wan2.6-t2v`                    |  ✓   | 1 image (URL or local file)                          | -                                               | `NOVITA_API_KEY`                         |
 | OpenRouter            | `google/veo-3.1-fast`           |  ✓   | Up to 4 images (first/last frame or references)      | -                                               | `OPENROUTER_API_KEY`                     |
+| PixVerse              | `v6`                            |  ✓   | 1 local or remote image                              | -                                               | `PIXVERSE_API_KEY`                       |
 | Qwen                  | `wan2.6-t2v`                    |  ✓   | Yes (remote URL)                                     | Yes (remote URL)                                | `QWEN_API_KEY`                           |
 | Runway                | `gen4.5`                        |  ✓   | 1 image                                              | 1 video                                         | `RUNWAYML_API_SECRET`                    |
 | Together              | `Wan-AI/Wan2.2-T2V-A14B`        |  ✓   | `Wan-AI/Wan2.2-I2V-A14B` only                        | -                                               | `TOGETHER_API_KEY`                       |
@@ -134,7 +137,9 @@ the shared live sweep:
 | Google     |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; shared `videoToVideo` skipped because the current buffer-backed Gemini/Veo sweep does not accept that input |
 | Kie AI     |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | MiniMax    |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
+| Novita     |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | OpenRouter |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
+| PixVerse   |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | Qwen       |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; `videoToVideo` skipped because this provider needs remote `http(s)` video URLs                              |
 | Runway     |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; `videoToVideo` runs only when the selected model is `runway/gen4_aleph`                                     |
 | Together   |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
@@ -396,6 +401,13 @@ OpenClaw does not append auto-detected providers.
     resolutions; requests such as `720P` are normalized to the closest
     supported value before submission.
   </Accordion>
+  <Accordion title="Novita">
+    Uses native Wan 2.6 and Hailuo 2.3 asynchronous routes. One image with a
+    `-t2v` model selects that family's `-i2v` route. Both families accept
+    local images as data URIs. Wan defaults to silent output; set
+    `audio: true` for generated audio. Hailuo supports 1080P only at 6 seconds.
+    See [NovitaAI](/providers/novita) for model IDs and provider options.
+  </Accordion>
   <Accordion title="OpenRouter">
     Uses OpenRouter's asynchronous `/videos` API. OpenClaw submits the
     job, polls `polling_url`, and downloads either `unsigned_urls` or the
@@ -560,7 +572,9 @@ openclaw config set agents.defaults.mediaModels.video.primary "qwen/wan2.6-t2v"
 - [Kie AI](/providers/kie)
 - [MiniMax](/providers/minimax)
 - [Models](/concepts/models)
+- [NovitaAI](/providers/novita)
 - [OpenRouter](/providers/openrouter)
+- [PixVerse](/providers/pixverse)
 - [Qwen](/providers/qwen)
 - [Runway](/providers/runway)
 - [Together AI](/providers/together)

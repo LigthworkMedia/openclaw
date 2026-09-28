@@ -117,6 +117,10 @@ export const pluginRegistrationContractCases = {
       groupHint: "Kimi Code membership · https://www.kimi.com/membership/pricing",
     },
   },
+  novita: {
+    pluginId: "novita",
+    videoGenerationProviderIds: ["novita"],
+  },
   nvidia: {
     pluginId: "nvidia",
     providerIds: ["nvidia"],

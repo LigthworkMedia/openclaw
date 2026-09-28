@@ -20,6 +20,7 @@ export const DEFAULT_LIVE_VIDEO_MODELS: Record<string, string> = {
   google: "google/veo-3.1-fast-generate-preview",
   kie: "kie/kling-2.6/text-to-video",
   minimax: "minimax/MiniMax-Hailuo-2.3",
+  novita: "novita/wan2.6-t2v",
   openrouter: "openrouter/google/veo-3.1-fast",
   pixverse: "pixverse/v6",
   qwen: "qwen/wan2.6-t2v",
@@ -43,6 +44,9 @@ export function resolveLiveVideoResolution(params: {
   const providerId = normalizeLowercaseStringOrEmpty(params.providerId);
   if (providerId === "minimax") {
     return "768P";
+  }
+  if (providerId === "novita") {
+    return params.modelRef.includes("minimax-hailuo-") ? "768P" : "720P";
   }
   if (providerId === "openrouter") {
     return "720P";

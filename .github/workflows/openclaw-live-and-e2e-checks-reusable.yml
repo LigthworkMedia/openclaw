@@ -498,6 +498,8 @@ on:
         required: false
       MINIMAX_API_KEY:
         required: false
+      NOVITA_API_KEY:
+        required: false
       OPENCODE_API_KEY:
         required: false
       OPENCODE_ZEN_API_KEY:
@@ -517,6 +519,8 @@ on:
       GOOGLE_API_KEY:
         required: false
       OPENROUTER_API_KEY:
+        required: false
+      PIXVERSE_API_KEY:
         required: false
       QWEN_API_KEY:
         required: false
@@ -4782,29 +4786,29 @@ jobs:
           - suite_id: native-live-extensions-media-video-a
             suite_group: native-live-extensions-media-video
             label: Native live media video plugins A
-            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=alibaba,byteplus,deepinfra,fal node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
-            timeout_minutes: 30
+            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=alibaba,byteplus,deepinfra,fal OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
+            timeout_minutes: 50
             profile_env_only: false
             profiles: full
           - suite_id: native-live-extensions-media-video-b
             suite_group: native-live-extensions-media-video
             label: Native live media video plugins B
-            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,kie,minimax OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
-            timeout_minutes: 30
+            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,kie,minimax,pixverse OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
+            timeout_minutes: 50
             profile_env_only: false
             profiles: full
           - suite_id: native-live-extensions-media-video-c
             suite_group: native-live-extensions-media-video
             label: Native live media video plugins C
-            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=openrouter,xai,zai node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
-            timeout_minutes: 30
+            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=novita,openrouter,xai,zai OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
+            timeout_minutes: 50
             profile_env_only: false
             profiles: full
           - suite_id: native-live-extensions-media-video-d
             suite_group: native-live-extensions-media-video
             label: Native live media video plugins D
-            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=qwen,runway,together,vydra node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
-            timeout_minutes: 30
+            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=qwen,runway,together,vydra OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
+            timeout_minutes: 50
             profile_env_only: false
             profiles: full
     env:
@@ -4825,6 +4829,7 @@ jobs:
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
       OPENCLAW_LIVE_BROWSER_CDP_URL: ${{ secrets.OPENCLAW_LIVE_BROWSER_CDP_URL }}
@@ -4835,6 +4840,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      PIXVERSE_API_KEY: ${{ secrets.PIXVERSE_API_KEY }}
       QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
       FAL_KEY: ${{ secrets.FAL_KEY }}
       RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}

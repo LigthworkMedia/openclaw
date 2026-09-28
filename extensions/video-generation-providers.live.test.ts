@@ -51,6 +51,7 @@ import falPlugin from "./fal/index.js";
 import googlePlugin from "./google/index.js";
 import kiePlugin from "./kie/index.js";
 import minimaxPlugin from "./minimax/index.js";
+import novitaPlugin from "./novita/index.js";
 import openrouterPlugin from "./openrouter/index.js";
 import pixversePlugin from "./pixverse/index.js";
 import qwenPlugin from "./qwen/index.js";
@@ -125,6 +126,7 @@ const CASES: LiveProviderCase[] = [
     pluginName: "MiniMax Provider",
     providerId: "minimax",
   },
+  { plugin: novitaPlugin, pluginId: "novita", pluginName: "NovitaAI", providerId: "novita" },
   {
     plugin: openrouterPlugin,
     pluginId: "openrouter",
