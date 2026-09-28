@@ -86,7 +86,7 @@ it("reports snapshot sizes and quoted removal commands without offering or perfo
   expect(message).toContain(
     "confirm no update is in progress and no recovery needs these snapshots",
   );
-  expect(check()?.repair).toBeUndefined();
+  expect(typeof check()?.repair).toBe("undefined");
 });
 
 it("does not report a finding without snapshot directories or outside an npm global layout", async () => {
