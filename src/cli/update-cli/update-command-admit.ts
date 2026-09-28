@@ -119,10 +119,12 @@ async function inspectUpdateAdmission(
       let schemasAccepted = false;
       let pluginInstallRecords: Record<string, PluginInstallRecord> | undefined;
       const checkDatabaseSchemas = async (
-        context: NonNullable<typeof databaseContext>,
+        schemaContext: NonNullable<typeof databaseContext>,
       ): Promise<boolean> => {
         try {
-          const schemas = await checkTargetDatabaseSchemasForContexts(schemaVersions, [context]);
+          const schemas = await checkTargetDatabaseSchemasForContexts(schemaVersions, [
+            schemaContext,
+          ]);
           if (hasSchemaRefusal(schemas)) {
             refuse(
               "database-schema",
