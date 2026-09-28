@@ -103,12 +103,6 @@ export const settleQueuedSessionDelivery: SettleSessionDeliveryFn = async (
   await removeCronRunContinuationSessionIfIdle(entry.sessionKey, entry.id, queueContext);
 };
 
-function cloneRestartSentinelPayload(
-  payload: RestartSentinelPayload | null,
-): RestartSentinelPayload | null {
-  return payload ? structuredClone(payload) : null;
-}
-
 function enqueueRestartSentinelWake(
   message: string,
   sessionKey: string,
@@ -126,13 +120,6 @@ function enqueueRestartSentinelWake(
     reason: "wake",
     agentId,
     sessionKey,
-  });
-}
-
-async function waitForRetry(delayMs: number) {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    timer.unref?.();
   });
 }
 
@@ -347,7 +334,9 @@ async function drainRestartContinuationQueue(params: {
     params.log.info(
       `restart continuation: entry ${params.entryId} still waiting for the previous run to clear; retrying in ${RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS}ms`,
     );
-    await waitForRetry(RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS).unref();
+    });
   }
 }
 
@@ -390,7 +379,6 @@ async function loadRestartSentinelStartupTask(params: {
   const env = queueContext.environment;
   const snapshot = await readRestartSentinelStartupSnapshot({
     ...params,
-    trackImport: params.trackWork,
     warn: (message) => log.warn(message),
   });
   if (!snapshot) {
@@ -446,13 +434,12 @@ async function loadRestartSentinelStartupTask(params: {
               return;
             }
             const work = runWithGatewayIndependentRootWorkAdmission(
-              async () => {
-                await scheduleRestartSentinelWakeAttempt({
+              () =>
+                scheduleRestartSentinelWake({
                   ...params,
                   attempt: attempt + 1,
                   ...(pendingUpdate ? { pendingUpdate } : {}),
-                });
-              },
+                }),
               "restart-sentinel:wake",
               params.signal,
             ).catch((err: unknown) => {
@@ -711,12 +698,12 @@ async function loadRestartSentinelStartupTask(params: {
   };
 }
 
-async function scheduleRestartSentinelWakeAttempt(params: {
+export async function scheduleRestartSentinelWake(params: {
   scheduler: GatewayScheduler;
   signal: AbortSignal;
   deps: CliDeps;
-  attempt: number;
-  context: DeliveryQueueStateContext;
+  attempt?: number;
+  context?: DeliveryQueueStateContext;
   shouldRun?: () => boolean;
   pendingUpdate?: PendingUpdateSentinelIdentity;
   trackWork?: (work: Promise<unknown>) => void;
@@ -724,26 +711,14 @@ async function scheduleRestartSentinelWakeAttempt(params: {
   if (params.signal.aborted || params.shouldRun?.() === false) {
     return;
   }
-  const task = await loadRestartSentinelStartupTask(params);
+  const task = await loadRestartSentinelStartupTask({
+    ...params,
+    context: params.context ?? captureDeliveryQueueStateContext(),
+  });
   if (!task) {
     return;
   }
   await runStartupTasks({ tasks: [task], log });
-}
-
-export async function scheduleRestartSentinelWake(params: {
-  scheduler: GatewayScheduler;
-  signal: AbortSignal;
-  deps: CliDeps;
-  context?: DeliveryQueueStateContext;
-  shouldRun?: () => boolean;
-  trackWork?: (work: Promise<unknown>) => void;
-}) {
-  await scheduleRestartSentinelWakeAttempt({
-    ...params,
-    context: params.context ?? captureDeliveryQueueStateContext(),
-    attempt: 0,
-  });
 }
 
 export async function refreshLatestUpdateRestartSentinel(
@@ -754,21 +729,21 @@ export async function refreshLatestUpdateRestartSentinel(
     current?.payload.kind === "update" &&
     isPendingControlPlaneUpdateRestartSentinel(current.payload)
   ) {
-    latestUpdateRestartSentinel = cloneRestartSentinelPayload(current.payload);
-    return cloneRestartSentinelPayload(latestUpdateRestartSentinel);
+    latestUpdateRestartSentinel = structuredClone(current.payload);
+    return structuredClone(latestUpdateRestartSentinel);
   }
   const finalized = await finalizeUpdateRestartSentinelRunningVersion(undefined, env);
   const sentinel = finalized ?? current;
   if (sentinel?.payload.kind === "update") {
-    latestUpdateRestartSentinel = cloneRestartSentinelPayload(sentinel.payload);
+    latestUpdateRestartSentinel = structuredClone(sentinel.payload);
   }
-  return cloneRestartSentinelPayload(latestUpdateRestartSentinel);
+  return structuredClone(latestUpdateRestartSentinel);
 }
 
 export function getLatestUpdateRestartSentinel(): RestartSentinelPayload | null {
-  return cloneRestartSentinelPayload(latestUpdateRestartSentinel);
+  return structuredClone(latestUpdateRestartSentinel);
 }
 
 export function recordLatestUpdateRestartSentinel(payload: RestartSentinelPayload): void {
-  latestUpdateRestartSentinel = cloneRestartSentinelPayload(payload);
+  latestUpdateRestartSentinel = structuredClone(payload);
 }
