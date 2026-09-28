@@ -664,6 +664,7 @@ describe("exec resolve_exec_env hook wiring", () => {
     });
     expect(mocks.hookRunner.runResolveExecEnv!).toHaveBeenCalledTimes(1);
     expect(mocks.gatewayParams[0]?.requestedEnv).toEqual({
+      GITHUB_APP_PRIVATE_KEY: "",
       EXISTING: "request",
       PLUGIN_SAFE: "yes",
     });
@@ -713,6 +714,7 @@ describe("exec resolve_exec_env hook wiring", () => {
     });
     expect(mocks.hookRunner.runResolveExecEnv!).toHaveBeenCalledTimes(1);
     expect(mocks.gatewayParams[0]?.requestedEnv).toEqual({
+      GITHUB_APP_PRIVATE_KEY: "",
       LAZY_PLUGIN_SAFE: "yes",
       REQUEST_SAFE: "request",
     });
@@ -850,6 +852,7 @@ describe("exec resolve_exec_env hook wiring", () => {
 
     expect(mocks.hookRunner.runResolveExecEnv!).not.toHaveBeenCalled();
     expect(mocks.gatewayParams[0]?.requestedEnv).toEqual({
+      GITHUB_APP_PRIVATE_KEY: "",
       REQUEST_SAFE: "request",
     });
   });
@@ -870,6 +873,7 @@ describe("exec resolve_exec_env hook wiring", () => {
     });
 
     expect(mocks.gatewayParams[0]?.requestedEnv).toEqual({
+      GITHUB_APP_PRIVATE_KEY: "",
       REQUEST_SAFE: "request",
     });
   });
@@ -913,6 +917,7 @@ describe("exec resolve_exec_env hook wiring", () => {
     });
     expect(mocks.hookRunner.runResolveExecEnv!).toHaveBeenCalledTimes(1);
     expect(mocks.gatewayParams[0]?.requestedEnv).toEqual({
+      GITHUB_APP_PRIVATE_KEY: "",
       PLUGIN_SAFE: "yes",
       REQUEST_SAFE: "request",
     });
