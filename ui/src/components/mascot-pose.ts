@@ -121,10 +121,6 @@ export function clampMascotPose(pose: MascotPose): MascotPose {
 export function staticMascotPose(mood: MascotMood): MascotPose {
   const pose = createMascotPose();
   switch (mood) {
-    case "idle":
-    case "curious":
-    case "attentive":
-      break;
     case "thinking":
       pose.gaze = { x: 0.3, y: -0.5 };
       break;

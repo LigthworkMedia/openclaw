@@ -565,14 +565,10 @@ class OpenClawLinkReaderPanel extends OpenClawLitElement implements PanelHostedT
           ? nothing
           : html`<header class="rail-header bp-header lr-tab-header">
               ${renderPanelTabStrip({
-                tabs: this.tabs.map((item) => ({
-                  id: item.id,
+                tabs: this.hostedTabs.map((item) => ({
+                  ...item,
                   domId: item.id + "-label",
-                  label: tabLabel(item),
-                  title: tabTarget(item)?.href,
-                  icon: readerIcon(tabTarget(item)?.reader.icon),
-                  className: item.view.status === "loading" ? "is-connecting" : "",
-                  closeLabel: t("linkReader.closeTab", { title: tabLabel(item) }),
+                  closeLabel: t("linkReader.closeTab", { title: item.label }),
                 })),
                 activeId: this.activeId,
                 ariaControls: "link-reader-tab-panel",

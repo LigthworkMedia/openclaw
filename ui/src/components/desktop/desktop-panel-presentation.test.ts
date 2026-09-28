@@ -27,6 +27,47 @@ describe("desktop panel presentation lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not claim fullscreen while its section is unrendered", async () => {
+    const properties = ["fullscreenElement", "exitFullscreen"] as const;
+    const original = properties.map((name) => Object.getOwnPropertyDescriptor(document, name));
+    const exitFullscreen = vi.fn(async () => {});
+    Object.defineProperties(document, {
+      fullscreenElement: { configurable: true, value: null },
+      exitFullscreen: { configurable: true, value: exitFullscreen },
+    });
+    const panel = createPanel();
+    try {
+      document.body.append(panel);
+      await panel.updateComplete;
+      expect(panel.renderRoot.querySelector("section.bp")).toBeNull();
+
+      document.dispatchEvent(new Event("fullscreenchange"));
+      panel.available = true;
+      panel.embedded = true;
+      panel.workspaceControls = true;
+      await panel.updateComplete;
+      const button = panel.renderRoot.querySelector(".desktop-fullscreen-button");
+      expect(button).not.toBeNull();
+      expect.soft(button?.getAttribute("aria-pressed")).toBe("false");
+
+      panel.available = false;
+      await panel.updateComplete;
+      expect(panel.renderRoot.querySelector("section.bp")).toBeNull();
+      panel.remove();
+      expect(exitFullscreen).not.toHaveBeenCalled();
+    } finally {
+      panel.remove();
+      for (const [index, name] of properties.entries()) {
+        const descriptor = original[index];
+        if (descriptor) {
+          Object.defineProperty(document, name, descriptor);
+        } else {
+          Reflect.deleteProperty(document, name);
+        }
+      }
+    }
+  });
+
   it("keeps one loading indicator mounted from source lookup through RFB authentication", async () => {
     const inventory = createDeferred<unknown>();
     const observe = createDeferred<unknown>();

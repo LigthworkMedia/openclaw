@@ -370,11 +370,6 @@ export class MascotAnimator {
       case "sleepy":
         target = { x: 0, y: 0.4 };
         break;
-      case "idle":
-      case "curious":
-      case "happy":
-      case "celebrating":
-        break;
     }
     const blend = 1 - Math.exp(-dt * 9);
     this.currentGaze.x += (target.x - this.currentGaze.x) * blend;
