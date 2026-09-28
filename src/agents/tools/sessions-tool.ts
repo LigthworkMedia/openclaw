@@ -1,16 +1,8 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { Type } from "typebox";
 import type {
   SessionsAssignOwnerResult,
   SessionsPatchResult,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { SessionMoveProfileTargetSchema } from "../../../packages/gateway-protocol/src/schema/session-placement.js";
-import { SESSIONS_PATCH_MANY_MAX_TARGETS } from "../../../packages/gateway-protocol/src/schema/sessions-patch.js";
-import {
-  SESSION_AGENT_ATTENTION_ICON_IDS,
-  SESSION_COLOR_IDS,
-  SESSION_ICON_GLYPH_IDS,
-} from "../../../packages/gateway-protocol/src/session-agent-status.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
@@ -23,7 +15,6 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { isIncognitoSessionKey, parseAgentSessionKey } from "../../routing/session-key.js";
 import { getSessionWorkAdmissionRelease } from "../../sessions/session-lifecycle-admission.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
-import { stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
 import {
   jsonResult,
@@ -44,6 +35,7 @@ import {
   resolveSessionToolAccess,
   runSessionToolActionWithConflictReceipt,
 } from "./sessions-access.js";
+import { hasSessionArchiveAuthority } from "./sessions-archive-authority.js";
 import { listSessionCloudProfiles } from "./sessions-cloud-profiles.js";
 import { resolveSessionToolContext } from "./sessions-helpers.js";
 import { resolveSessionReference, shouldResolveSessionIdInput } from "./sessions-resolution.js";
@@ -52,22 +44,11 @@ import {
   runSessionsToolPatchMany,
   sessionsToolResultFitsBudget,
 } from "./sessions-tool-patch.js";
+import { SessionArchiveToolSchema, SessionsToolSchema } from "./sessions-tool-schema.js";
 
-const ACTIONS = [
-  "cloud_profiles",
-  "patch",
-  "reset",
-  "delete",
-  "assign_owner",
-  "group_list",
-  "group_set",
-  "group_rename",
-  "group_delete",
-] as const;
 const GROUP_NAME_MAX_LENGTH = 512;
 const SELF_ARCHIVE_MAX_RETRY_DELAY_MS = 5_000;
 const RESOLVED_OMITTED_REASON = "response_budget_exceeded";
-const SESSION_ICON_GLYPH_DESCRIPTION = SESSION_ICON_GLYPH_IDS.join(", ");
 const log = createSubsystemLogger("agents/sessions");
 
 type SessionsResolved = NonNullable<SessionsPatchResult["resolved"]>;
@@ -89,117 +70,8 @@ function withBoundedSessionsResolved(
   };
 }
 
-const SessionsToolSchema = Type.Object(
-  {
-    action: stringEnum(ACTIONS, { description: "Action" }),
-    profileId: Type.Optional({
-      ...SessionMoveProfileTargetSchema.properties.profileId,
-      description: "cloud_profiles: return OS and machine choices for this configured profile.",
-    }),
-    offset: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        description: "cloud_profiles: nextOffset from the previous profile-list page.",
-      }),
-    ),
-    sessionKey: Type.Optional(Type.String({ description: "Target session. Default: current" })),
-    targets: Type.Optional(
-      Type.Array(
-        Type.Object(
-          {
-            sessionKey: Type.String({ minLength: 1 }),
-            expectedSessionId: Type.Optional(Type.String({ minLength: 1 })),
-          },
-          { additionalProperties: false },
-        ),
-        {
-          minItems: 1,
-          maxItems: SESSIONS_PATCH_MANY_MAX_TARGETS,
-          description:
-            "patch: apply the same settings to these sessions. Cannot combine with top-level sessionKey/expectedSessionId. Archive/restore requires each target's expectedSessionId. Current-session archive uses a single patch. Results use zero-based succeeded/failed indexes; valid targets continue after item errors.",
-        },
-      ),
-    ),
-    expectedSessionId: Type.Optional(
-      Type.String({
-        description:
-          "Durable identity returned by sessions_list; rejects a replaced session. Required for archive, restore, or delete of another session.",
-      }),
-    ),
-    deleteTranscript: Type.Optional(
-      Type.Boolean({ description: "Archive the deleted session transcript. Default: true." }),
-    ),
-    label: Type.Optional(
-      Type.String({ description: "Sidebar title override. Empty string clears it." }),
-    ),
-    icon: Type.Optional(
-      Type.String({
-        description: `Persistent sidebar icon: a single emoji, or a named icon: ${SESSION_ICON_GLYPH_DESCRIPTION}, or custom SVG markup/data:image/svg+xml URL (max 16 KiB decoded; self-contained, no scripts or external references). Include xmlns="http://www.w3.org/2000/svg" and viewBox on SVGs. Empty string clears it. Distinct from temporary attention.`,
-      }),
-    ),
-    color: Type.Optional(
-      Type.String({
-        description: `Persistent sidebar color tint, one of: ${SESSION_COLOR_IDS.join(", ")}. Empty string clears it.`,
-      }),
-    ),
-    group: Type.Optional(
-      Type.Union([Type.String(), Type.Null()], {
-        description:
-          "patch: custom sidebar group for this session. Null or an empty string clears it back to ungrouped; assigning a new name creates the group.",
-      }),
-    ),
-    statusNote: Type.Optional(
-      Type.String({
-        maxLength: 120,
-        description:
-          "Short sidebar status line. Empty string clears it and declared attention. Clears automatically when the user reads or replies, or when its TTL expires.",
-      }),
-    ),
-    attention: Type.Optional(
-      stringEnum(["clear", ...SESSION_AGENT_ATTENTION_ICON_IDS] as const, {
-        description:
-          "Request user attention with a curated icon; requires an active statusNote. 'clear' clears both attention and statusNote.",
-      }),
-    ),
-    ttlMinutes: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: 120,
-        description: "Status/attention lifetime in minutes. Default 30; maximum 120.",
-      }),
-    ),
-    pinned: Type.Optional(
-      Type.Boolean({
-        description:
-          "Pin session (root and Home-linked sessions only; spawned, subagent, and nested-child sessions cannot be pinned)",
-      }),
-    ),
-    archived: Type.Optional(
-      Type.Boolean({ description: "True archives without deleting; false restores the session." }),
-    ),
-    model: Type.Optional(Type.String({ description: "Model override" })),
-    thinkingLevel: Type.Optional(Type.String({ description: "Thinking override" })),
-    ownerType: Type.Optional(
-      stringEnum(["human", "agent"] as const, {
-        description: "New owner kind for assign_owner",
-      }),
-    ),
-    ownerId: Type.Optional(Type.String({ description: "New owner id for assign_owner" })),
-    names: Type.Optional(
-      Type.Array(Type.String(), {
-        description:
-          "group_set: full replacement of the ordered group catalog. Array order becomes sidebar order; new names are created; empty groups left out are deleted. Dropping a group that still has member sessions is rejected — remove it with group_delete first. Never moves sessions. To reorder, pass the complete current list in the new order.",
-      }),
-    ),
-    name: Type.Optional(
-      Type.String({ description: "group_rename and group_delete: the group to act on." }),
-    ),
-    to: Type.Optional(Type.String({ description: "group_rename: the new group name." })),
-  },
-  { additionalProperties: false },
-);
-
 type SessionsToolOptions = {
+  archiveOnly?: boolean;
   agentSessionKey?: string;
   agentSessionId?: string;
   requesterAgentIdOverride?: string;
@@ -346,12 +218,31 @@ export function createSessionsTool(opts: SessionsToolOptions = {}): AnyAgentTool
   return {
     label: "Sessions",
     name: "sessions",
-    description:
-      "cloud_profiles lists configured cloud profiles; pass profileId for their OS and machine choices. Session settings, ownership, reset, delete, and custom sidebar groups: patch label/icon/group/status, pin, archive/restore, model/thinking override. patch with group files sessions into a group; targets applies the same patch to up to 100 visible sessions; group_list shows the catalog; group_set replaces the whole ordered catalog; group_rename/group_delete change one group everywhere. assign_owner hands responsibility to a human or agent; reset/delete visible sessions.",
-    parameters: SessionsToolSchema,
+    description: opts.archiveOnly
+      ? "Archive or restore sessions you are authorized to manage. Use patch with archived=true or false. Defaults to the current session; self-archive waits until the current run finishes. Other sessions require expectedSessionId from session discovery. No deletion, settings, ownership, or group changes."
+      : "cloud_profiles lists configured cloud profiles; pass profileId for their OS and machine choices. Session settings, ownership, reset, delete, and custom sidebar groups: patch label/icon/group/status, pin, archive/restore, model/thinking override. patch with group files sessions into a group; targets applies the same patch to up to 100 visible sessions; group_list shows the catalog; group_set replaces the whole ordered catalog; group_rename/group_delete change one group everywhere. assign_owner hands responsibility to a human or agent; reset/delete visible sessions.",
+    parameters: opts.archiveOnly ? SessionArchiveToolSchema : SessionsToolSchema,
     execute: async (_toolCallId, rawArgs) => {
       const params = rawArgs as Record<string, unknown>;
       const action = readToolStringParam(params, "action", { required: true });
+      if (opts.archiveOnly) {
+        // Discovery is not a grant: retained tools cannot fall back to System
+        // dispatch after their human caller or invocation has gone away.
+        if (!hasSessionArchiveAuthority()) {
+          throw new ToolAuthorizationError(
+            "Session archive requires a current operator write grant",
+          );
+        }
+        if (
+          action !== "patch" ||
+          typeof params.archived !== "boolean" ||
+          Object.keys(params).some(
+            (key) => !Object.hasOwn(SessionArchiveToolSchema.properties, key),
+          )
+        ) {
+          throw new ToolAuthorizationError("This session tool only permits archive and restore");
+        }
+      }
       if (
         params.targets !== undefined &&
         (action !== "patch" ||

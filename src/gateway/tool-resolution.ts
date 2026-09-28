@@ -1,4 +1,5 @@
 // Gateway-scoped tool resolution for HTTP and loopback tool surfaces.
+import type { AdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import { resolveAgentWorkspaceDir, resolveSessionAgentIds } from "../agents/agent-scope.js";
 import { applyToolAvailabilityDescriptions } from "../agents/agent-tools.deferred-followup.js";
 import { createOpenClawCodingTools } from "../agents/agent-tools.js";
@@ -46,6 +47,7 @@ import {
 } from "../agents/tools/cron-tool.js";
 import { createChannelQuestionPromptDelivery } from "../agents/tools/question-prompt-send.js";
 import { prepareSessionPortalToolTarget } from "../agents/tools/session-portal-target.js";
+import { hasSessionArchiveAuthority } from "../agents/tools/sessions-archive-authority.js";
 import type { SourceReplyDeliveryMode } from "../auto-reply/get-reply-options.types.js";
 import type { ConversationReadInvocationOrigin } from "../channels/plugins/conversation-read-origin.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -86,6 +88,8 @@ export function resolveGatewayScopedTools(
     agentTo?: string;
     agentThreadId?: string;
     senderIsOwner?: boolean;
+    /** Host-issued source for archive-only discovery; execution rechecks its own caller. */
+    sessionArchiveAuthority?: AdmittedRunOperatorAuthority;
     conversationReadOrigin?: ConversationReadInvocationOrigin;
     allowGatewaySubagentBinding?: boolean;
     allowMediaInvokeCommands?: boolean;
@@ -259,7 +263,13 @@ export function resolveGatewayScopedTools(
       : [];
   const ownerOnlyGatewayDeny =
     params.senderIsOwner === false || (surface === "http" && params.senderIsOwner !== true)
-      ? GATEWAY_OWNER_ONLY_CORE_TOOLS.filter((name) => name !== "portal" || !sessionPortalTarget)
+      ? GATEWAY_OWNER_ONLY_CORE_TOOLS.filter(
+          (name) =>
+            (name !== "portal" || !sessionPortalTarget) &&
+            (name !== "sessions" ||
+              surface !== "loopback" ||
+              !hasSessionArchiveAuthority(params.sessionArchiveAuthority)),
+        )
       : [];
   // HTTP callers start with additional surface denies because they cross auth only.
   const workspaceDir =
