@@ -3015,6 +3015,7 @@ openclaw-chat-ci-details {
 @media (max-width: 560px) {
   .agent-chat__input--chat .chat-mobile-primary-action {
     margin-inline-start: var(--chat-mobile-row-action-gap);
+    gap: var(--chat-mobile-row-action-gap);
   }
 
   .agent-chat__input--chat
