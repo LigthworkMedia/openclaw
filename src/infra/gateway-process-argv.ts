@@ -114,10 +114,18 @@ function classifyEntrypoint(
   if (typeof entryIndex !== "number") {
     return entryIndex.kind === "not-runtime" ? { kind: "other" } : entryIndex;
   }
-  const script = args[entryIndex]!;
+  const identity = classifyOpenClawEntrypointPath(args[entryIndex]!, opts);
+  return identity.kind === "openclaw" ? { kind: "openclaw", entryIndex } : identity;
+}
+
+/** Path evidence is shared with cleanup even when launcher syntax is unfamiliar. */
+export function classifyOpenClawEntrypointPath(
+  script: string,
+  opts: Pick<ClassificationOptions, "cwd" | "pid" | "additionalEntrypoints"> = {},
+): OpenClawArgvClassification {
   const normalized = normalizeProcArg(script);
   if (/(?:^|\/)openclaw\.mjs$/.test(normalized)) {
-    return { kind: "openclaw", entryIndex };
+    return { kind: "openclaw" };
   }
   const entrypoints = [...ENTRY_CANDIDATES, ...(opts.additionalEntrypoints ?? [])];
   let scriptPath = script;
@@ -151,7 +159,7 @@ function classifyEntrypoint(
     return { kind: "unclassified", reason: `could not read package identity for ${script}` };
   }
   return isRecord(manifest) && manifest.name === "openclaw"
-    ? { kind: "openclaw", entryIndex }
+    ? { kind: "openclaw" }
     : { kind: "other" };
 }
 
