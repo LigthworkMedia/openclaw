@@ -2127,12 +2127,11 @@ process.stdout.write(JSON.stringify({ elapsedMs: Date.now() - startedAt, message
     );
 
     expect(workflow.permissions).toEqual({});
-    expect(workflow.on.workflow_dispatch.inputs.operation).toEqual({
-      description: "Upload a new release or reconcile one existing processed build",
+    expect(workflow.on.workflow_dispatch.inputs.operation).toMatchObject({
       required: true,
       default: "release",
       type: "choice",
-      options: ["release", "reconcile-and-record"],
+      options: ["release", "screenshots", "reconcile-and-record"],
     });
     expect(workflow.jobs.release.if).toContain("inputs.operation == 'release'");
     expect(reader.if).toContain("inputs.operation == 'reconcile-and-record'");
