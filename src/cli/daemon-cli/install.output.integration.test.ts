@@ -65,6 +65,7 @@ vi.mock("../../daemon/runtime-paths.js", async (importOriginal) => ({
 }));
 
 const daemonExec = await import("../../daemon/exec-file.js");
+const runtimePinState = await import("../../daemon/runtime-pin-state.js");
 const { runDaemonInstall } = await import("./install.js");
 const { clearConfigCache, clearRuntimeConfigSnapshot, readConfigFileSnapshot } =
   await import("../../config/config.js");
@@ -155,6 +156,50 @@ describe("runDaemonInstall integration", () => {
     await fs.writeFile(configPath, JSON.stringify({}, null, 2));
     clearConfigCache();
   });
+
+  it.each(["inspection", "validation"] as const)(
+    "classifies a saved runtime pin failure during %s without installing",
+    async (failure) => {
+      const runtimePath = path.join(tempHome, "missing", "node");
+      serviceMock.readCommand.mockResolvedValue({
+        programArguments: [runtimePath, "/opt/openclaw/openclaw.mjs", "gateway"],
+      });
+      const readRuntimePin = runtimePinState.readDaemonRuntimePinForInstall;
+      const readPin = vi.spyOn(runtimePinState, "readDaemonRuntimePinForInstall");
+      if (failure === "inspection") {
+        readPin.mockImplementation(() => {
+          throw new Error("Saved runtime pin cannot be read");
+        });
+      } else {
+        readPin.mockImplementation((...args) => ({
+          ...readRuntimePin(...args),
+          stored: true,
+          pin: { runtime: "node", path: runtimePath },
+        }));
+      }
+
+      await expect(runDaemonInstall({ json: true, force: true })).rejects.toThrow("__exit__:1");
+
+      expect(defaultRuntime.exit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(runtimeLogs).toEqual([
+        JSON.stringify(
+          {
+            action: "install",
+            ok: false,
+            error:
+              failure === "inspection"
+                ? "Runtime pin inspection failed: Error: Saved runtime pin cannot be read"
+                : `Invalid runtime pin: Error: Pinned runtime is not executable: ${runtimePath}`,
+            result: "runtime-pin-invalid",
+          },
+          null,
+          2,
+        ),
+      ]);
+      expect(runtimeErrors).toEqual([]);
+      expect(serviceMock.install).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([false, true])(
     "orders Gateway mode warning, installed result, and reinstall hint (json=%s)",

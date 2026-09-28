@@ -178,7 +178,7 @@ export function createDaemonActionContext(params: {
   const fail = (
     message: string,
     hints?: string[],
-    result?: "restart-health-failed" | "still-starting",
+    result?: "restart-health-failed" | "still-starting" | "runtime-pin-invalid",
   ) => {
     if (params.json) {
       emit({

@@ -211,7 +211,7 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
       opts.runtime !== undefined || opts.runtimePath !== undefined,
     );
   } catch (error) {
-    fail(`Runtime pin inspection failed: ${String(error)}`);
+    fail(`Runtime pin inspection failed: ${String(error)}`, undefined, "runtime-pin-invalid");
     return;
   }
   let pinnedRuntimePath = opts.runtimePath ?? (opts.runtime ? undefined : pinSnapshot.pin?.path);
@@ -295,7 +295,7 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
     }
     runtimePath = wrapperPath ? undefined : pinnedRuntimePath;
   } catch (error) {
-    fail(`Invalid runtime pin: ${String(error)}`);
+    fail(`Invalid runtime pin: ${String(error)}`, undefined, "runtime-pin-invalid");
     return;
   }
   const installBind = resolveGatewayInstallBindMode(cfg);

@@ -449,6 +449,56 @@ struct GatewayLaunchAgentManagerTests {
 
 @Suite(.serialized)
 struct GatewayLaunchAgentLocalRoutingTests {
+    @Test(arguments: ["invalid-pin", "invalid-pin-retry-fails", "other-failure"])
+    func `enable retries only a typed invalid runtime pin once`(_ scenario: String) async {
+        await TestIsolation.withIsolatedState(env: ["OPENCLAW_CONFIG_PATH": TestIsolation.tempConfigPath()]) {
+            let marker = FileManager.default.temporaryDirectory
+                .appendingPathComponent("openclaw-no-disable-marker-\(UUID().uuidString)")
+            let retries = scenario != "other-failure"
+            let expectedError: String? = switch scenario {
+            case "invalid-pin-retry-fails": "Pin still invalid"
+            case "other-failure": "Invalid runtime pin: untyped failure"
+            default: nil
+            }
+            let retryPayload = scenario == "invalid-pin-retry-fails"
+                ? #"{"ok":false,"result":"runtime-pin-invalid","error":"Pin still invalid"}"#
+                : #"{"ok":true}"#
+            let cliPrefix = ["/fixture/node", "/fixture/openclaw.mjs"]
+            GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(marker)
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(
+                true,
+                beforeReturning: { _ in
+                    GatewayLaunchAgentManager.setTestingDaemonStatusPayload(retryPayload)
+                },
+                resolveCLI: { _, _ in .executable(cliPrefix) })
+            GatewayLaunchAgentManager.setTestingDaemonStatusPayload(retries
+                ? #"{"ok":false,"result":"runtime-pin-invalid","error":"Pin rejected"}"#
+                : #"{"ok":false,"error":"Invalid runtime pin: untyped failure"}"#)
+            GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            defer {
+                GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(nil)
+                GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(false)
+                GatewayLaunchAgentManager.setTestingDaemonStatusPayload(nil)
+                GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            }
+
+            let error = await GatewayLaunchAgentManager.set(
+                enabled: true,
+                bundlePath: "/Applications/OpenClaw.app",
+                port: 51845,
+                allowUnconfigured: true)
+
+            #expect(error == expectedError)
+            let install = ["install", "--force", "--port", "51845", "--allow-unconfigured"]
+            let expectedCalls = retries ? [install, install + ["--runtime", "node"]] : [install]
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot() == expectedCalls)
+            let prefix = cliPrefix + AppProfile.current.cliRootArguments + ["gateway"]
+            #expect(GatewayLaunchAgentManager.testingResolvedDaemonCommandsSnapshot() == expectedCalls.map {
+                prefix + $0 + ["--json"]
+            })
+        }
+    }
+
     @Test(arguments: [
         ["/fixture/managed/openclaw"],
         ["/fixture/node", "/fixture/openclaw.mjs"],
