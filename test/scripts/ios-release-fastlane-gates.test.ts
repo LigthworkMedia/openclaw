@@ -1509,6 +1509,8 @@ class << Dir
 end
 Dir.mktmpdir("openclaw-screenshot-diagnostics-") do |root|
   ENV["HOME"] = root
+  timestamp = Time.utc(2026, 1, 1)
+  Time.define_singleton_method(:now) { timestamp }
   directory = File.join(root, "Library", "Logs", "DiagnosticReports")
   FileUtils.mkdir_p(directory)
   log = File.join(root, "capture.log")
@@ -1518,7 +1520,8 @@ Dir.mktmpdir("openclaw-screenshot-diagnostics-") do |root|
   error = nil
   begin
     diagnostics.measure("capture", device: "iPad Pro 13-inch", log_path: log) do
-      File.write(File.join(directory, "runner.ips"), JSON.generate({
+      report = File.join(directory, "runner.ips")
+      File.write(report, JSON.generate({
         "procName" => "OpenClawUITests-Runner", "procPath" => "PRIVATE-PATH",
         "exception" => { "type" => "EXC_CRASH", "signal" => "SIGABRT", "codes" => "PRIVATE-CODES" },
         "termination" => { "namespace" => "SIGNAL", "code" => 6, "reason" => "PRIVATE-REASON" },
@@ -1527,6 +1530,11 @@ Dir.mktmpdir("openclaw-screenshot-diagnostics-") do |root|
           { "symbol" => "https://PRIVATE-URL/?token=value" }
         ] }]
       }))
+      # Explicit mtimes keep the age filter independent of filesystem clock precision.
+      File.utime(timestamp, timestamp, report)
+      stale_report = File.join(directory, "stale.ips")
+      FileUtils.cp(report, stale_report)
+      File.utime(timestamp - 60, timestamp - 60, stale_report)
       raise "original capture failed"
     end
   rescue => failure
