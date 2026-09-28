@@ -154,6 +154,7 @@ it.each(
       await expect(attempt).rejects.toThrow(
         `node openclaw.mjs${profile ? ` --profile ${profile}` : ""} gateway stop`,
       );
+      await expect(attempt).rejects.toThrow("add `--force` in a non-interactive shell");
       expect(spawn).not.toHaveBeenCalled();
       expect(
         vi
