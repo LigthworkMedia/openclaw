@@ -9,7 +9,11 @@ import { createDeferredCore } from "../../shared/deferred.js";
 import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import { createGatewayAuthRateLimiter, type AuthRateLimiter } from "../auth-rate-limit.js";
 import { createArtifactTransferHttpCallback } from "./artifact-transfer-http.js";
-import { ArtifactTransferBusyError } from "./artifact-transfer-service.js";
+import {
+  ArtifactTransferBusyError,
+  createArtifactTransferService,
+  type ArtifactTransferService,
+} from "./artifact-transfer-service.js";
 import { handleWorkerBootstrapArtifactTransferHttpRequest } from "./worker-bootstrap-artifact-transfer-http.js";
 import { createWorkerBootstrapArtifactTransferService } from "./worker-bootstrap-artifact-transfer-service.js";
 
@@ -52,7 +56,11 @@ describe("artifact transfer response settlement", () => {
     vi.useRealTimers();
   });
 
-  async function serve(writeError?: Error, artifactKey = artifact.tarballSha256) {
+  async function serve(
+    writeError?: Error,
+    artifactKey = artifact.tarballSha256,
+    transfer: Omit<ArtifactTransferService, "prepare"> = service,
+  ) {
     const chunks: Buffer[] = [];
     class ResponseSocket extends Socket {
       override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error) => void) {
@@ -77,7 +85,7 @@ describe("artifact transfer response settlement", () => {
         req,
         res,
         clientIp: "127.0.0.1",
-        callback: createArtifactTransferHttpCallback(service),
+        callback: createArtifactTransferHttpCallback(transfer),
         rateLimiter,
       });
       return { res, wire: Buffer.concat(chunks).toString("utf8") };
@@ -85,6 +93,36 @@ describe("artifact transfer response settlement", () => {
       socket.destroy();
     }
   }
+
+  it("reports progress only for authorized bytes and isolates observer failures", async ({
+    onTestFinished,
+  }) => {
+    const transfer = createArtifactTransferService({ now: () => now });
+    onTestFinished(() => transfer.closeAll());
+    const onProgress = vi.fn(() => {
+      throw new Error("synthetic progress observer failure");
+    });
+    const prepare = () =>
+      transfer.prepare({
+        artifact,
+        artifactKey: artifact.tarballSha256,
+        ttlMs: 60_000,
+        maxServes: 1,
+        isAuthorized: () => authorized,
+        onProgress,
+      });
+    ({ token } = prepare());
+    transfer.revoke(token);
+    expect((await serve(undefined, artifact.tarballSha256, transfer)).res.statusCode).toBe(404);
+    expect(onProgress).not.toHaveBeenCalled();
+
+    ({ token } = prepare());
+    const completed = await serve(undefined, artifact.tarballSha256, transfer);
+    expect(completed.res.statusCode).toBe(200);
+    expect(completed.res.writableFinished).toBe(true);
+    expect(completed.wire.split("\r\n\r\n")[1]).toBe(contents);
+    expect(onProgress).toHaveBeenCalled();
+  });
 
   it("counts interrupted serves and keeps retries exclusive through descriptor settlement", async () => {
     rateLimiter = createGatewayAuthRateLimiter(
