@@ -14,6 +14,11 @@ const loadConfig = vi.hoisted(() => vi.fn());
 const resolveGatewayInstallToken = vi.hoisted(() => vi.fn());
 const readDaemonRuntimePinForInstall = vi.hoisted(() => vi.fn());
 vi.mock("../daemon/runtime-pin-state.js", () => ({ readDaemonRuntimePinForInstall }));
+const runExec = vi.hoisted(() => vi.fn());
+vi.mock("../process/exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../process/exec.js")>()),
+  runExec,
+}));
 
 const buildGatewayInstallPlan = vi.hoisted(() => vi.fn());
 const note = vi.hoisted(() => vi.fn());
@@ -86,6 +91,15 @@ describe("maybeInstallDaemon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readDaemonRuntimePinForInstall.mockReturnValue({ revision: "empty", stored: false });
+    runExec.mockReset().mockResolvedValue({
+      stdout: JSON.stringify({
+        nodeVersion: "26.8.1",
+        bunVersion: "1.4.2",
+        sqliteVersion: "3.53.4",
+        sqliteProbe: { available: true, version: "3.53.4", text: true, blob: true, json: true },
+      }),
+      stderr: "",
+    });
     progressSetLabel.mockReset();
     serviceIsLoaded.mockResolvedValue(false);
     serviceReadCommand.mockResolvedValue(null);
@@ -223,6 +237,31 @@ describe("maybeInstallDaemon", () => {
 
     expect(serviceInstall).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["bun", "node"])(
+    "defaults the runtime picker to recorded Bun and honors %s",
+    async (choice) => {
+      const recordedPath = "/opt/recorded/bin/bun";
+      serviceIsLoaded.mockResolvedValue(true);
+      serviceReadCommand.mockResolvedValue({
+        programArguments: [recordedPath, "/app/openclaw.mjs", "gateway"],
+      });
+      select.mockResolvedValueOnce("reinstall").mockResolvedValueOnce(choice);
+
+      expect(await runInstall()).toBe("succeeded");
+
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Gateway service runtime",
+          initialValue: "bun",
+        }),
+      );
+      const plan = buildGatewayInstallPlan.mock.calls[0]?.[0];
+      expect(plan?.runtime).toBe(choice);
+      expect(plan?.runtimePath).toBe(choice === "bun" ? recordedPath : undefined);
+      expect(plan?.pinnedRuntimePath).toBeUndefined();
+    },
+  );
 
   it("rethrows install probe failures that are not the known non-fatal Linux systemd cases", async () => {
     serviceIsLoaded.mockRejectedValueOnce(

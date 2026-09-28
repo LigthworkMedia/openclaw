@@ -24,6 +24,11 @@ type DefaultModelCatalogFacts = ReturnType<
 
 const readPin = vi.hoisted(() => vi.fn());
 vi.mock("../daemon/runtime-pin-state.js", () => ({ readDaemonRuntimePinForInstall: readPin }));
+const runExec = vi.hoisted(() => vi.fn());
+vi.mock("../process/exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../process/exec.js")>()),
+  runExec,
+}));
 
 const runTui = vi.hoisted(() => vi.fn<(options: unknown) => Promise<void>>(async () => {}));
 const setupCleanupExitTimer = vi.hoisted(() => ({ unref: vi.fn() }));
@@ -427,6 +432,7 @@ function requireMockArg(mock: ReturnType<typeof vi.fn>, callIndex = 0, argIndex 
 describe("finalizeSetupWizard", () => {
   beforeEach(() => {
     readPin.mockReset().mockReturnValue({ revision: "empty", stored: false });
+    runExec.mockReset();
     runTui.mockClear();
     setupCleanupExitTimer.unref.mockClear();
     scheduleProcessExitAfterTuiReturn.mockReset();
@@ -1568,6 +1574,55 @@ describe("finalizeSetupWizard", () => {
         }),
       );
       expect(gatewayServiceUninstall).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { flow: "advanced", choice: "bun" },
+    { flow: "advanced", choice: "node" },
+    { flow: "quickstart", choice: "bun" },
+  ] as const)(
+    "reinstalls recorded Bun through $flow with choice=$choice",
+    async ({ flow, choice }) => {
+      const recordedPath = "/opt/recorded/bin/bun";
+      runExec.mockResolvedValue({
+        stdout: JSON.stringify({
+          bunVersion: "1.4.2",
+          sqliteVersion: "3.53.4",
+          sqliteProbe: { available: true, version: "3.53.4", text: true, blob: true, json: true },
+        }),
+        stderr: "",
+      });
+      gatewayServiceIsLoaded.mockResolvedValue(true);
+      gatewayServiceReadCommand.mockResolvedValue({
+        programArguments: [recordedPath, "/app/openclaw.mjs", "gateway"],
+      });
+      const prompter = buildWizardPrompter();
+      const selectRuntime = vi
+        .mocked(prompter.select)
+        .mockResolvedValueOnce("reinstall")
+        .mockResolvedValueOnce(choice);
+
+      const result = await ensureGatewayServiceForOnboarding(
+        createServiceSetupArgs({
+          flow,
+          opts: { installDaemon: true },
+          prompter,
+        }),
+      );
+
+      expect(result.gateway).toEqual({ status: "ready", action: "installed" });
+      if (flow === "advanced") {
+        expect(selectRuntime).toHaveBeenCalledWith(
+          expect.objectContaining({ initialValue: "bun" }),
+        );
+      }
+      expect(selectRuntime).toHaveBeenCalledTimes(flow === "advanced" ? 2 : 1);
+      expect(requireMockArg(buildGatewayInstallPlan)).toMatchObject({
+        runtime: choice,
+        runtimePath: choice === "bun" ? recordedPath : undefined,
+        pinnedRuntimePath: undefined,
+      });
     },
   );
 

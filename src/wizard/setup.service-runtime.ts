@@ -40,11 +40,11 @@ export async function resolveOnboardingGatewayRuntime(params: {
     selectRuntime:
       params.flow === "quickstart"
         ? undefined
-        : () =>
+        : (recorded) =>
             params.prompter.select({
               message: t("wizard.finalize.daemonRuntime"),
               options: getLocalizedGatewayDaemonRuntimeOptions(),
-              initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+              initialValue: recorded ?? DEFAULT_GATEWAY_DAEMON_RUNTIME,
             }),
   });
   if (

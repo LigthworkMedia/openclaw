@@ -381,14 +381,14 @@ export async function maybeRepairGatewayDaemon(params: {
       const selection = await resolveGatewaySetupRuntime({
         env: process.env,
         existingCommand: serviceState.command,
-        selectRuntime: () =>
+        selectRuntime: (recorded) =>
           params.prompter.select<GatewayDaemonRuntime>(
             {
               message: "Gateway service runtime",
               options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
-              initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+              initialValue: recorded ?? DEFAULT_GATEWAY_DAEMON_RUNTIME,
             },
-            DEFAULT_GATEWAY_DAEMON_RUNTIME,
+            recorded ?? DEFAULT_GATEWAY_DAEMON_RUNTIME,
           ),
       });
       const tokenResolution = await resolveGatewayInstallToken({
@@ -414,6 +414,7 @@ export async function maybeRepairGatewayDaemon(params: {
         env: selection.env,
         port,
         runtime: selection.runtime,
+        runtimePath: selection.runtimePath,
         pinnedRuntimePath: selection.pinnedRuntimePath,
         existingCommand: serviceState.command,
         warn: (message, title) => note(message, title),

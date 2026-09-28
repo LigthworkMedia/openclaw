@@ -1,4 +1,5 @@
 /** Resolve setup runtime intent without turning automatic choices into persistent pins. */
+import { resolveRecordedDaemonRuntime } from "../daemon/runtime-paths.js";
 import { readDaemonRuntimePinForInstall } from "../daemon/runtime-pin-state.js";
 import {
   resolveManagedGatewayServiceCommand,
@@ -10,7 +11,7 @@ export async function resolveGatewaySetupRuntime(params: {
   env: NodeJS.ProcessEnv;
   existingCommand: GatewayServiceCommandConfig | null;
   runtime?: GatewayDaemonRuntime;
-  selectRuntime?: () => Promise<GatewayDaemonRuntime>;
+  selectRuntime?: (recorded?: GatewayDaemonRuntime) => Promise<GatewayDaemonRuntime>;
 }) {
   const expected = readDaemonRuntimePinForInstall(
     { kind: "gateway", env: params.env },
@@ -18,19 +19,28 @@ export async function resolveGatewaySetupRuntime(params: {
     params.runtime !== undefined,
   );
   const pin = params.runtime === undefined ? expected.pin : undefined;
+  const existing = resolveManagedGatewayServiceCommand(params.existingCommand);
+  const env = {
+    ...params.env,
+    OPENCLAW_WRAPPER: params.env.OPENCLAW_WRAPPER ?? existing?.environment?.OPENCLAW_WRAPPER,
+  };
+  const recordedRuntime =
+    params.runtime === undefined && !pin && !env.OPENCLAW_WRAPPER?.trim()
+      ? await resolveRecordedDaemonRuntime(existing?.programArguments[0], env)
+      : undefined;
+  const retainedRuntime = recordedRuntime?.status === "supported" ? recordedRuntime : undefined;
   const runtime =
     params.runtime ??
     pin?.runtime ??
-    (await params.selectRuntime?.()) ??
+    (params.selectRuntime
+      ? await params.selectRuntime(retainedRuntime?.runtime)
+      : retainedRuntime?.runtime) ??
     DEFAULT_GATEWAY_DAEMON_RUNTIME;
-  const existing = resolveManagedGatewayServiceCommand(params.existingCommand);
   return {
     runtime,
+    runtimePath: runtime === retainedRuntime?.runtime ? retainedRuntime.path : undefined,
     pinnedRuntimePath: pin?.path,
     runtimePinUpdate: { expected, pin },
-    env: {
-      ...params.env,
-      OPENCLAW_WRAPPER: params.env.OPENCLAW_WRAPPER ?? existing?.environment?.OPENCLAW_WRAPPER,
-    },
+    env,
   };
 }

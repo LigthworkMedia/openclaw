@@ -81,7 +81,7 @@ export async function maybeInstallDaemon(params: {
       env: process.env,
       existingCommand,
       runtime: params.daemonRuntime,
-      selectRuntime: async () => {
+      selectRuntime: async (recorded) => {
         if (GATEWAY_DAEMON_RUNTIME_OPTIONS.length === 1) {
           return GATEWAY_DAEMON_RUNTIME_OPTIONS[0]?.value ?? DEFAULT_GATEWAY_DAEMON_RUNTIME;
         }
@@ -89,7 +89,7 @@ export async function maybeInstallDaemon(params: {
           await select({
             message: "Gateway service runtime",
             options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
-            initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+            initialValue: recorded ?? DEFAULT_GATEWAY_DAEMON_RUNTIME,
           }),
           params.runtime,
           1,
@@ -122,6 +122,7 @@ export async function maybeInstallDaemon(params: {
           env: selection.env,
           port: params.port,
           runtime: selection.runtime,
+          runtimePath: selection.runtimePath,
           pinnedRuntimePath: selection.pinnedRuntimePath,
           existingCommand,
           warn: (message, title) => note(message, title),

@@ -85,6 +85,7 @@ export async function installGatewayDaemonNonInteractive(params: {
     env: selection.env,
     port,
     runtime: selection.runtime,
+    runtimePath: selection.runtimePath,
     pinnedRuntimePath: selection.pinnedRuntimePath,
     existingCommand,
     warn: (message) => runtime.log(message),

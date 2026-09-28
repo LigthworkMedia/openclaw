@@ -115,9 +115,13 @@ commands retain their service-management behavior.
 
 ### Pin the service runtime
 
-Forced reinstall retains a supported Node executable recorded in the service.
-Doctor also retains it when no runtime migration is needed. An explicit
-`--runtime node` requests automatic selection again.
+When no runtime option is supplied, forced reinstall retains a supported Node or
+Bun executable recorded in an unpinned service without a wrapper. Update refresh
+does the same without creating a pin. Doctor also defaults to the recorded runtime
+when no runtime migration is needed, including an existing but unloaded service.
+A missing, non-executable, or unsupported recorded Bun falls back to automatic
+Node selection. An explicit `--runtime node` or `--runtime bun` requests automatic
+selection of that runtime.
 
 Use `--runtime-path` to keep the service on an operator-selected Node or Bun
 executable instead of automatic runtime selection:
@@ -186,14 +190,14 @@ openclaw gateway restart
 <AccordionGroup>
   <Accordion title="Command options">
     - `gateway status`: `--url`, `--port`, `--token`, `--password`, `--timeout`, `--no-probe`, `--require-rpc`, `--deep`, `--json`
-    - `gateway install`: `--port`, `--runtime <node|bun>` (default: `node`), `--runtime-path <path>`, `--token`, `--wrapper <path>`, `--force`, `--json`
+    - `gateway install`: `--port`, `--runtime <node|bun>` (fresh-install default: `node`), `--runtime-path <path>`, `--token`, `--wrapper <path>`, `--force`, `--json`
     - `gateway restart`: `--safe`, `--skip-deferral`, `--force`, `--wait <duration>`, `--preserve-definition`, `--json`
     - `gateway uninstall|start`: `--json`
     - `gateway stop`: `--disable`, `--force`, `--json`
 
   </Accordion>
   <Accordion title="Service runtime">
-    - Node is the primary, default, and recommended managed Gateway runtime.
+    - Node is the primary and recommended managed Gateway runtime and the default for fresh installations. Implicit reinstalls retain a supported recorded Node or Bun runtime as described above.
     - For unpinned services, `gateway install` checks the Node executable recorded in the managed service. If it is missing, non-executable, or unsupported, installation refreshes the service without requiring `--force` and reports the replacement path. This also applies when an installer or update refreshes the service. Repair prefers the current CLI's supported Node, retaining stable Homebrew paths, then checks supported system installations. Custom wrappers keep control of their runtime; protected service definitions still require their deployment owner to repair them.
     - Bun 1.4+ with WAL-reset-safe `node:sqlite` is available as an explicit opt-in with `gateway install --runtime bun`.
 

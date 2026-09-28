@@ -15,7 +15,10 @@ import {
   buildPlatformRuntimeLogHints,
   buildPlatformServiceStartHints,
 } from "../../daemon/runtime-hints.js";
-import { resolvePinnedDaemonRuntimePath } from "../../daemon/runtime-paths.js";
+import {
+  resolvePinnedDaemonRuntimePath,
+  resolveRecordedDaemonRuntime,
+} from "../../daemon/runtime-paths.js";
 import { readDaemonRuntimePinForInstall } from "../../daemon/runtime-pin-state.js";
 import type { GatewayServiceRuntime } from "../../daemon/service-runtime.js";
 import { resolveManagedGatewayServiceCommand } from "../../daemon/service-types.js";
@@ -212,6 +215,12 @@ export async function runNodeDaemonInstall(opts: NodeDaemonInstallOptions) {
     return;
   }
 
+  const recordedRuntime =
+    opts.runtime === undefined && !pinnedRuntimePath && !installEnv.OPENCLAW_WRAPPER?.trim()
+      ? await resolveRecordedDaemonRuntime(existingManagedCommand?.programArguments[0], installEnv)
+      : undefined;
+  const retainedRuntime = recordedRuntime?.status === "supported" ? recordedRuntime : undefined;
+
   const { programArguments, workingDirectory, environment, environmentValueSources, description } =
     await buildNodeInstallPlan({
       env: installEnv,
@@ -225,7 +234,8 @@ export async function runNodeDaemonInstall(opts: NodeDaemonInstallOptions) {
       installedAppsSharing: opts.shareInstalledApps,
       commands: opts.commands,
       allCommands: opts.allCommands,
-      runtime: runtimeRaw,
+      runtime: retainedRuntime?.runtime ?? runtimeRaw,
+      runtimePath: retainedRuntime?.path,
       pinnedRuntimePath,
       warn,
     });

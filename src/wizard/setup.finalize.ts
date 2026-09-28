@@ -421,6 +421,7 @@ export async function ensureGatewayServiceForOnboarding(params: {
           env: selection.env,
           port: settings.port,
           runtime: selection.runtime,
+          runtimePath: selection.runtimePath,
           pinnedRuntimePath: selection.pinnedRuntimePath,
           existingCommand,
           warn: (message, title) => {
