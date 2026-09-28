@@ -44,7 +44,7 @@ type ClassificationOptions = {
   additionalEntrypoints?: readonly string[];
 };
 
-function readProcessWorkingDirectory(pid: number): string | undefined {
+export function readProcessWorkingDirectory(pid: number): string | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return undefined;
   }
