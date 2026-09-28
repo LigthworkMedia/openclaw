@@ -124,11 +124,11 @@ export class EmbeddedQuestionBroker {
         : undefined,
       onResolved: (event) => {
         signal?.removeEventListener("abort", abort);
-        this.emit({ event: "question.resolved", payload: event });
+        notifyListeners(this.listeners, { event: "question.resolved", payload: event });
       },
     });
     signal?.addEventListener("abort", abort, { once: true });
-    this.emit({ event: "question.requested", payload: record });
+    notifyListeners(this.listeners, { event: "question.requested", payload: record });
     return { id: record.id, expiresAtMs: record.expiresAtMs };
   }
 
@@ -220,10 +220,6 @@ export class EmbeddedQuestionBroker {
     }
     this.manager.close();
     this.listeners.clear();
-  }
-
-  private emit(event: QuestionEvent): void {
-    notifyListeners(this.listeners, event);
   }
 }
 

@@ -44,12 +44,18 @@ type QuestionChannelRuntime = {
   clear: () => Promise<void>;
 };
 
-function collectAnsweredLabels(
+function formatQuestionTerminalStatusLine(
   record: QuestionRecord,
-  event: Extract<QuestionResolvedEvent, { status: "answered" }>,
-): string[] {
+  event: QuestionResolvedEvent,
+): string {
+  if (event.status === "expired") {
+    return "Expired";
+  }
+  if (event.status === "cancelled") {
+    return "Cancelled";
+  }
   const answers = event.answers.answers;
-  return record.questions.flatMap((question) => {
+  const labels = record.questions.flatMap((question) => {
     // Only declared choices are safe to echo. Free-text answers can contain
     // secrets, mentions, or transport markup, and the label filter below drops
     // them; isOther alone must not suppress a declared selection.
@@ -59,19 +65,6 @@ function collectAnsweredLabels(
     const optionLabels = new Set(question.options.map((option) => option.label));
     return (answers[question.questionId] ?? []).filter((answer) => optionLabels.has(answer));
   });
-}
-
-function formatQuestionTerminalStatusLine(params: {
-  record: QuestionRecord;
-  event: QuestionResolvedEvent;
-}): string {
-  if (params.event.status === "expired") {
-    return "Expired";
-  }
-  if (params.event.status === "cancelled") {
-    return "Cancelled";
-  }
-  const labels = collectAnsweredLabels(params.record, params.event);
   return labels.length > 0 ? `Answered: ${labels.join(", ")}` : "Answered";
 }
 
@@ -106,7 +99,6 @@ export function createQuestionChannelRuntime(
   };
 
   const finalizeDelivery = (
-    questionId: string,
     entry: QuestionChannelEntry,
     deliveryId: string,
     finalize: QuestionDeliveryFinalizer,
@@ -116,11 +108,8 @@ export function createQuestionChannelRuntime(
     }
     entry.deliveries.delete(deliveryId);
     entry.finalizedDeliveryIds.add(deliveryId);
-    const statusLine = formatQuestionTerminalStatusLine({
-      record: entry.record,
-      event: entry.terminal,
-    });
-    runFinalizer(questionId, deliveryId, finalize, statusLine, entry.track);
+    const statusLine = formatQuestionTerminalStatusLine(entry.record, entry.terminal);
+    runFinalizer(entry.record.id, deliveryId, finalize, statusLine, entry.track);
   };
 
   const releaseEntry = (entry: QuestionChannelEntry) => {
@@ -131,17 +120,6 @@ export function createQuestionChannelRuntime(
     entry.cleanupJob?.cancel();
     entry.deliveries.clear();
     entry.finalizedDeliveryIds.clear();
-  };
-
-  const scheduleCleanup = (entry: QuestionChannelEntry) => {
-    if (entry.cleanupJob || !retainedEntries.has(entry)) {
-      return;
-    }
-    entry.cleanupJob = entry.scheduler.schedule({
-      id: `question-delivery:${randomUUID()}`,
-      delayMs: TERMINAL_DELIVERY_RETENTION_MS,
-      run: () => releaseEntry(entry),
-    });
   };
 
   return {
@@ -170,9 +148,15 @@ export function createQuestionChannelRuntime(
       }
       entry.terminal = event;
       for (const [deliveryId, finalize] of entry.deliveries) {
-        finalizeDelivery(event.id, entry, deliveryId, finalize);
+        finalizeDelivery(entry, deliveryId, finalize);
       }
-      scheduleCleanup(entry);
+      if (retainedEntries.has(entry)) {
+        entry.cleanupJob = entry.scheduler.schedule({
+          id: `question-delivery:${randomUUID()}`,
+          delayMs: TERMINAL_DELIVERY_RETENTION_MS,
+          run: () => releaseEntry(entry),
+        });
+      }
     },
     runWithDeliveries(questionIds, run, deliveryOptions) {
       if (!questionIds.some(Boolean)) {
@@ -231,7 +215,7 @@ export function createQuestionChannelRuntime(
         return;
       }
       entry.deliveries.set(deliveryId, finalize);
-      finalizeDelivery(questionId, entry, deliveryId, finalize);
+      finalizeDelivery(entry, deliveryId, finalize);
     },
     retireGateway(owner) {
       // The Gateway calls this after joining received work and its finalizers,

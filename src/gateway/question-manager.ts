@@ -100,15 +100,6 @@ function waitResult(entry: QuestionEntry, includeResolutionId: boolean): Questio
   };
 }
 
-function resolvedEvent(record: QuestionRecord): QuestionResolvedEvent | null {
-  if (record.status === "pending") {
-    return null;
-  }
-  return record.status === "answered"
-    ? { id: record.id, status: record.status, answers: record.answers ?? { answers: {} } }
-    : { id: record.id, status: record.status };
-}
-
 /** Process-local lifecycle owner for pending questions. */
 export class QuestionManager {
   private readonly entries = new Map<string, QuestionEntry>();
@@ -172,9 +163,6 @@ export class QuestionManager {
         id: `${this.scheduleId}:${id}`,
         delayMs: timeoutMs,
         run: () => {
-          if (this.entries.get(id) !== entry) {
-            return;
-          }
           this.expire(id);
           return this.drain();
         },
@@ -506,9 +494,13 @@ export class QuestionManager {
       try {
         // Enter the original continuation before these callbacks can release its last parked root.
         settle();
-        const event = resolvedEvent(entry.record);
-        if (event && this.entries.get(entry.record.id) === entry) {
-          await Promise.resolve(entry.onResolved?.(event, this.observeEntry(entry)));
+        const { id, status, answers } = entry.record;
+        if (status !== "pending" && this.entries.get(id) === entry) {
+          const event: QuestionResolvedEvent =
+            status === "answered"
+              ? { id, status, answers: answers ?? { answers: {} } }
+              : { id, status };
+          await entry.onResolved?.(event, this.observeEntry(entry));
         }
       } finally {
         continuation?.release();
