@@ -6,6 +6,7 @@ export const databaseWorkerExtensionTestRoots = [
 ];
 
 export const databaseWorkerExtensionTestFiles = [
+  "extensions/agentsapi/agentsapi-harness.persistence.test.ts",
   "extensions/openai/binary-transport.test.ts",
   "extensions/openai/tts.test.ts",
   "extensions/microsoft/speech-provider.test.ts",
@@ -101,6 +102,7 @@ export const databaseWorkerExtensionTestFiles = [
   "extensions/browser/src/browser/routes/agent.state.dashboard-ownership.test.ts",
   "extensions/browser/src/browser/session-tab-registry.extension-cleanup.test.ts",
   "extensions/browser/src/browser/session-tab-registry.lifecycle-retry.test.ts",
+  "extensions/browser/src/browser/session-tab-registry.membership.test.ts",
   "extensions/browser/src/browser/session-tab-registry.sqlite.test.ts",
   "extensions/browser/src/browser-dashboard.test.ts",
   "extensions/buzz/src/buzz-bus.socket.test.ts",
@@ -368,6 +370,7 @@ export const databaseWorkerExtensionTestFiles = [
   "extensions/telegram/src/channel.gateway.test.ts",
   "extensions/telegram/src/message-cache.retained.test.ts",
   "extensions/telegram/src/message-cache.test.ts",
+  "extensions/telegram/src/miniapp/routes.test.ts",
   "extensions/telegram/src/monitor.webhook-identity.test.ts",
   "extensions/telegram/src/outbound-adapter.telegram-http.test.ts",
   "extensions/telegram/src/outbound-message-context.test.ts",

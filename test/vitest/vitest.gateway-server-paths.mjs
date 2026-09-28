@@ -11,13 +11,12 @@ export const gatewayPluginTestFiles = [
 
 // Native database consumers retain lifecycle cleanup within each forked process.
 export const gatewayDatabaseWorkerTestFiles = [
-  "src/gateway/agent-turn/agent-run-dispatch.execution-binding.test.ts",
-  "src/gateway/agent-turn/agent-run-dispatch.sqlite.test.ts",
   "src/gateway/approval-fixture.test.ts",
   "src/gateway/board-http.test.ts",
   "src/gateway/board-store.test.ts",
   "src/gateway/chat-display-projection.cron.test.ts",
   "src/gateway/config-reload.activation.integration.test.ts",
+  "src/gateway/config-reload.lease-retry.test.ts",
   "src/gateway/config-reload.plugin-observation.test.ts",
   "src/gateway/config-reload.test.ts",
   "src/gateway/config-reload.transcripts.test.ts",
@@ -335,6 +334,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/worker-turn-rpc.test.ts",
   "src/gateway/worker-environments/worker-turn-rpc.transcript.test.ts",
   "src/gateway/worker-environments/worker-turn-run-owner.test.ts",
+  "src/gateway/worker-environments/worker-turn-shutdown.test.ts",
   "src/gateway/worker-environments/worker-turn-trajectory.test.ts",
   "src/gateway/worker-environments/workspace-result-finalize.test.ts",
   "src/gateway/worker-environments/workspace-result-ref-mutation.test.ts",
