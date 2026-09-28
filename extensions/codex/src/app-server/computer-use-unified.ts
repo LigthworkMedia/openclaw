@@ -204,9 +204,6 @@ export function hasLegacyCodexComputerUseMcpPolicy(config: unknown): boolean {
   if (!isRecord(config)) {
     return false;
   }
-  if (isLegacyCodexComputerUsePluginDisabled(config)) {
-    return true;
-  }
   if (isRecord(config.mcp_servers) && Object.hasOwn(config.mcp_servers, "computer-use")) {
     return true;
   }

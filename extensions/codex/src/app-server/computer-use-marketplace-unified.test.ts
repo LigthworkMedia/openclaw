@@ -1,12 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatComputerUseStatus } from "../command-formatters.js";
 import { ensureCodexManagedBundledMarketplace } from "./computer-use-marketplace.js";
 import {
   hasLegacyCodexComputerUseMcpPolicy,
   resolveManagedCodexComputerUseConfig,
 } from "./computer-use-unified.js";
-import { ensureCodexComputerUse } from "./computer-use.js";
+import {
+  ensureCodexComputerUse,
+  installCodexComputerUse,
+  readCodexComputerUseStatus,
+} from "./computer-use.js";
 import { createComputerUseRequest, expectSetupErrorStatus } from "./computer-use.test-support.js";
 import { resolveCodexComputerUseConfig } from "./config.js";
 import type { MacOSDesktopCodexAppPathCandidate } from "./desktop-app-paths.js";
@@ -137,9 +142,20 @@ describe("managed unified Computer Use marketplace", () => {
     },
   );
 
-  it.each([false, true])(
-    "review: native plugin disable veto survives readiness and auto-install (%s)",
-    async (autoInstall) => {
+  it.each([
+    { action: "ensure", autoInstall: false, disableAt: "initial", installed: false },
+    { action: "ensure", autoInstall: true, disableAt: "initial", installed: false },
+    { action: "status", autoInstall: false, disableAt: "initial", installed: true },
+    { action: "install", autoInstall: false, disableAt: "initial", installed: false },
+    { action: "install", autoInstall: true, disableAt: "initial", installed: false },
+    { action: "ensure", autoInstall: true, disableAt: "plugin/list", installed: false },
+    { action: "ensure", autoInstall: true, disableAt: "plugin/read", installed: false },
+    { action: "ensure", autoInstall: true, disableAt: "never", installed: false },
+    { action: "ensure", autoInstall: true, disableAt: "plugin/list", installed: true },
+    { action: "ensure", autoInstall: true, disableAt: "plugin/read", installed: true },
+  ] as const)(
+    "$action with autoInstall=$autoInstall and native disable at $disableAt (installed=$installed)",
+    async ({ action, autoInstall, disableAt, installed }) => {
       const root = tempDirs.make("openclaw-unified-native-veto-");
       const candidate = await writeUnifiedCandidate(root);
       const agentDir = path.join(root, "agent");
@@ -155,7 +171,7 @@ describe("managed unified Computer Use marketplace", () => {
         codexHome,
       });
       const request = createComputerUseRequest({
-        installed: false,
+        installed,
         pluginName: "unified-computer-use",
         mcpServerName: "cua_repl",
         mcpTools: ["js"],
@@ -164,36 +180,75 @@ describe("managed unified Computer Use marketplace", () => {
       if (!native) {
         throw new Error("missing request fixture");
       }
-      vi.mocked(request).mockImplementation(async (method, params, options) =>
-        method === "config/read"
-          ? {
-              config: { plugins: { "computer-use@openai-bundled": { enabled: false } } },
-              origins: {},
-              layers: null,
-            }
-          : native(method, params, options),
-      );
+      let nativeDisabled = disableAt === "initial";
+      let installing = false;
+      vi.mocked(request).mockImplementation(async (method, params, options) => {
+        if (method === "config/read") {
+          return {
+            config: { plugins: { "computer-use@openai-bundled": { enabled: !nativeDisabled } } },
+            origins: {},
+            layers: null,
+          };
+        }
+        if (method === "experimentalFeature/enablement/set") {
+          installing = true;
+        }
+        const result = await native(method, params, options);
+        // Apply revocation while discovery or inspection is in flight, after the first policy read.
+        if ((installing || installed) && method === disableAt) {
+          nativeDisabled = true;
+        }
+        return result;
+      });
       try {
-        await expectSetupErrorStatus(
-          ensureCodexComputerUse({
-            client,
-            request,
-            agentDir,
-            pluginConfig: { computerUse: { enabled: true, autoInstall } },
-          }),
-          {
-            ready: false,
-            reason: "plugin_disabled",
-            pluginName: "computer-use",
-            mcpServerName: "computer-use",
-          },
-        );
-        expect(vi.mocked(request).mock.calls.map(([method]) => method)).not.toContain(
-          "plugin/install",
-        );
-        expect(vi.mocked(request).mock.calls.map(([method]) => method)).not.toContain(
-          "experimentalFeature/enablement/set",
-        );
+        const params = {
+          client,
+          request,
+          agentDir,
+          pluginConfig: { computerUse: { enabled: true, autoInstall } },
+        };
+        if (action === "install" || disableAt === "never") {
+          await expect(
+            action === "install" ? installCodexComputerUse(params) : ensureCodexComputerUse(params),
+          ).resolves.toMatchObject({
+            ready: true,
+            installed: true,
+            pluginEnabled: true,
+            pluginName: "unified-computer-use",
+            tools: ["js"],
+          });
+          expect(vi.mocked(request).mock.calls.map(([method]) => method)).toContain(
+            "plugin/install",
+          );
+          return;
+        }
+        const disabledStatus = {
+          ready: false,
+          reason: "plugin_disabled" as const,
+          installed: null,
+          pluginName: "computer-use",
+          mcpServerName: "computer-use",
+        };
+        if (action === "status") {
+          const result = await readCodexComputerUseStatus(params);
+          expect(result).toMatchObject({
+            ...disabledStatus,
+            installation: { status: "unchecked", ok: false },
+          });
+          const display = formatComputerUseStatus(result);
+          expect(display).toContain("Plugin: computer-use (installation unchecked)");
+          expect(display).toContain("Installation: unchecked");
+          expect(display).toContain("/codex computer-use install");
+          expect(display).not.toContain("not installed");
+        } else {
+          await expectSetupErrorStatus(ensureCodexComputerUse(params), disabledStatus);
+        }
+        const methods = vi.mocked(request).mock.calls.map(([method]) => method);
+        expect(methods).not.toContain("plugin/install");
+        expect(methods).not.toContain("mcpServerStatus/list");
+        if (disableAt === "initial") {
+          expect(methods).not.toContain("experimentalFeature/enablement/set");
+        }
       } finally {
         client.close();
       }

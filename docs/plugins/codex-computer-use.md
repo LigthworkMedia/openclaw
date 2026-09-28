@@ -147,7 +147,11 @@ The legacy default plugin/server pair follows this replacement automatically,
 including an explicitly configured `pluginName: "computer-use"` with the default
 server name. Custom plugin, server, or marketplace selections remain unchanged.
 An explicit native disable for `computer-use@openai-bundled` blocks automatic
-replacement before feature enablement or installation. Startup cache preparation
+replacement before feature enablement. Automatic installation rechecks that disable
+immediately before sending the native install request, after marketplace discovery
+and plugin inspection. Disabled status reports installation as unchecked because
+policy blocks inspection; it does not imply that the plugin is absent.
+Startup cache preparation
 keeps the requested identity until native effective policy is available. An
 explicit native `mcp_servers.computer-use` entry or legacy plugin MCP tool policy
 keeps the legacy identity, so a renamed server cannot bypass those restrictions. Update that native policy explicitly before selecting the unified
@@ -242,6 +246,13 @@ server exposes tools. Because installation changes trusted host resources,
 only an owner or an `operator.admin` Gateway client can run `install`. Other
 authorized senders can continue to use the read-only `status` command,
 including with overrides.
+
+The explicit owner-authorized `install` command can recover the managed unified
+replacement even when the legacy `computer-use@openai-bundled` plugin is disabled.
+It installs or re-enables the selected replacement without clearing that legacy
+setting. Automatic readiness and installation continue to honor the legacy disable;
+to resume automatic replacement, enable `computer-use@openai-bundled` in native
+Codex config. Explicit installation still respects native server and tool policies.
 
 Older releases accepted one-off `--plugin`, `--server`, and `--mcp-server`
 identity overrides. Configure `computerUse.pluginName` and
@@ -376,16 +387,16 @@ matching config key is unset:
 OpenClaw reports a stable setup reason internally and formats the
 user-facing status for chat:
 
-| Reason                 | Meaning                                                | Next step                                    |
-| ---------------------- | ------------------------------------------------------ | -------------------------------------------- |
-| `disabled`             | `computerUse.enabled` resolved to false.               | Set `enabled` or another Computer Use field. |
-| `marketplace_missing`  | No matching marketplace was available.                 | Configure source, path, or marketplace name. |
-| `plugin_not_installed` | Marketplace exists, but the plugin is not installed.   | Run install or enable `autoInstall`.         |
-| `plugin_disabled`      | Plugin is installed but disabled in Codex config.      | Run install to re-enable it.                 |
-| `mcp_missing`          | Plugin is enabled, but the MCP server is unavailable.  | Check Codex Computer Use and OS permissions. |
-| `ready`                | Plugin and MCP tools are available.                    | Start the Codex-mode turn.                   |
-| `check_failed`         | A Codex app-server request failed during status check. | Check app-server connectivity and logs.      |
-| `auto_install_blocked` | Turn-start setup would need to add a new source.       | Run explicit install first.                  |
+| Reason                 | Meaning                                                                                        | Next step                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `disabled`             | `computerUse.enabled` resolved to false.                                                       | Set `enabled` or another Computer Use field.                                                                   |
+| `marketplace_missing`  | No matching marketplace was available.                                                         | Configure source, path, or marketplace name.                                                                   |
+| `plugin_not_installed` | Marketplace exists, but the plugin is not installed.                                           | Run install or enable `autoInstall`.                                                                           |
+| `plugin_disabled`      | Native policy disables the plugin or its automatic replacement; installation may be unchecked. | Run owner-only install for explicit recovery. Enable the legacy native plugin to resume automatic replacement. |
+| `mcp_missing`          | Plugin is enabled, but the MCP server is unavailable.                                          | Check Codex Computer Use and OS permissions.                                                                   |
+| `ready`                | Plugin and MCP tools are available.                                                            | Start the Codex-mode turn.                                                                                     |
+| `check_failed`         | A Codex app-server request failed during status check.                                         | Check app-server connectivity and logs.                                                                        |
+| `auto_install_blocked` | Turn-start setup would need to add a new source.                                               | Run explicit install first.                                                                                    |
 
 The chat output includes the plugin state, MCP server state, marketplace,
 tools when available, and the specific message for the failing setup step.

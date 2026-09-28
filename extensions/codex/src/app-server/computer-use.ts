@@ -22,6 +22,7 @@ import {
   type CodexComputerUseRequest,
 } from "./computer-use-readiness.js";
 import { assertNotSymlink } from "./computer-use-service-path.js";
+import { unavailableStatus } from "./computer-use-status.js";
 import {
   hasLegacyCodexComputerUseMcpPolicy,
   isLegacyCodexComputerUsePluginDisabled,
@@ -75,6 +76,7 @@ type CodexComputerUseInstallationStatus =
   | "disabled"
   | "marketplace_missing"
   | "not_installed"
+  | "unchecked"
   | "installed_disabled"
   | "installed";
 
@@ -90,7 +92,7 @@ export type CodexComputerUseStatus = {
   enabled: boolean;
   ready: boolean;
   reason: CodexComputerUseStatusReason;
-  installed: boolean;
+  installed: boolean | null;
   pluginEnabled: boolean;
   mcpServerAvailable: boolean;
   pluginName: string;
@@ -143,7 +145,7 @@ type CodexComputerUseInspectionParams = Omit<
 > & {
   computerUseConfig: ResolvedCodexComputerUseConfig;
   runLiveTest: boolean;
-  installPlugin: boolean;
+  installMode: "none" | "automatic" | "explicit";
   explicitManagedInstall?: ExplicitManagedComputerUseInstallContext;
 };
 
@@ -205,7 +207,7 @@ export async function readCodexComputerUseStatus(
       ...params,
       computerUseConfig: config,
       runLiveTest: true,
-      installPlugin: false,
+      installMode: "none",
     });
   } catch (error) {
     return unavailableStatus(
@@ -231,7 +233,7 @@ export async function ensureCodexComputerUse(
     ...params,
     computerUseConfig: config,
     runLiveTest: config.strictReadiness,
-    installPlugin: false,
+    installMode: "none",
   });
   if (status.ready) {
     return status;
@@ -245,7 +247,7 @@ export async function ensureCodexComputerUse(
       ...params,
       computerUseConfig: config,
       runLiveTest: config.strictReadiness,
-      installPlugin: true,
+      installMode: "automatic",
     });
     if (!installedStatus.ready) {
       throw new CodexComputerUseSetupError(installedStatus);
@@ -268,7 +270,7 @@ export async function installCodexComputerUse(
     ...params,
     computerUseConfig: config,
     runLiveTest: true,
-    installPlugin: true,
+    installMode: "explicit",
   });
   if (!status.ready) {
     throw new CodexComputerUseSetupError(status);
@@ -305,7 +307,7 @@ async function inspectCodexComputerUse(
       });
       lease.client = client;
     }
-    if (!params.installPlugin) {
+    if (params.installMode === "none") {
       if (!lease.client) {
         return await inspectCodexComputerUseWithoutFence(params);
       }
@@ -417,7 +419,7 @@ async function inspectCodexComputerUseWithoutFence(
   params: CodexComputerUseInspectionParams,
 ): Promise<CodexComputerUseStatus> {
   const request = createComputerUseRequest(params);
-  if (params.installPlugin) {
+  if (params.installMode !== "none") {
     if (!resolveCodexComputerUseConfig({ pluginConfig: params.pluginConfig }).autoInstall) {
       await prepareExplicitManagedComputerUseInstall(params);
     }
@@ -434,33 +436,37 @@ async function inspectCodexComputerUseWithoutFence(
     params.computerUseConfig,
     managedMarketplacePath,
   );
+  const nativeDisableStatus =
+    computerUseConfig !== params.computerUseConfig && params.installMode !== "explicit"
+      ? unavailableStatus(
+          params.computerUseConfig,
+          "plugin_disabled",
+          "Computer Use is disabled by native plugin policy. Run /codex computer-use install for explicit recovery, or enable computer-use@openai-bundled in native Codex config for automatic replacement.",
+        )
+      : undefined;
   if (computerUseConfig !== params.computerUseConfig) {
     const nativeConfig = await request<CodexConfigReadResponse>("config/read", {
       includeLayers: false,
     });
-    if (isLegacyCodexComputerUsePluginDisabled(nativeConfig.config)) {
-      return unavailableStatus(
-        params.computerUseConfig,
-        "plugin_disabled",
-        "Computer Use is disabled by native plugin policy; automatic replacement was not installed.",
-      );
+    if (nativeDisableStatus && isLegacyCodexComputerUsePluginDisabled(nativeConfig.config)) {
+      return nativeDisableStatus;
     }
     if (hasLegacyCodexComputerUseMcpPolicy(nativeConfig.config)) {
       computerUseConfig = params.computerUseConfig;
     }
   }
-  if (params.installPlugin) {
+  if (params.installMode !== "none") {
     await request<JsonValue>("experimentalFeature/enablement/set", {
       enablement: { plugins: true },
     } satisfies CodexRequestObject);
   }
-  if (params.installPlugin && managedCodexHome) {
+  if (params.installMode !== "none" && managedCodexHome) {
     await assertNotSymlink(path.join(managedCodexHome, "config.toml"), "Codex config");
   }
   const marketplace = await resolveMarketplaceRef({
     request,
     config: computerUseConfig,
-    allowAdd: params.installPlugin,
+    allowAdd: params.installMode !== "none",
     signal: params.signal,
     defaultBundledMarketplacePath: params.defaultBundledMarketplacePath ?? managedMarketplacePath,
     defaultBundledMarketplacePathCandidates: params.defaultBundledMarketplacePathCandidates,
@@ -479,7 +485,8 @@ async function inspectCodexComputerUseWithoutFence(
     request,
     config: computerUseConfig,
     marketplace: marketplace.marketplace,
-    installPlugin: params.installPlugin,
+    nativeDisableStatus,
+    installPlugin: params.installMode !== "none",
   });
   if (!pluginInspection.ok) {
     return pluginInspection.status;
@@ -492,7 +499,7 @@ async function inspectCodexComputerUseWithoutFence(
     config: computerUseConfig,
     plugin: pluginInspection.plugin,
     runLiveTest: params.runLiveTest,
-    installPlugin: params.installPlugin,
+    installPlugin: params.installMode !== "none",
     releaseNativeConfigFence: params.releaseNativeConfigFence,
   });
 }
@@ -569,12 +576,22 @@ async function ensureComputerUsePlugin(params: {
   config: ResolvedCodexComputerUseConfig;
   marketplace: MarketplaceRef;
   installPlugin: boolean;
+  nativeDisableStatus?: CodexComputerUseStatus;
 }): Promise<PluginInspection> {
   let plugin = await readComputerUsePlugin(
     params.request,
     params.marketplace,
     params.config.pluginName,
   );
+  if (params.nativeDisableStatus) {
+    // Discovery and plugin inspection can await external work after the initial policy read.
+    const nativeConfig = await params.request<CodexConfigReadResponse>("config/read", {
+      includeLayers: false,
+    });
+    if (isLegacyCodexComputerUsePluginDisabled(nativeConfig.config)) {
+      return { ok: false, status: params.nativeDisableStatus };
+    }
+  }
   if (params.installPlugin && (!plugin.summary.installed || !plugin.summary.enabled)) {
     await params.request<JsonValue>(
       "plugin/install",
@@ -1019,51 +1036,6 @@ function statusFromPlugin(params: {
           ]
         : [],
     message: params.message,
-  };
-}
-
-function unavailableStatus(
-  config: ResolvedCodexComputerUseConfig,
-  reason: CodexComputerUseStatusReason,
-  message: string,
-): CodexComputerUseStatus {
-  const disabled = reason === "disabled";
-  return {
-    enabled: !disabled,
-    ready: false,
-    reason,
-    installed: false,
-    pluginEnabled: false,
-    mcpServerAvailable: false,
-    pluginName: config.pluginName,
-    mcpServerName: config.mcpServerName,
-    ...(!disabled && config.marketplaceName ? { marketplaceName: config.marketplaceName } : {}),
-    ...(!disabled && config.marketplacePath ? { marketplacePath: config.marketplacePath } : {}),
-    tools: [],
-    installation: {
-      status: disabled
-        ? "disabled"
-        : reason === "marketplace_missing"
-          ? "marketplace_missing"
-          : "not_installed",
-      ok: false,
-      message,
-    },
-    exposure: {
-      status: "skipped",
-      ok: false,
-      message: disabled
-        ? "MCP exposure was not checked because Computer Use is disabled."
-        : "MCP exposure was not checked because Computer Use installation is not ready.",
-    },
-    liveTest: skippedLiveTestStatus(
-      config,
-      disabled
-        ? "Computer Use live test was not run because Computer Use is disabled."
-        : "Computer Use live test was not run because installation is not ready.",
-    ),
-    warnings: [],
-    message,
   };
 }
 
