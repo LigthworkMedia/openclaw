@@ -6,17 +6,11 @@ import { loadSessionEntry } from "../../../config/sessions/session-accessor.js";
 import type { createGatewayInstanceRuntime } from "../../../gateway/server-instance-runtime.js";
 import type { GatewayRequestContext } from "../../../gateway/server-methods/types.js";
 import { withTimeout } from "../../../infra/fs-safe.js";
-import { getDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
-import {
-  resetDetachedTaskLifecycleRuntimeForTests,
-  setDetachedTaskLifecycleRuntime,
-} from "../../../tasks/detached-task-runtime.test-support.js";
 import type { AdmittedRunOperatorAuthority } from "../../admitted-run-context.js";
 import { subagentRuns } from "../registry/subagent-registry-memory.js";
 import { SubagentRegistryWriteError } from "../registry/subagent-registry-persistence.js";
 import { persistSubagentRunsToDiskAsyncOrThrow } from "../registry/subagent-registry-state.js";
 import { settleSubagentRegistryPersistenceWork } from "../registry/subagent-registry.persistence.test-support.js";
-import { loadSubagentRunsByRunIdsFromSqlite } from "../registry/subagent-registry.store.sqlite.js";
 import { resetSubagentRegistryForTests } from "../registry/subagent-registry.test-helpers.js";
 import {
   createBoundSpawnInvocation,
@@ -45,7 +39,6 @@ export function registerOperatorSpawnRollbackCases(options: {
   it.each([
     { phase: "preparation", label: "revoked-source preparation" },
     { phase: "accepted registration", label: "revoked-source accepted registration" },
-    { phase: "required task rollback", label: "required task rollback" },
     { phase: "uncertain registration", label: "uncertain registration" },
   ] as const)(
     "rolls back an ordinary operator spawn and joins cleanup after $label failure",
@@ -53,15 +46,13 @@ export function registerOperatorSpawnRollbackCases(options: {
       const source = createSpawnOperatorSource();
       const bound = await options.createBoundParent(source.authority);
       const { context, runtime } = await options.createBoundGateway(bound);
-      const preserveSession =
-        phase === "required task rollback" || phase === "uncertain registration";
+      const preserveSession = phase === "uncertain registration";
       let childSessionKey: string | undefined;
       let childRunId: string | undefined;
       let embeddedSignal: AbortSignal | undefined;
       let embeddedSettled = false;
       const embeddedStarted = createDeferred();
       let invocation: Promise<unknown> | undefined;
-      let rollbackRefused = false;
       let registrationUncertain = false;
       let retainedChildIdentity: { sessionId: string; lifecycleRevision?: string } | undefined;
       const cleanupAttemptSettled = createDeferred();
@@ -105,116 +96,50 @@ export function registerOperatorSpawnRollbackCases(options: {
             embeddedSettled = true;
           }
         });
-        if (phase === "required task rollback") {
-          const createTaskRun = vi.fn(() => null);
-          setDetachedTaskLifecycleRuntime({
-            ...getDetachedTaskLifecycleRuntime(),
-            createQueuedTaskRun: createTaskRun,
-            createRunningTaskRun: createTaskRun,
-          });
-          const actual = await vi.importActual<
-            typeof import("../registry/subagent-registry-state.js")
-          >("../registry/subagent-registry-state.js");
-          const persist = vi.mocked(persistSubagentRunsToDiskAsyncOrThrow);
-          persist
-            .mockImplementationOnce(actual.persistSubagentRunsToDiskAsyncOrThrow)
-            .mockImplementationOnce(async (runs, runIds) => {
-              const record = expectDefined(
-                [...subagentRuns.values()].find(
-                  (entry) => entry.requesterSessionKey === bound.parentSessionKey,
-                ),
-                "durably registered child",
-              );
-              childSessionKey = record.childSessionKey;
-              childRunId = record.runId;
-              expect(createTaskRun).toHaveBeenCalledOnce();
-              expect(runIds).toContain(record.runId);
-              expect(runs.has(record.runId)).toBe(false);
-              await embeddedStarted.promise;
-              expect(expectDefined(embeddedSignal, "running child abort signal").aborted).toBe(
-                false,
-              );
-              const acceptedRun = expectDefined(
-                context.chatAbortControllers.get(record.runId),
-                "accepted child execution owner",
-              );
-              const childEntry = expectDefined(
-                loadSessionEntry({
-                  storePath: bound.storePath,
-                  sessionKey: record.childSessionKey,
-                }),
-                "retained child session",
-              );
-              retainedChildIdentity = {
-                sessionId: childEntry.sessionId,
-                lifecycleRevision: childEntry.lifecycleRevision,
-              };
-              expect(acceptedRun).toMatchObject({
+        vi.mocked(persistSubagentRunsToDiskAsyncOrThrow).mockImplementationOnce(async (runs) => {
+          const record = expectDefined(
+            [...runs.values()].find(
+              (entry) => entry.requesterSessionKey === bound.parentSessionKey,
+            ),
+            "ordinary child registration",
+          );
+          childSessionKey = record.childSessionKey;
+          childRunId = record.runId;
+          expect(subagentRuns.has(record.runId)).toBe(false);
+          const acceptedRun = expectDefined(
+            context.chatAbortControllers.get(record.runId),
+            "accepted child execution owner",
+          );
+          expect(acceptedRun.sessionKey).toBe(record.childSessionKey);
+          if (phase === "uncertain registration") {
+            await embeddedStarted.promise;
+            expect(expectDefined(embeddedSignal, "running child abort signal").aborted).toBe(false);
+            expect(context.chatAbortControllers.get(record.runId)).toBe(acceptedRun);
+            const childEntry = expectDefined(
+              loadSessionEntry({
+                storePath: bound.storePath,
                 sessionKey: record.childSessionKey,
-                sessionId: childEntry.sessionId,
-              });
-              const retained = {
-                runId: record.runId,
-                childSessionKey: record.childSessionKey,
-                requesterSessionKey: bound.parentSessionKey,
-              };
-              // Terminal cleanup may retire this row after abort; prove recovery custody at refusal.
-              expect(subagentRuns.get(record.runId)).toBe(record);
-              expect(loadSubagentRunsByRunIdsFromSqlite([record.runId])).toMatchObject([retained]);
-              rollbackRefused = true;
-              throw new SubagentRegistryWriteError(
-                "not-committed",
-                new Error("required task registry rollback failed"),
-              );
+              }),
+              "uncertain registration child session",
+            );
+            retainedChildIdentity = {
+              sessionId: childEntry.sessionId,
+              lifecycleRevision: childEntry.lifecycleRevision,
+            };
+            expect(acceptedRun).toMatchObject({
+              sessionKey: record.childSessionKey,
+              sessionId: childEntry.sessionId,
             });
-        } else {
-          vi.mocked(persistSubagentRunsToDiskAsyncOrThrow).mockImplementationOnce(async (runs) => {
-            const record = expectDefined(
-              [...runs.values()].find(
-                (entry) => entry.requesterSessionKey === bound.parentSessionKey,
-              ),
-              "ordinary child registration",
-            );
-            childSessionKey = record.childSessionKey;
-            childRunId = record.runId;
-            expect(subagentRuns.has(record.runId)).toBe(false);
-            const acceptedRun = expectDefined(
-              context.chatAbortControllers.get(record.runId),
-              "accepted child execution owner",
-            );
-            expect(acceptedRun.sessionKey).toBe(record.childSessionKey);
-            if (phase === "uncertain registration") {
-              await embeddedStarted.promise;
-              expect(expectDefined(embeddedSignal, "running child abort signal").aborted).toBe(
-                false,
-              );
-              expect(context.chatAbortControllers.get(record.runId)).toBe(acceptedRun);
-              const childEntry = expectDefined(
-                loadSessionEntry({
-                  storePath: bound.storePath,
-                  sessionKey: record.childSessionKey,
-                }),
-                "uncertain registration child session",
-              );
-              retainedChildIdentity = {
-                sessionId: childEntry.sessionId,
-                lifecycleRevision: childEntry.lifecycleRevision,
-              };
-              expect(acceptedRun).toMatchObject({
-                sessionKey: record.childSessionKey,
-                sessionId: childEntry.sessionId,
-              });
-              registrationUncertain = true;
-            }
-            if (phase === "accepted registration") {
-              source.revoke();
-            }
-            throw new SubagentRegistryWriteError(
-              phase === "uncertain registration" ? "unknown" : "not-committed",
-              new Error("ordinary child registry write failed"),
-            );
-          });
-        }
+            registrationUncertain = true;
+          }
+          if (phase === "accepted registration") {
+            source.revoke();
+          }
+          throw new SubagentRegistryWriteError(
+            phase === "uncertain registration" ? "unknown" : "not-committed",
+            new Error("ordinary child registry write failed"),
+          );
+        });
       }
       try {
         const pending = createBoundSpawnInvocation(bound, {
@@ -247,7 +172,6 @@ export function registerOperatorSpawnRollbackCases(options: {
         const childKey = expectDefined(childSessionKey, "created child session");
         expect(result.details).toMatchObject({ status: "error", childSessionKey: childKey });
         if (preserveSession) {
-          expect(rollbackRefused).toBe(phase === "required task rollback");
           expect(registrationUncertain).toBe(phase === "uncertain registration");
           const dispatch = expectDefined(cleanupDispatch, "bound cleanup dispatch observer");
           expect(dispatch.mock.calls.some(([method]) => method === "sessions.delete")).toBe(false);
@@ -275,9 +199,7 @@ export function registerOperatorSpawnRollbackCases(options: {
           expect(context.dedupe.get(`agent:${runId}`)).toMatchObject({
             payload: { runId, status: expect.stringMatching(/^(error|timeout)$/) },
           });
-          if (phase !== "required task rollback") {
-            expect(subagentRuns.has(runId)).toBe(false);
-          }
+          expect(subagentRuns.has(runId)).toBe(false);
           if (embeddedSignal) {
             expect(embeddedSignal.aborted).toBe(true);
             expect(embeddedSettled).toBe(true);
@@ -305,8 +227,6 @@ export function registerOperatorSpawnRollbackCases(options: {
             await settleSubagentRegistryPersistenceWork();
           } catch (error) {
             failures.push(error);
-          } finally {
-            resetDetachedTaskLifecycleRuntimeForTests();
           }
         }
         cleanupDispatch?.mockRestore();

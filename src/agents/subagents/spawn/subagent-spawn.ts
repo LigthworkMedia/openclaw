@@ -12,8 +12,8 @@ import { recordSubagentSpawned } from "../../../sessions/session-state-events.js
 import { hasDeliveryTargetFields } from "../../../utils/delivery-context.shared.js";
 import {
   runSpawnPipeline,
-  type SpawnBackendAdapter,
   summarizeSpawnError,
+  type SpawnBackendAdapter,
 } from "../../spawn-pipeline.js";
 import { getGatewayToolCallerIdentity } from "../../tools/gateway-caller-context.js";
 import { cleanupMaterializedSubagentAttachments } from "../subagent-attachment-cleanup.js";
@@ -84,6 +84,7 @@ export async function spawnSubagentDirect(
       cleanup,
       expectsCompletionMessage,
       completionRequesterSessionId,
+      completionRequesterLifecycleRevision,
     },
     runtime: {
       hookRunner,
@@ -440,7 +441,7 @@ export async function spawnSubagentDirect(
         ...(cleanupOwner ? { callGateway: cleanupOwner.callGateway } : {}),
       });
     type SubagentBackendState = { contextEnginePreparation?: PreparedContextEngineSubagentSpawn };
-    let taskRowOwnership: "required" | "gateway_best_effort" = "required";
+    let registrationRequired = true;
     const adapter: SpawnBackendAdapter<SubagentBackendState> = {
       async initialize() {
         const result =
@@ -465,7 +466,7 @@ export async function spawnSubagentDirect(
           return { runId: childIdem };
         }
         const launch = await launchChildRun(assertActive);
-        taskRowOwnership = launch.taskRowOwnership;
+        registrationRequired = launch.registrationRequired;
         recordRequesterParticipation();
         return { runId: readGatewayRunId(launch.response) ?? childIdem };
       },
@@ -482,7 +483,7 @@ export async function spawnSubagentDirect(
         if (
           phase === "register" &&
           acceptedChildRunId &&
-          taskRowOwnership === "required" &&
+          registrationRequired &&
           isAbortCurrent()
         ) {
           const deleteSessionOnMiss = isCleanupCurrent();
@@ -580,6 +581,7 @@ export async function spawnSubagentDirect(
           expectsCompletionMessage: completionMode === "announce",
           completionTarget: params.completionTarget,
           completionRequesterSessionId,
+          completionRequesterLifecycleRevision,
           spawnMode,
           collect: params.collect === true,
           swarmRequesterSessionKey: params.collect ? requesterInternalKey : undefined,
@@ -592,7 +594,6 @@ export async function spawnSubagentDirect(
           groupId: swarmGroupId,
           queuedLaunch,
           queued: params.collect === true,
-          taskRowOwnership,
           ...(gatewayContextResolver ? { gatewayContextResolver } : {}),
           attachmentId,
           retainAttachmentsOnKeep: retainOnSessionKeep,

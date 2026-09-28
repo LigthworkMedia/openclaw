@@ -21,7 +21,7 @@ export function createQueuedRegistrationFixture(
     assertCurrent: () => void;
     afterPublicationFailure?: { error: unknown };
   }> = [];
-  const writeWaiters = new Map<number, ReturnType<typeof createDeferred<void>>>();
+  let nextWrite = createDeferred<(typeof writes)[number]>();
   const persist = vi.fn<SubagentManagerOptions["persistAsyncOrThrow"]>(
     (_context, callbacks, ...runIds) => {
       const gate = createDeferred();
@@ -32,7 +32,8 @@ export function createQueuedRegistrationFixture(
         assertCurrent: callbacks.assertCurrent,
       };
       writes.push(write);
-      writeWaiters.get(writes.length - 1)?.resolve();
+      nextWrite.resolve(write);
+      nextWrite = createDeferred<(typeof writes)[number]>();
       if (acknowledgeAll) {
         gate.resolve();
       }
@@ -79,7 +80,6 @@ export function createQueuedRegistrationFixture(
     notifyContextEngineSubagentEnded: async () => {},
     completeCleanupBookkeeping: vi.fn(),
     completeSubagentRun: async () => {},
-    resolveSubagentTask: () => ({ lookup: "unavailable" }),
   } satisfies SubagentManagerOptions;
   const manager = createSubagentRunManager(options);
   mocks.register.mockImplementation(manager.registerSubagentRun);
@@ -92,7 +92,6 @@ export function createQueuedRegistrationFixture(
     cleanup: "keep",
     collect: true,
     queued: true,
-    taskRowOwnership: "required",
     queuedLaunch: {
       request: { sessionKey: "agent:main:subagent:synthetic" },
       timeoutMs: 100,
@@ -104,13 +103,8 @@ export function createQueuedRegistrationFixture(
   return {
     runs,
     writes,
-    waitForWrite: async (index: number) => {
-      if (!writes[index]) {
-        const waiter = createDeferred();
-        writeWaiters.set(index, waiter);
-        await waiter.promise;
-      }
-      return writes[index]!;
+    get nextWrite() {
+      return nextWrite.promise;
     },
     options,
     manager,

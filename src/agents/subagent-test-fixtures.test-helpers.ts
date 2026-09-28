@@ -69,8 +69,10 @@ export function createSubagentPersistenceMock(
     persistSubagentRunsToDiskAsyncOrThrow: (async (runs, ids, options) => {
       let committed = false;
       try {
+        const snapshot = structuredClone(runs);
+        await Promise.resolve();
         options.assertCurrent?.();
-        methods.persistSubagentRunsToDiskOrThrow(runs, ids);
+        methods.persistSubagentRunsToDiskOrThrow(snapshot, ids);
         committed = true;
         options.onCommitted?.(ids);
         notifyListeners(listeners, undefined);

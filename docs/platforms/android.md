@@ -59,6 +59,15 @@ Adding an already saved Gateway uses its existing connection settings; use
 **Manage Gateways** to replace its setup.
 Saved offline entries remain listed; connection status is separate from selection.
 
+In **Manage Gateways**, tap **Rename** to choose a name used only on this phone.
+The name appears in the sidebar and picker and survives switching Gateways,
+reconnecting, app restarts, and discovery updates. The secondary address still
+distinguishes Gateways with the same name. Clear the name to restore the default.
+Renaming does not change the Gateway's address, identity, or saved credentials.
+Downgrading to an older Android build can discard these local names when that
+build starts and rewrites the registry. Gateway addresses and credentials are
+unaffected; after upgrading again, choose the local names again if needed.
+
 Unsent text and finished attachments stay with their Gateway, agent, and session
 when you switch away and back. Finish recording, stop dictation or Talk, and let
 media imports or pending send admission finish before using the quick picker.
@@ -434,8 +443,13 @@ context ring remains directly accessible on narrow screens and opens context
 usage, latest-run tokens, and the cost breakdown. Viewing usage does not require
 permission to change session settings. A reported model-call total remains visible
 when no cost breakdown is available. Missing usage is shown as unknown.
-Tap the model name to open a compact menu above the composer, search by model or
-provider, and expand provider groups. The picker has no settings buttons. The Gateway's
+Tap the model name to open a compact menu above the composer, search by model name,
+ID, or provider, and expand provider groups. Search accepts multiple terms and small
+typos in words of at least four letters, including swapped adjacent letters. Every
+term must match; short terms and version numbers are not typo-corrected. Exact
+matches rank first within each provider, and provider groups follow their best
+match. Clearing the search restores the usual ordering without changing your selection.
+The picker has no settings buttons. The Gateway's
 configured default is labeled on its model row. Selecting a named model pins that
 model to the session; **Default model** separately resets the override to follow the
 Gateway's current default.

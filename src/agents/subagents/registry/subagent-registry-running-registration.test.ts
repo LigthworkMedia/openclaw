@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
-import type { CreatedDetachedTaskRun } from "../../../tasks/detached-task-runtime-contract.js";
-import type { prepareRunningTaskRun } from "../../../tasks/detached-task-runtime.js";
-import type { TaskRecord } from "../../../tasks/task-registry.types.js";
 import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import { SubagentRegistryWriteError } from "./subagent-registry-persistence.js";
@@ -13,8 +9,6 @@ import type { SubagentLaunchManager } from "./subagent-registry-run-launch.js";
 const mocks = vi.hoisted(() => ({
   register: vi.fn<SubagentLaunchManager["registerSubagentRun"]>(),
   persisted: new Set<() => void>(),
-  prepare: vi.fn<typeof prepareRunningTaskRun>(),
-  createLegacy: vi.fn<() => TaskRecord | null>(),
   lifecycle: "original",
   context: undefined as OpenClawStateWorkerContext | undefined,
 }));
@@ -30,33 +24,9 @@ vi.mock("../../../infra/agent-events.js", () => ({
 vi.mock("../../../state/openclaw-state-worker-context.js", () => ({
   captureOpenClawStateWorkerContext: () => mocks.context,
 }));
-vi.mock("../../../tasks/detached-task-runtime.js", () => ({
-  prepareRunningTaskRun: mocks.prepare,
-  createQueuedTaskRun: vi.fn(),
-  createRunningTaskRun: mocks.createLegacy,
-  finalizeTaskRunByRunId: vi.fn(),
-  startTaskRunByRunId: vi.fn(),
-}));
 vi.mock("./subagent-session-reconciliation.js", () => ({
   loadSubagentSessionEntry: () => undefined,
 }));
-
-function task(): TaskRecord {
-  return {
-    taskId: "task",
-    runtime: "subagent",
-    runId: "running-original",
-    childSessionKey: "agent:main:subagent:synthetic",
-    requesterSessionKey: "agent:main:main",
-    ownerKey: "agent:main:main",
-    scopeKind: "session",
-    task: "synthetic running work",
-    status: "running",
-    deliveryStatus: "not_applicable",
-    notifyPolicy: "silent",
-    createdAt: 1,
-  };
-}
 
 function fixture() {
   const f = createQueuedRegistrationFixture(mocks, subagentRuns);
@@ -75,7 +45,6 @@ beforeEach(() => {
   mocks.persisted.clear();
   subagentRuns.clear();
   mocks.lifecycle = "original";
-  mocks.createLegacy.mockReturnValue(task());
   mocks.context = {
     admission: {
       databasePath: "/synthetic/state.sqlite",
@@ -85,53 +54,13 @@ beforeEach(() => {
     },
     environment: { OPENCLAW_STATE_DIR: "/synthetic" },
   };
-  mocks.prepare.mockReturnValue({ kind: "legacy", task: task(), finalizeRun: () => [] });
 });
 afterEach(() => {
   subagentRuns.clear();
   vi.restoreAllMocks();
 });
 
-it("publishes only after acknowledgement and joins task creation before activating", async () => {
-  const f = fixture();
-  const entered = createDeferred();
-  const creation = createDeferred<CreatedDetachedTaskRun>();
-  const release = vi.fn();
-  mocks.prepare.mockReturnValue({
-    kind: "receipt",
-    create: () => {
-      entered.resolve();
-      return creation.promise;
-    },
-  });
-  const pending = f.register();
-  expect(f.runs.has(f.registration.runId)).toBe(false);
-  expect(f.writes[0]?.snapshot.get(f.registration.runId)).toMatchObject({
-    execution: { status: "running" },
-  });
-  expect(mocks.prepare).not.toHaveBeenCalled();
-  f.writes[0]!.gate.resolve();
-  await entered.promise;
-  expect(f.runs.has(f.registration.runId)).toBe(true);
-  expect(f.options.ensureListener).not.toHaveBeenCalled();
-  expect(f.scope.canLaunch()).toBe(false);
-  creation.resolve({
-    task: task(),
-    release,
-    bindRunOwner: async () => {
-      throw new Error("Registry registration must not acquire the execution owner");
-    },
-    finalizeActive: async () => {},
-    settleUnstarted: async () => false,
-  });
-  await pending;
-  expect(f.scope.canLaunch()).toBe(true);
-  expect(f.options.ensureListener).toHaveBeenCalledOnce();
-  expect(release).toHaveBeenCalledOnce();
-  expect(f.options.persistOrThrow).not.toHaveBeenCalled();
-});
-
-it("keeps the acknowledged row visible until a required no-task rollback commits", async () => {
+it("publishes the registration and predecessor change only after acknowledgement", async () => {
   const f = fixture();
   const previous = createSubagentRunRecord({
     runId: "previous",
@@ -142,22 +71,31 @@ it("keeps the acknowledged row visible until a required no-task rollback commits
     killReconciliation: { killedAt: 2 },
   });
   f.runs.set(previous.runId, previous);
-  mocks.prepare.mockReturnValue({ kind: "legacy", task: null, finalizeRun: () => [] });
-  const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
-  expect(previous.killReconciliation).toEqual({ killedAt: 2 });
-  f.writes[0]!.gate.resolve();
-  const rollback = await f.waitForWrite(1);
-  expect(previous.killReconciliation?.supersededAt).toBeTypeOf("number");
-  expect(f.runs.has(f.registration.runId)).toBe(true);
-  expect(rollback.snapshot.has(f.registration.runId)).toBe(false);
-  expect(f.scope.canCleanupSession()).toBe(false);
-  rollback.assertCurrent();
-  rollback.gate.resolve();
-  expect(await pending).toMatchObject({ message: expect.stringContaining("created no task row") });
+  const pending = f.register();
+  const write = f.writes[0] ?? (await f.nextWrite);
   expect(f.runs.has(f.registration.runId)).toBe(false);
   expect(previous.killReconciliation).toEqual({ killedAt: 2 });
-  expect(f.scope.canCleanupSession()).toBe(true);
+  expect(write.snapshot.get(f.registration.runId)).toMatchObject({
+    execution: { status: "running" },
+  });
+  expect(write.snapshot.get(previous.runId)?.killReconciliation?.supersededAt).toBeTypeOf("number");
   expect(f.options.ensureListener).not.toHaveBeenCalled();
+  expect(f.scope.canLaunch()).toBe(false);
+  write.assertCurrent();
+  write.gate.resolve();
+  await pending;
+  expect(f.runs.get(f.registration.runId)).toMatchObject({
+    runId: f.registration.runId,
+    execution: { status: "running" },
+  });
+  expect(previous.killReconciliation?.supersededAt).toBeTypeOf("number");
+  expect(f.scope.canLaunch()).toBe(true);
+  expect(f.scope.canCleanupSession()).toBe(false);
+  expect(f.options.ensureListener).toHaveBeenCalledOnce();
+  expect(f.options.startSweeper).toHaveBeenCalledOnce();
+  expect(f.manager.waitForSubagentCompletion).toHaveBeenCalledOnce();
+  expect(f.options.persistOrThrow).not.toHaveBeenCalled();
+  expect(f.writes).toHaveLength(1);
 });
 
 it.each(["not-committed", "unknown"] as const)(
@@ -165,48 +103,70 @@ it.each(["not-committed", "unknown"] as const)(
   async (outcome) => {
     const f = fixture();
     const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
+    const write = f.writes[0] ?? (await f.nextWrite);
     const failure = new SubagentRegistryWriteError(outcome, new Error("write failed"));
-    f.writes[0]!.gate.reject(failure);
+    write.gate.reject(failure);
     expect(await pending).toBe(failure);
     expect(f.runs.has(f.registration.runId)).toBe(false);
     expect(f.scope.canCleanupSession()).toBe(outcome === "not-committed");
     expect(f.scope.canAcceptLaunch()).toBe(false);
     expect(f.scope.canAbortAcceptedRun()).toBe(true);
-    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(f.options.ensureListener).not.toHaveBeenCalled();
+    expect(f.options.persistOrThrow).not.toHaveBeenCalled();
     expect(f.writes).toHaveLength(1);
   },
 );
 
-it.each(["required", "optional"] as const)(
-  "retains committed registry ownership when %s core task creation has no receipt",
-  async (ownership) => {
+it("retains an acknowledged registration for observation after publication settlement fails", async () => {
+  const f = fixture();
+  const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
+  const write = f.writes[0] ?? (await f.nextWrite);
+  const failure = new SubagentRegistryWriteError("committed", new Error("publication tail failed"));
+  write.afterPublicationFailure = { error: failure };
+  write.gate.resolve();
+  expect(await pending).toBe(failure);
+  expect(f.runs.get(f.registration.runId)).toMatchObject({ runId: f.registration.runId });
+  expect(f.scope.canCleanupSession()).toBe(false);
+  expect(f.options.ensureListener).toHaveBeenCalledOnce();
+  expect(f.options.startSweeper).toHaveBeenCalledOnce();
+  expect(f.options.persistOrThrow).not.toHaveBeenCalled();
+  expect(f.writes).toHaveLength(1);
+});
+
+it.each(["caller", "database", "lifecycle"] as const)(
+  "refuses commit after the captured %s authority retires",
+  async (owner) => {
     const f = fixture();
-    if (ownership === "optional") {
-      f.registration.taskRowOwnership = undefined;
+    let callerCurrent = true;
+    const pending = Promise.resolve(
+      f.register(() => {
+        if (!callerCurrent) {
+          throw new Error("caller retired");
+        }
+      }),
+    ).catch((error: unknown) => error);
+    const write = f.writes[0] ?? (await f.nextWrite);
+    if (owner === "caller") {
+      callerCurrent = false;
+    } else if (owner === "lifecycle") {
+      mocks.lifecycle = "successor";
+    } else {
+      const original = mocks.context!;
+      mocks.context = {
+        ...original,
+        admission: {
+          ...original.admission,
+          identity: { ...original.admission.identity, key: "successor" },
+        },
+      };
     }
-    const failure = new Error("task result lost after admission");
-    mocks.prepare.mockReturnValue({
-      kind: "receipt",
-      create: async () => {
-        throw failure;
-      },
-    });
-    const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
-    f.writes[0]!.gate.resolve();
-    expect(await pending).toBe(ownership === "required" ? failure : undefined);
-    expect(f.runs.has(f.registration.runId)).toBe(true);
-    expect(f.scope.canCleanupSession()).toBe(false);
-    expect(f.scope.canLaunch()).toBe(ownership === "optional");
-    expect(f.options.ensureListener).toHaveBeenCalledOnce();
-    expect(f.options.startSweeper).toHaveBeenCalledOnce();
-    expect(f.manager.waitForSubagentCompletion).toHaveBeenCalledTimes(
-      ownership === "optional" ? 1 : 0,
-    );
-    if (ownership === "required") {
-      await expect(f.scope.settleFailedLaunch("creation failed")).rejects.toThrow(
-        "requires recovery",
-      );
-    }
+    expect(write.assertCurrent).toThrow();
+    const failure = new SubagentRegistryWriteError("not-committed", new Error("admission refused"));
+    write.gate.reject(failure);
+    expect(await pending).toBe(failure);
+    expect(f.runs.has(f.registration.runId)).toBe(false);
+    expect(f.options.ensureListener).not.toHaveBeenCalled();
+    expect(f.scope.canLaunch()).toBe(false);
     expect(f.writes).toHaveLength(1);
   },
 );
@@ -214,74 +174,44 @@ it.each(["required", "optional"] as const)(
 it("keeps an acknowledged old run tracked when a different run owns the child before publication", async () => {
   const f = fixture();
   const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
-  const captured = f.writes[0]!.snapshot.get(f.registration.runId)!;
+  const write = f.writes[0] ?? (await f.nextWrite);
+  const captured = write.snapshot.get(f.registration.runId)!;
+  write.assertCurrent();
   const successor = createSubagentRunRecord({ ...captured, runId: "successor", generation: 2 });
   f.runs.set(successor.runId, successor);
   subagentRuns.commitOwnership(successor);
-  f.writes[0]!.gate.resolve();
-  expect(await pending).toMatchObject({ message: expect.stringContaining("owner changed") });
+  write.gate.resolve();
+  expect(await pending).toBeInstanceOf(Error);
   expect(f.runs.get(f.registration.runId)).toEqual(captured);
   expect(f.runs.get(successor.runId)).toBe(successor);
   expect(f.options.ensureListener).toHaveBeenCalledOnce();
-  expect(f.manager.waitForSubagentCompletion).toHaveBeenCalledWith(
-    f.registration.runId,
-    expect.any(Number),
-    f.runs.get(f.registration.runId),
-  );
-  expect(mocks.prepare).not.toHaveBeenCalled();
   expect(f.scope.canCleanupSession()).toBe(false);
   expect(f.scope.canAbortAcceptedRun()).toBe(false);
   expect(f.writes).toHaveLength(1);
 });
 
 it.each(["same run", "different run"] as const)(
-  "retains a %s successor that commits and retires during task creation",
+  "preserves a %s successor that commits and retires before the earlier acknowledgement",
   async (replacement) => {
     const f = fixture();
-    const entered = createDeferred();
-    const creation = createDeferred<CreatedDetachedTaskRun>();
-    const release = vi.fn();
-    const settleUnstarted = vi.fn<CreatedDetachedTaskRun["settleUnstarted"]>(
-      async (_terminal, canSettle) => canSettle(task()),
-    );
-    mocks.prepare.mockReturnValue({
-      kind: "receipt",
-      create: () => {
-        entered.resolve();
-        return creation.promise;
-      },
-    });
     const pending = Promise.resolve(f.register()).catch((error: unknown) => error);
-    f.writes[0]!.gate.resolve();
-    await entered.promise;
+    const write = f.writes[0] ?? (await f.nextWrite);
+    const captured = write.snapshot.get(f.registration.runId)!;
+    write.assertCurrent();
     const successor = createSubagentRunRecord({
-      ...f.runs.get(f.registration.runId)!,
+      ...captured,
       runId: replacement === "same run" ? f.registration.runId : "successor",
       generation: 2,
     });
     f.runs.set(successor.runId, successor);
     subagentRuns.commitOwnership(successor);
     f.runs.delete(successor.runId);
-    creation.resolve({
-      task: task(),
-      release,
-      settleUnstarted,
-      bindRunOwner: async () => {
-        throw new Error("unused");
-      },
-      finalizeActive: async () => {},
-    });
-    expect(await pending).toMatchObject({ message: expect.stringContaining("owner changed") });
+    write.gate.resolve();
+    expect(await pending).toBeInstanceOf(Error);
     expect(f.runs.has(f.registration.runId)).toBe(replacement === "different run");
-    expect(settleUnstarted).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ status: "failed", suppressDelivery: true }),
-      expect.any(Function),
-    );
-    expect(await settleUnstarted.mock.results[0]!.value).toBe(replacement === "different run");
-    expect(f.writes).toHaveLength(1);
     expect(f.scope.canCleanupSession()).toBe(false);
     expect(f.scope.canAbortAcceptedRun()).toBe(false);
-    expect(release).toHaveBeenCalledOnce();
     expect(f.options.ensureListener).toHaveBeenCalledTimes(replacement === "different run" ? 1 : 0);
+    expect(f.writes).toHaveLength(1);
   },
 );

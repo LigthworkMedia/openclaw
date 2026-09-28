@@ -1,4 +1,3 @@
-import "./subagent-spawn-model.mocks.shared.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,7 +10,6 @@ import type { AgentRuntimeIdentity } from "../../../gateway/agent-runtime-identi
 import { prepareAgentRequestPreflight } from "../../../gateway/agent-turn/agent-request-preflight.js";
 import { createAgentTurnIo } from "../../../gateway/agent-turn/io.js";
 import { readInProcessAgentRuntimeIdentity } from "../../../gateway/in-process-agent-runtime-identity.js";
-import { resolveGatewayAgentTaskTrackingMode } from "../../../gateway/server-methods/agent-task-tracking.js";
 import type { GatewayRequestOptions } from "../../../gateway/server-methods/types.js";
 import { createSyntheticPluginRuntimeClient } from "../../../gateway/server-plugin-runtime-client.js";
 import type { dispatchGatewayMethodInProcess } from "../../../gateway/server-plugins.js";
@@ -35,12 +33,6 @@ import {
   tryBeginGatewayRootWorkAdmission,
 } from "../../../process/gateway-work-admission.js";
 import { createDeferredCore } from "../../../shared/deferred.js";
-import { getDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
-import {
-  resetDetachedTaskLifecycleRuntimeForTests,
-  setDetachedTaskLifecycleRuntime,
-} from "../../../tasks/detached-task-runtime.test-support.js";
-import { findTaskByRunId } from "../../../tasks/runtime-internal.js";
 import { createTestRegistry } from "../../../test-utils/channel-plugins.js";
 import { captureEnv, setTestEnvValue } from "../../../test-utils/env.js";
 import { cleanupSessionStateForTest } from "../../../test-utils/session-state-cleanup.js";
@@ -61,9 +53,9 @@ import { testing as swarmSchedulerTesting } from "../swarm/swarm-scheduler.test-
 import { withParentExecutionIdentity } from "./execution-identity-spawn-context.js";
 import { buildSubagentExecutionSessionSpawnContext } from "./subagent-spawn-execution-identity.js";
 import { callSubagentGateway } from "./subagent-spawn-gateway.js";
+import "./subagent-spawn-model.mocks.shared.js";
 import { makeGatewayContext } from "./subagent-spawn.in-process-gateway.test-support.js";
 import { spawnSubagentDirect } from "./subagent-spawn.js";
-import { registerRequiredTaskAbortTests } from "./subagent-spawn.task-abort.test-support.js";
 import { testing as subagentSpawnTesting } from "./subagent-spawn.test-support.js";
 
 vi.mock("../../runtime-plugins.js", () => ({
@@ -207,7 +199,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
     vi.mocked(persistSubagentRunsToDiskAsyncOrThrow).mockReset();
     vi.mocked(restoreSubagentRunsFromDisk).mockReset();
     subagentSpawnTesting.setDepsForTest();
-    resetDetachedTaskLifecycleRuntimeForTests();
     clearRuntimeConfigSnapshot();
     clearConfigCache();
     await cleanupSessionStateForTest({ stateDir });
@@ -612,11 +603,18 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
     );
 
     expect(markSubagentRunTerminated({ runId: firstRunId, reason: "manual kill" })).toBe(1);
-    const killedTask = structuredClone(findTaskByRunId(firstRunId!));
     const killedEntry = expectDefined(subagentRuns.get(firstRunId!), "killed collector");
+    const killedSnapshot = structuredClone(killedEntry);
     const killedExecution = structuredClone(killedEntry.execution);
     const killedReconciliation = structuredClone(killedEntry.killReconciliation);
-    expect(killedTask).toMatchObject({ status: "cancelled", endedAt: expect.any(Number) });
+    expect(killedSnapshot).toMatchObject({
+      endedReason: "subagent-killed",
+      execution: {
+        status: "terminal",
+        endedAt: expect.any(Number),
+        outcome: { status: "error", error: "manual kill" },
+      },
+    });
     firstLaunchGate.resolve();
 
     await waitForAssertion(() => {
@@ -633,7 +631,25 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
       expect(subagentRuns.get(firstRunId!)?.queuedLaunch).toBeUndefined();
       expect(subagentRuns.get(firstRunId!)?.execution).toEqual(killedExecution);
       expect(subagentRuns.get(firstRunId!)?.killReconciliation).toEqual(killedReconciliation);
-      expect(findTaskByRunId(firstRunId!)).toEqual(killedTask);
+      expect(subagentRuns.get(firstRunId!)).toEqual({
+        ...killedSnapshot,
+        swarmLaunchPending: false,
+        queuedLaunch: undefined,
+        collectorLaunchCleanupPending: false,
+        completion: {
+          required: false,
+          resultText: "manual kill",
+          capturedAt: killedExecution.endedAt,
+        },
+        collectorCompletion: { status: "killed" },
+        structuredOutput: undefined,
+        archiveAtMs: expectDefined(killedExecution.endedAt, "killed run end") + 60 * 60_000,
+        cleanupCompletedAt: expect.any(Number),
+        contextEngineCleanupCompletedAt: expect.any(Number),
+      });
+      const settledEntry = expectDefined(subagentRuns.get(firstRunId!), "settled collector");
+      expect(settledEntry.cleanupCompletedAt).toBe(settledEntry.contextEngineCleanupCompletedAt);
+      expect(settledEntry.cleanupCompletedAt).toBeGreaterThanOrEqual(killedExecution.endedAt!);
       expect(subagentRuns.get("gateway-run-2")).toMatchObject({
         swarmRunId: nextRunId,
         swarmLaunchPending: false,
@@ -752,8 +768,7 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
         return {} as T;
       },
     });
-    // The registry never takes ownership, which is exactly when the suppressed
-    // gateway CLI row would have been the only record of the accepted run.
+    // The accepted execution must stop if registry persistence never takes ownership.
     vi.mocked(persistSubagentRunsToDiskAsyncOrThrow).mockRejectedValueOnce(
       new SubagentRegistryWriteError("not-committed", new Error("state db unavailable")),
     );
@@ -773,7 +788,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
 
     expect(result.status).toBe("error");
     expect(result.error ?? "").toContain("Failed to register subagent run");
-    // No registry row exists, so an unaborted run would execute with no task row at all.
     expect(
       requests.some(
         (request) =>
@@ -782,14 +796,9 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
     ).toBe(true);
   });
 
-  registerRequiredTaskAbortTests(externalCliClient);
-
-  it("keeps the Gateway-owned task row on an out-of-process fallback", async () => {
+  it("retains accepted native ownership on an out-of-process fallback", async () => {
     const gatewayContext = makeGatewayContext();
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
-    const createTaskRun = vi.fn(() => {
-      throw new Error("registry task creation must be skipped");
-    });
     subagentSpawnTesting.setDepsForTest({
       hasInProcessGatewayContext: () => false,
       callGateway: async <T>(request: { method: string; params?: unknown }) => {
@@ -802,11 +811,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
           status: "accepted",
         } as T;
       },
-    });
-    setDetachedTaskLifecycleRuntime({
-      ...getDetachedTaskLifecycleRuntime(),
-      createQueuedTaskRun: createTaskRun,
-      createRunningTaskRun: createTaskRun,
     });
 
     const result = await withPluginRuntimeGatewayRequestScope(
@@ -824,7 +828,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
 
     expect(result.status).toBe("accepted");
     expect(result.runId).toBe("gateway-owned-run");
-    expect(createTaskRun).not.toHaveBeenCalled();
     expect(subagentRuns.get("gateway-owned-run")).toMatchObject({
       childSessionKey: result.childSessionKey,
     });
@@ -834,7 +837,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
 
   it("keeps the queued registry row when a collector starts out of process", async () => {
     const gatewayContext = makeGatewayContext();
-    const trackingModes: ReturnType<typeof resolveGatewayAgentTaskTrackingMode>[] = [];
     subagentSpawnTesting.setDepsForTest({
       hasInProcessGatewayContext: () => false,
       callGateway: async <T>(request: { method: string; params?: unknown }) => {
@@ -842,13 +844,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
         if (request.method === "agent") {
           const client = createSyntheticPluginRuntimeClient();
           expect(client.internal?.agentRunTracking).toBeUndefined();
-          trackingModes.push(
-            resolveGatewayAgentTaskTrackingMode({
-              client,
-              sessionKey: requestParams.sessionKey as string,
-              existingTask: findTaskByRunId(requestParams.idempotencyKey as string),
-            }),
-          );
         }
         return {
           runId: requestParams.idempotencyKey,
@@ -879,7 +874,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
 
     expect(result.status).toBe("accepted");
     await waitForAssertion(() => {
-      expect(trackingModes).toEqual(["none"]);
       expect(subagentRuns.get(result.runId!)).toMatchObject({
         collect: true,
         swarmLaunchPending: false,
@@ -994,11 +988,6 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
         : {}),
       ...(dispatch?.options?.syntheticScopes ? { scopes: dispatch.options.syntheticScopes } : {}),
     });
-    expect(
-      resolveGatewayAgentTaskTrackingMode({
-        client: gatewayClient,
-        sessionKey: dispatch?.params.sessionKey as string,
-      }),
-    ).toBe("none");
+    expect(gatewayClient.internal?.agentRunTracking).toBe("native_subagent");
   });
 });

@@ -2,13 +2,16 @@
 import { expect, it, vi } from "vitest";
 import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
 import { SubagentRegistryWriteError } from "../../agents/subagents/registry/subagent-registry-persistence.js";
+import * as subagentRegistryStore from "../../agents/subagents/registry/subagent-registry.store.kernel.js";
+import { loadSubagentRegistryFromSqlite } from "../../agents/subagents/registry/subagent-registry.store.sqlite.js";
 import {
-  addSubagentRunForTests,
   getSubagentRunByChildSessionKey,
   resetSubagentRegistryForTests,
 } from "../../agents/subagents/registry/subagent-registry.test-helpers.js";
-import { findTaskByRunId } from "../../tasks/task-registry.js";
-import { withPluginSubagentTestState } from "./agent-task-tracking.test-helpers.js";
+import {
+  seedPersistedSubagentRunForAgentTest,
+  withPluginSubagentTestState,
+} from "./agent.spawned-child.test-support.js";
 import {
   backendGatewayClient,
   expectRespondError,
@@ -16,7 +19,6 @@ import {
   invokeAgent,
   makeContext,
   requireValue,
-  resetAgentTaskRegistryForTests,
   waitForAssertion,
 } from "./agent.test-harness.js";
 
@@ -27,7 +29,7 @@ export function registerPluginSubagentPersistenceFailureTest() {
     await withPluginSubagentTestState(
       "openclaw-gateway-plugin-subagent-registry-fail-",
       async () => {
-        resetAgentTaskRegistryForTests();
+        resetSubagentRegistryForTests({ persist: false });
         const persistenceError = Object.assign(new Error("disk full"), { code: "SQLITE_FULL" });
         mocks.registryPersistAsyncOrThrow.mockRejectedValue(
           new SubagentRegistryWriteError("not-committed", persistenceError),
@@ -88,7 +90,8 @@ export function registerPluginSubagentPersistenceFailureTest() {
 
         expect(mocks.registryPersistAsyncOrThrow).toHaveBeenCalledTimes(1);
         expect(mocks.agentCommand).toHaveBeenCalledTimes(commandCallCount);
-        expect(findTaskByRunId(runId)).toBeUndefined();
+        expect(loadSubagentRegistryFromSqlite().has(runId)).toBe(false);
+        expect(context.chatAbortControllers.has(runId)).toBe(false);
         expectRespondError(respond, {
           code: ErrorCodes.UNAVAILABLE,
           message:
@@ -101,7 +104,7 @@ export function registerPluginSubagentPersistenceFailureTest() {
 
         resetSubagentRegistryForTests({ persist: false });
         const pausedRunId = "plugin-subagent-paused-before-persistence-failure";
-        addSubagentRunForTests({
+        seedPersistedSubagentRunForAgentTest({
           runId: pausedRunId,
           childSessionKey,
           requesterSessionKey: "agent:main:telegram:direct:777",
@@ -111,9 +114,11 @@ export function registerPluginSubagentPersistenceFailureTest() {
           pauseReason: "sessions_yield",
           expectsCompletionMessage: true,
         });
-        mocks.registryPersistOrThrow.mockImplementation(() => {
-          throw new Error("disk full during paused-run adoption");
-        });
+        using replacementWrite = vi
+          .spyOn(subagentRegistryStore, "upsertSubagentRunRowInDatabase")
+          .mockImplementationOnce(() => {
+            throw new Error("disk full during paused-run adoption");
+          });
         const adoptionRunId = "plugin-subagent-adoption-registry-fail";
         const adoptionRespond = vi.fn();
         await invokeAgent(
@@ -137,19 +142,24 @@ export function registerPluginSubagentPersistenceFailureTest() {
           },
         );
 
-        expect(mocks.registryPersistOrThrow).toHaveBeenCalledTimes(1);
         expect(mocks.agentCommand).toHaveBeenCalledTimes(commandCallCount);
         expect(getSubagentRunByChildSessionKey(childSessionKey)).toMatchObject({
           runId: pausedRunId,
           pauseReason: "sessions_yield",
         });
         expect(getSubagentRunByChildSessionKey(childSessionKey)?.runId).not.toBe(adoptionRunId);
+        expect(replacementWrite).toHaveBeenCalledOnce();
+        const storedRuns = loadSubagentRegistryFromSqlite();
+        expect(storedRuns.has(adoptionRunId)).toBe(false);
+        expect(storedRuns.get(pausedRunId)).toMatchObject({
+          runId: pausedRunId,
+          pauseReason: "sessions_yield",
+        });
         expectRespondError(adoptionRespond, {
           code: ErrorCodes.UNAVAILABLE,
           message:
             "plugin subagent registry persistence failed; run was not started | disk full during paused-run adoption",
         });
-        mocks.registryPersistOrThrow.mockReset();
 
         resetSubagentRegistryForTests({ persist: false });
         const retryRunId = "plugin-subagent-registry-retry";
