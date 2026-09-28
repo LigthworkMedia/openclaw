@@ -70,7 +70,7 @@ export function createReplyTurnParticipants(
     const choices = people.map((person) => `${person.name} (user: ${person.senderId})`).join(", ");
     if (user === undefined && people.length > 1) {
       throw new Error(
-        `Several people have steered this turn: ${choices}. Pass user for the person who asked, or ask them if unclear.`,
+        `Several people have steered this turn: ${choices}. Pass the requester's requester_profile.id as user, or ask them if unclear.`,
       );
     }
     const person =

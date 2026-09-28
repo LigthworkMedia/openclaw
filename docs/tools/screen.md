@@ -38,9 +38,10 @@ absent rather than failing at call time.
 | `desktop_show` / `desktop_hide`   | Show or hide a remote desktop              | `environmentId`, `sessionKey`, `dock` (default `right`) |
 | `portal_show` / `portal_hide`     | Show or hide a web application portal      | `portalId`, `sessionKey`, `dock` (default `right`)      |
 
-Every action accepts optional `user`, the person's sender id from the message
-metadata. When several people have steered the turn, `user` is required; the
-agent chooses the person who asked or asks them if it is unclear.
+Every action accepts optional `user`, the person's verified `requester_profile.id`
+from the Control UI message's conversation context. When several people have
+steered the turn, `user` is required; the agent chooses the person who asked or
+asks them if it is unclear.
 
 For a native application running on an attached environment, use `desktop_show`
 with its `environmentId`. For a web application, open a portal for the server's

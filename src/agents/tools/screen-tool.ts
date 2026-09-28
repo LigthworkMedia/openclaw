@@ -32,7 +32,7 @@ const ScreenToolSchema = Type.Object(
     user: Type.Optional(
       Type.String({
         description:
-          "Person to act for (their sender id). Required when several people have steered this turn.",
+          "The person's requester_profile.id, required when several people have steered this turn.",
       }),
     ),
     sessionKey: Type.Optional(Type.String({ description: "Session. Default: current" })),

@@ -1,9 +1,12 @@
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
+import { createAssistantMessageEventStream, type Context } from "openclaw/plugin-sdk/llm";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
+import { installRuntimeContextMessageForPrompt } from "../../agents/embedded-agent-runner/run/attempt-llm-boundary.js";
 import { steerActiveSessionWithOptionalDeliveryWait } from "../../agents/embedded-agent-runner/run/attempt-queue-message.js";
+import { buildRuntimeContextCustomMessage } from "../../agents/embedded-agent-runner/run/runtime-context-prompt.js";
+import type { CurrentInboundPromptContext } from "../../agents/internal-runtime-context.js";
 import { guardSessionManager } from "../../agents/session-tool-result-guard-wrapper.js";
 import {
   createAssistant,
@@ -15,9 +18,16 @@ import {
 } from "../../agents/sessions/agent-session-loop-correctness.test-support.js";
 import type { AgentSessionEvent } from "../../agents/sessions/agent-session-types.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
+import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import { createScreenTool } from "../../agents/tools/screen-tool.js";
 import { resolveCommandAuthorization } from "../../auto-reply/command-auth.js";
+import type { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
+import { buildInboundUserContextPrefix } from "../../auto-reply/reply/inbound-meta.js";
+import { callPersonalToolUiCommand } from "../../auto-reply/reply/personal-tool-turn.test-support.js";
+import { buildReplyPromptEnvelopeBase } from "../../auto-reply/reply/prompt-prelude.js";
 import { createQueueTestRun } from "../../auto-reply/reply/queue.test-helpers.js";
 import type { ReplyBackendMessageInjectionV2 } from "../../auto-reply/reply/reply-run-registry.contracts.js";
+import { createReplyOperation } from "../../auto-reply/reply/reply-run-registry.operation.js";
 import { prepareReplyToolAuthority } from "../../auto-reply/reply/reply-tool-authority.js";
 import {
   listSessionPendingInputs,
@@ -55,7 +65,11 @@ describe("steering input custody", () => {
   ] as const)(
     "preserves authenticated chat.send steering authority across callers (%s)",
     async (scenario) => {
-      const fixture = await createBrowserFollowupFixture({ preserveContent: true });
+      const startOwnerTurn = scenario === "same permissions across profiles";
+      const fixture = await createBrowserFollowupFixture({
+        preserveContent: true,
+        active: !startOwnerTurn,
+      });
       const profile = ensureProfileForEmail("reconnect-steering@example.test");
       const acrossProfiles =
         scenario === "same permissions across profiles" ||
@@ -109,21 +123,60 @@ describe("steering input custody", () => {
         expect(reconnectedClient.internal.operatorAccessAuthority).toBeNull();
       }
       let captured: Awaited<ReturnType<typeof captureGatewayOperatorRunAuthority>>;
+      let operation = fixture.activeRun;
+      let ownerContext: CurrentInboundPromptContext | undefined;
+      let cleanupOwnerContext = () => {};
       let backingRun: Promise<void> | undefined;
       let releaseProvider = () => {};
       try {
+        if (startOwnerTurn) {
+          const ownerDispatch = createDispatchTestHarness({
+            connId: originalClient.connId,
+            buildRequestContext: () => fixture.context,
+            extraHandlers: { "chat.send": handleChatSend },
+          });
+          await ownerDispatch.dispatcher.dispatch(
+            {
+              type: "req",
+              id: "owner-input",
+              method: "chat.send",
+              params: {
+                ...fixture.params,
+                message: "Continue the original work",
+                idempotencyKey: "owner-input",
+              },
+            },
+            originalClient,
+          );
+          await fixture.dispatchedRecorder;
+          const ownerDispatchParams = dispatchInboundMessageMock.mock.calls[0]![0] as Parameters<
+            typeof dispatchInboundMessage
+          >[0];
+          const ownerCtx = ownerDispatchParams.ctx;
+          expect(ownerCtx).not.toHaveProperty("SenderId");
+          ownerContext = buildReplyPromptEnvelopeBase({
+            ctx: ownerCtx,
+            sessionCtx: ownerCtx,
+            baseBody: ownerCtx.BodyForAgent!,
+            hasUserBody: true,
+            inboundUserContext: buildInboundUserContextPrefix(ownerCtx),
+            isBareSessionReset: false,
+            startupAction: "new",
+          }).currentInboundContext;
+          dispatchInboundMessageMock.mockClear();
+          operation = createReplyOperation({ ...fixture.scope, resetTriggered: false });
+        }
         captured = await captureGatewayOperatorRunAuthority({
           client: originalClient,
           context: fixture.context,
         });
-        if (!captured || !fixture.activeRun) {
+        if (!captured || !operation) {
           throw new Error("Expected original operator and active run ownership");
         }
         if (acrossProfiles) {
           expect(captured.authority.gatewayAccessGrant).toBeNull();
           expect(incomingProfile.id).not.toBe(captured.authority.profileId);
         }
-        const operation = fixture.activeRun;
         const run = createQueueTestRun({
           prompt: "Continue the original work",
           originatingChannel: "webchat",
@@ -180,8 +233,26 @@ describe("steering input custody", () => {
             response.end();
           }
         };
-        backingRun = session.prompt("Continue the original work");
+        cleanupOwnerContext = installRuntimeContextMessageForPrompt({
+          session,
+          message: buildRuntimeContextCustomMessage(ownerContext?.text, ownerContext?.fragments),
+          persistedUserIdempotencyKey: startOwnerTurn ? "owner-input:user" : undefined,
+        });
+        backingRun = session.prompt("Continue the original work", {
+          persistedUserIdempotencyKey: startOwnerTurn ? "owner-input:user" : undefined,
+        });
         await providerStarted.promise;
+        if (startOwnerTurn) {
+          const firstContext = streamMocks.streamSimple.mock.calls[0]![1] as Context;
+          const ownerUserContext = JSON.stringify(
+            firstContext.messages
+              .filter((message) => message.role === "user")
+              .map((message) => message.content),
+          );
+          expect(ownerUserContext).toContain("requester_profile");
+          expect(ownerUserContext).toContain(profile.id);
+          expect(ownerUserContext).not.toContain(incomingProfile.id);
+        }
         fixture.beforeApprove.mockClear();
         const queueMessage = vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>(
           async (text, options, assertCurrent) =>
@@ -223,9 +294,66 @@ describe("steering input custody", () => {
           reconnectedClient,
         );
         if (accepted) {
-          expect(session.getSteeringMessages()).toEqual([fixture.params.message]);
+          expect(session.getSteeringMessages()).toEqual([
+            expect.stringContaining(fixture.params.message),
+          ]);
           expect(queueMessage).toHaveBeenCalledOnce();
           expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
+          if (acrossProfiles) {
+            const inboundContext = queueMessage.mock.calls[0]?.[1]?.currentInboundContext?.text;
+            expect(inboundContext).toContain('"requester_profile"');
+            const conversationInfo = JSON.parse(
+              inboundContext!.match(/```json\n([\s\S]*?)\n```/u)![1]!,
+            ) as {
+              requester_profile: { id: string };
+            };
+            expect(conversationInfo.requester_profile.id).toBe(incomingProfile.id);
+            const results: Awaited<ReturnType<typeof callPersonalToolUiCommand>>[] = [];
+            const screen = createScreenTool({
+              callGateway: async <T>(
+                _method: string,
+                params: Record<string, unknown>,
+              ): Promise<T> => {
+                const result = await callPersonalToolUiCommand(params, [
+                  originalClient,
+                  reconnectedClient,
+                ]);
+                results.push(result);
+                return { ok: true } as T;
+              },
+            });
+            await withGatewayToolCallerIdentity(
+              {
+                agentId: fixture.scope.agentId,
+                sessionKey: fixture.scope.sessionKey,
+                operatorAuthority: captured.authority,
+                personalToolParticipants: operation.personalToolParticipants,
+              },
+              async () => {
+                await screen.execute("unnamed", { action: "sidebar_hide" });
+                const ambiguous = results.at(-1)!;
+                for (const id of [profile.id, incomingProfile.id]) {
+                  expect(ambiguous.respond).toHaveBeenCalledWith(
+                    false,
+                    undefined,
+                    expect.objectContaining({ message: expect.stringContaining(`(user: ${id})`) }),
+                  );
+                }
+                expect(ambiguous.broadcastToConnIds).not.toHaveBeenCalled();
+                await screen.execute("selected", {
+                  action: "sidebar_hide",
+                  user: conversationInfo.requester_profile.id,
+                });
+                const selected = results.at(-1)!;
+                expect(selected.respond).toHaveBeenCalledWith(true, { ok: true });
+                expect(selected.broadcastToConnIds).toHaveBeenCalledExactlyOnceWith(
+                  "ui.command",
+                  { command: { kind: "sidebar", visible: false } },
+                  new Set([reconnectedClient.connId]),
+                );
+              },
+            );
+          }
         } else {
           expect(session.getSteeringMessages()).toEqual([]);
           expect(queueMessage).not.toHaveBeenCalled();
@@ -260,6 +388,16 @@ describe("steering input custody", () => {
             },
           });
           expect(streamMocks.streamSimple).toHaveBeenCalledTimes(2);
+          if (acrossProfiles) {
+            const modelContext = streamMocks.streamSimple.mock.calls[1]![1] as Context;
+            const steeredUser = modelContext.messages.findLast(
+              (message) => message.role === "user",
+            );
+            const userText = JSON.stringify(steeredUser?.content);
+            expect(userText).toContain("requester_profile");
+            expect(userText).toContain(incomingProfile.id);
+            expect(userText).not.toContain(profile.id);
+          }
         } else if (queued) {
           expect(input).toMatchObject({ message: { content: fixture.params.message } });
           expect(input).not.toHaveProperty("message.__openclaw.steerTargetRunId");
@@ -273,6 +411,8 @@ describe("steering input custody", () => {
           releaseProvider();
           await backingRun;
         } finally {
+          cleanupOwnerContext();
+          operation?.complete();
           try {
             await fixture.cleanup();
           } finally {

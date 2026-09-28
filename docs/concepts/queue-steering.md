@@ -82,8 +82,10 @@ Different signed-in people with the same permissions can steer each other's
 active turn, including from different browsers or after reconnecting. The turn
 keeps its original owner's authority, tool bindings, and approval destination.
 Personal tools (`screen` and `theme`) act for one named person. When several
-people have steered the turn, the agent must pass that person's sender id as
-`user` to choose whose view or appearance to change, and ask if it is unclear.
+people have steered the turn, the agent must pass that person's verified
+`requester_profile.id` as `user` to choose whose view or appearance to change,
+and ask if it is unclear. Each authenticated Control UI message includes its
+requester's verified profile id in the agent's user-role conversation context.
 Different permissions (role scopes, model access, access grant, or tool policy)
 queue the message as a followup; changes to execution policy, workspace, or
 bound tools can also require a followup.

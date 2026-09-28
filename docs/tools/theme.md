@@ -43,10 +43,11 @@ Use an ID returned by `list`. Plugin IDs are qualified as
 | `set`    | `id` and/or `mode`                           | Saves profile overrides and returns the resulting selection.                                                                           |
 | `import` | `id`, `definition`; optional `apply`, `mode` | Saves a personal theme. `apply: true` selects it in the same call.                                                                     |
 
-Every action accepts optional `user`, the person's sender id from the message
-metadata. When several people have steered the turn, `user` is required; the
-agent chooses the person who asked or asks them if it is unclear. Only the
-turn's owner or an accepted participant can be selected. Reads, including the
+Every action accepts optional `user`, the person's verified `requester_profile.id`
+from the Control UI message's conversation context. When several people have
+steered the turn, `user` is required; the agent chooses the person who asked or
+asks them if it is unclear. Only the turn's owner or an accepted participant
+can be selected. Reads, including the
 current selection in `list` and `get`, use that person's profile; changes save
 only to that profile. If their access has changed, they must ask again.
 
