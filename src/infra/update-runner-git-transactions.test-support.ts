@@ -321,9 +321,14 @@ function registerGitRetainedTransactionTests(
     ).toMatchObject({ commit: beforeSha });
   });
 
-  it.each(["delete", "rewrite"] as const)(
-    "retained rollback preserves a linked-worktree claim before ref %s",
-    async (operation) => {
+  it.each([
+    ["delete", "checkout"],
+    ["rewrite", "checkout"],
+    ["delete", "bisect"],
+    ["rewrite", "bisect"],
+  ] as const)(
+    "retained rollback preserves a linked-worktree claim before ref %s (%s)",
+    async (operation, claim) => {
       const { root, beforeSha, advanceRemote, update, runCommand, setRunCommand } = getFixture();
       const linked = path.join(path.dirname(root), "linked-checkout");
       if (operation === "delete") {
@@ -344,6 +349,10 @@ function registerGitRetainedTransactionTests(
         ) {
           expect(result.code).toBe(0);
           await runFixtureGit(root, "worktree", "add", linked, "main");
+          if (claim === "bisect") {
+            // A paused bisect detaches HEAD but still reserves the branch.
+            await runFixtureGit(linked, "bisect", "start", "main", beforeSha);
+          }
           claimed = true;
         }
         return result;
@@ -364,8 +373,10 @@ function registerGitRetainedTransactionTests(
         await expect(rollback).rejects.toThrow("Git source rollback failed");
       }
       expect(claimed).toBe(true);
-      expect(await runFixtureGit(linked, "rev-parse", "HEAD")).toBe(targetSha);
-      expect(await runFixtureGit(linked, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+      if (claim === "checkout") {
+        expect(await runFixtureGit(linked, "rev-parse", "HEAD")).toBe(targetSha);
+        expect(await runFixtureGit(linked, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+      }
       expect(await runFixtureGit(root, "rev-parse", "refs/heads/main")).toBe(targetSha);
       expect(await runFixtureGit(root, "rev-parse", "HEAD")).toBe(beforeSha);
       expect(await runFixtureGit(root, "rev-parse", "--abbrev-ref", "HEAD")).toBe(

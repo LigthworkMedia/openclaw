@@ -143,16 +143,23 @@ export async function runGitRollbackSteps({
       runCommand: async (argv, options) => {
         if (refChange) {
           // update-ref's SHA check does not protect linked-worktree branch custody.
-          const worktrees = await stepOptions.runCommand(
-            ["git", "-C", gitRoot, "worktree", "list", "--porcelain"],
+          // Resetting a branch to its own ref is a no-op that Git refuses for every
+          // worktree owner state, including paused rebase and bisect reservations.
+          const custody = await stepOptions.runCommand(
+            [
+              "git",
+              "-C",
+              gitRoot,
+              "branch",
+              "-f",
+              refChange.branch,
+              `refs/heads/${refChange.branch}`,
+            ],
             options,
           );
           assertCurrent();
-          if (isFailedUpdateStep({ ...worktrees, exitCode: worktrees.code })) {
-            return worktrees;
-          }
-          if (worktrees.stdout.split("\n").includes(`branch refs/heads/${refChange.branch}`)) {
-            const message = `Branch ${refChange.branch} is used by another Git worktree.`;
+          if (custody.code !== 0) {
+            const message = `Branch ${refChange.branch} is used or reserved by another Git worktree.`;
             if (refChange.operation === "delete") {
               skipped = `Skipped deleting ${refChange.branch}. ${message}`;
               return { code: 0, stdout: skipped, stderr: "" };
