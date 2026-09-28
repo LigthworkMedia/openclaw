@@ -17,6 +17,7 @@ import {
   SessionRestartRecoveryTombstoneError,
 } from "../../config/sessions/lifecycle.js";
 import { loadSessionEntryForAdmission } from "../../config/sessions/session-accessor.sqlite-entry.js";
+import { normalizeStoreSessionKey } from "../../config/sessions/store-entry.js";
 import type { InternalSessionEntry, SessionEntry } from "../../config/sessions/types.js";
 import type { GatewayRecoveryRuntime } from "../../gateway/server-instance-runtime.types.js";
 import type { GatewayContextResolver } from "../../gateway/server-methods/types.js";
@@ -30,6 +31,7 @@ import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayContextResolver,
 } from "../../plugins/runtime/gateway-request-scope.js";
+import { parseAgentSessionKey } from "../../routing/session-key.js";
 import {
   beginSessionWorkAdmission,
   getSessionWorkAdmissionOwnerRelease,
@@ -286,6 +288,11 @@ export async function admitReplyTurn(
               scope: storePath,
               resolveGatewayContext,
               identities: [params.sessionKey],
+              storeWriterIdentities:
+                parseAgentSessionKey(params.sessionKey) &&
+                normalizeStoreSessionKey(params.sessionKey) === params.sessionKey
+                  ? [params.sessionKey]
+                  : undefined,
               signal: params.upstreamAbortSignal,
               onInterrupt: () => {
                 interruptedBeforeOperation = true;
