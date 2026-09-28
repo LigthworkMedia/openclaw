@@ -6,6 +6,7 @@ import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { z } from "zod";
 import { hashFile, hashInstall } from "../../scripts/lib/gateway-bench-installed-package.ts";
 import { listUpdateRunsAsync } from "../infra/update-run-reader.js";
+import type { UpdateRunRecord } from "../infra/update-run-record.js";
 import { redactSupportString } from "../logging/diagnostic-support-redaction.js";
 import { sleep } from "../utils/sleep.js";
 import { run, type CommandRecord } from "./schtasks.installed-command.test-support.js";
@@ -16,6 +17,7 @@ import {
   recordCapacityBoundary,
   requiredCellSpace,
 } from "./schtasks.installed-package.test-support.js";
+import { readRelatedProcessDiagnostics } from "./schtasks.integration-observation.test-support.js";
 
 export const doctorReportSchema = z.object({
   checksRun: z.number().int().positive(),
@@ -56,6 +58,7 @@ export async function readInstalledUpdateProgress({
         : value;
     // Retain only the facts needed to distinguish update progress from failed native verification.
     return {
+      runId: record.runId,
       phase: record.phase,
       status: record.status,
       createdAtMs: record.createdAtMs,
@@ -170,6 +173,42 @@ export async function runInstalledPublishedUpdate(params: {
   const startedAt = Date.now();
   const stopObservation = new AbortController();
   const completed = new Set<string>();
+  let observedRunId: string | undefined;
+  const settlementProcesses: ReturnType<typeof captureSettlementProcesses>[] = [];
+  function captureSettlementProcesses(
+    progress: Pick<UpdateRunRecord, "runId" | "phase" | "status">,
+    reason: "terminal" | "elapsed-300s" | "follow-up",
+  ) {
+    const sample = {
+      runId: progress.runId,
+      phase: progress.phase,
+      status: progress.status,
+      reason,
+      capturedAtMs: Date.now(),
+    };
+    const safeText = (value: string) => redactSupportString(value, task, { maxLength: 2_000 });
+    try {
+      const capture = readRelatedProcessDiagnostics([task.profile, packageRoot(task.installRoot)]);
+      return {
+        ...sample,
+        ok: capture.ok,
+        truncated: capture.truncated,
+        ...(capture.error ? { unavailable: safeText(capture.error) } : {}),
+        processes: capture.processes.map((process) => ({
+          pid: process.ProcessId,
+          parentPid: process.ParentProcessId,
+          createdAt: process.CreationDate,
+          userModeTime100ns: process.UserModeTime,
+          kernelModeTime100ns: process.KernelModeTime,
+          readOperationCount: process.ReadOperationCount,
+          writeOperationCount: process.WriteOperationCount,
+          commandLine: process.CommandLine ? safeText(process.CommandLine) : null,
+        })),
+      };
+    } catch {
+      return { ...sample, unavailable: "Process observation could not be read" };
+    }
+  }
   let observationFailure: Error | undefined;
   const observation = (async () => {
     while (!stopObservation.signal.aborted) {
@@ -187,6 +226,23 @@ export async function runInstalledPublishedUpdate(params: {
       }
       if ("unavailable" in progress || progress.createdAtMs < startedAt) {
         continue;
+      }
+      observedRunId ??= progress.runId;
+      if (progress.runId !== observedRunId) {
+        continue;
+      }
+      const snapshotReason =
+        settlementProcesses.length > 0
+          ? "follow-up"
+          : progress.phase === "finished" && progress.status !== "running"
+            ? "terminal"
+            : Date.now() - startedAt >= 300_000
+              ? "elapsed-300s"
+              : undefined;
+      if (snapshotReason && settlementProcesses.length < 2) {
+        settlementProcesses.push(captureSettlementProcesses(progress, snapshotReason));
+        // Diagnostics wait for an ordinary proof write; they are not durable update progress.
+        observations.updateSettlementProcesses = settlementProcesses;
       }
       const newSteps = progress.steps.filter((step) => {
         if (step.status !== "completed" || step.endedAtMs === undefined) {

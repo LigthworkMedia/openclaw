@@ -802,7 +802,7 @@ describe("managed Gateway inventory projections", () => {
     },
   );
 
-  it("reports global and custom launchd extras without admitting authenticated Node jobs", async () => {
+  it("includes user and global launchd Gateways without admitting Node or legacy jobs", async () => {
     Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
     const home = tempDirs.make("managed-launchd-", os.tmpdir());
     const write = isolateNativeRoots(home);

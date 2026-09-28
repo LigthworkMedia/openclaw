@@ -127,6 +127,9 @@ describe("findExtraGatewayServices (win32)", () => {
       "\\OpenClaw Gateway (dev)",
       "\\OpenClaw Gateway Backup",
     ]);
+    for (const service of result.services) {
+      expect(service).not.toHaveProperty("windowsProfile");
+    }
     for (const service of [...managed.services, ...result.services]) {
       expect(service).not.toHaveProperty("extra");
       expect(service).not.toHaveProperty("managedGateway");

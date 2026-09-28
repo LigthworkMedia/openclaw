@@ -377,6 +377,62 @@ describe("live-gateway-dist-fence physical overlap", () => {
 });
 
 describe("live-gateway-dist-fence cross-profile overlap", () => {
+  it("refuses when another profile's live Gateway overlaps this checkout", async () => {
+    await withTestDir({ prefix: "openclaw-live-dist-cross-profile-" }, async (tmp) => {
+      const otherCheckout = path.join(tmp, "other");
+      await writeOpenClawPackage(tmp);
+      await writeOpenClawPackage(otherCheckout);
+      const defaultBinding = {
+        profile: "default",
+        env: { OPENCLAW_PROFILE: undefined },
+      };
+      const fenceproofBinding = {
+        profile: "fenceproof",
+        env: {
+          OPENCLAW_PROFILE: "fenceproof",
+          OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway-fenceproof.service",
+        },
+      };
+      const result = await inspectFixtureGateway(tmp, {
+        env: {},
+        listBindings: async () => [defaultBinding, fenceproofBinding],
+        readState: async (binding) => {
+          if (binding?.profile === "fenceproof") {
+            return baseState({
+              running: true,
+              command: {
+                programArguments: [process.execPath, path.join(tmp, "dist", "index.js"), "gateway"],
+              },
+              runtime: {
+                status: "running",
+                pid: 4242,
+                systemd: { unit: "openclaw-gateway-fenceproof.service" },
+              },
+            });
+          }
+          return baseState({
+            running: false,
+            command: {
+              programArguments: [
+                process.execPath,
+                path.join(otherCheckout, "dist", "index.js"),
+                "gateway",
+              ],
+            },
+            runtime: { status: "stopped", pid: undefined },
+          });
+        },
+      });
+      expect(result.refuse).toBe(true);
+      if (result.refuse) {
+        expect(result.message).toContain("fenceproof");
+        expect(result.message).toContain("openclaw update");
+        expect(result.message).toContain("openclaw gateway stop --profile fenceproof");
+        expect(result.message).not.toContain("profiles default, fenceproof");
+      }
+    });
+  });
+
   it.each(["saved environment", "root argv"] as const)(
     "fences a custom Windows Task using its %s profile without mutating the service",
     async (profileSource) => {
@@ -687,62 +743,6 @@ describe("live-gateway-dist-fence cross-profile overlap", () => {
       });
     },
   );
-
-  it("refuses when another profile's live Gateway overlaps this checkout", async () => {
-    await withTestDir({ prefix: "openclaw-live-dist-cross-profile-" }, async (tmp) => {
-      const otherCheckout = path.join(tmp, "other");
-      await writeOpenClawPackage(tmp);
-      await writeOpenClawPackage(otherCheckout);
-      const defaultBinding = {
-        profile: "default",
-        env: { OPENCLAW_PROFILE: undefined },
-      };
-      const fenceproofBinding = {
-        profile: "fenceproof",
-        env: {
-          OPENCLAW_PROFILE: "fenceproof",
-          OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway-fenceproof.service",
-        },
-      };
-      const result = await inspectFixtureGateway(tmp, {
-        env: {},
-        listBindings: async () => [defaultBinding, fenceproofBinding],
-        readState: async (binding) => {
-          if (binding?.profile === "fenceproof") {
-            return baseState({
-              running: true,
-              command: {
-                programArguments: [process.execPath, path.join(tmp, "dist", "index.js"), "gateway"],
-              },
-              runtime: {
-                status: "running",
-                pid: 4242,
-                systemd: { unit: "openclaw-gateway-fenceproof.service" },
-              },
-            });
-          }
-          return baseState({
-            running: false,
-            command: {
-              programArguments: [
-                process.execPath,
-                path.join(otherCheckout, "dist", "index.js"),
-                "gateway",
-              ],
-            },
-            runtime: { status: "stopped", pid: undefined },
-          });
-        },
-      });
-      expect(result.refuse).toBe(true);
-      if (result.refuse) {
-        expect(result.message).toContain("fenceproof");
-        expect(result.message).toContain("openclaw update");
-        expect(result.message).toContain("openclaw gateway stop --profile fenceproof");
-        expect(result.message).not.toContain("profiles default, fenceproof");
-      }
-    });
-  });
 
   it.skipIf(process.platform === "win32").each([
     ["literal", "Environment=OPENCLAW_PROFILE=fenceproof", "custom-rescue.service"],
