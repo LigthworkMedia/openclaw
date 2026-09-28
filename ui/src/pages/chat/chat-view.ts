@@ -45,7 +45,10 @@ import {
 } from "./chat-view-notices.ts";
 import "./components/chat-comment-controller.ts";
 import { createAsyncQuestionPresentation } from "./components/chat-async-question.ts";
-import { createChatAttachmentDropHandlers } from "./components/chat-attachments.ts";
+import {
+  createChatAttachmentDropHandlers,
+  stagedAttachmentBytes,
+} from "./components/chat-attachments.ts";
 import { resolveChatCommentAnchor } from "./components/chat-comment-anchor.ts";
 import {
   renderComposerQuestionDock,
@@ -288,6 +291,7 @@ export function renderChat(props: ChatProps) {
                         sessionKey: props.sessionKey,
                       },
                       props.attachmentLimits,
+                      stagedAttachmentBytes(props),
                     );
                     if (!attachment) {
                       return false;

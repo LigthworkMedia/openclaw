@@ -1,5 +1,9 @@
 import type { ChatAttachment } from "../../../lib/chat/chat-types.ts";
 import { generateAttachmentId } from "../attachment-payload-store.ts";
+import {
+  attachmentReservationBytes,
+  type ChatAttachmentLimits,
+} from "./chat-attachment-admission.ts";
 
 type ChatAttachmentReadDestination = {
   getAttachments: () => ChatAttachment[];
@@ -37,6 +41,21 @@ export class ChatAttachmentReadLifecycle {
 
   get readSignal(): AbortSignal {
     return this.controller.signal;
+  }
+
+  pendingBytes(limits: ChatAttachmentLimits | undefined): number {
+    return this.entries.reduce(
+      (total, entry) =>
+        total +
+        (entry.state === "reading"
+          ? attachmentReservationBytes(
+              entry.attachment.sizeBytes ?? 0,
+              entry.attachment.mimeType,
+              limits,
+            )
+          : 0),
+      0,
+    );
   }
 
   updatePending(readSignal: AbortSignal, delta: 1 | -1): void {

@@ -16,7 +16,7 @@ import {
   registerChatAttachmentPayload,
   releaseChatAttachmentPayload,
 } from "../attachment-payload-store.ts";
-import { admitAttachmentFiles } from "./chat-attachment-admission.ts";
+import { admitAttachmentFiles, chatAttachmentBatchBytes } from "./chat-attachment-admission.ts";
 import type { ChatAttachmentControlsProps } from "./chat-attachment-controls.types.ts";
 import { renderAttachmentFileIcon } from "./chat-attachment-file-icon.ts";
 import { renderCompactAttachmentFile } from "./chat-attachment-file.ts";
@@ -77,6 +77,17 @@ function currentAttachments(props: ChatAttachmentControlsProps): ChatAttachment[
   return props.getAttachments?.() ?? props.attachments ?? [];
 }
 
+/** Decoded bytes already committed to the next send: ready attachments plus in-flight reads. */
+export function stagedAttachmentBytes(
+  props: ChatAttachmentControlsProps,
+  attachments: readonly ChatAttachment[] = currentAttachments(props),
+): number {
+  return (
+    chatAttachmentBatchBytes(attachments) +
+    (props.attachmentReads?.pendingBytes(props.attachmentLimits) ?? 0)
+  );
+}
+
 function clickComposerInput(target: HTMLElement, selector: string) {
   target.closest("details")?.removeAttribute("open");
   target
@@ -113,7 +124,8 @@ function handleLargeTextPaste(e: ClipboardEvent, props: ChatAttachmentControlsPr
   const file = new File([text], `${LARGE_PASTE_TEXT_FILE_PREFIX}${Date.now()}.txt`, {
     type: LARGE_PASTE_TEXT_MIME_TYPE,
   });
-  if (admitAttachmentFiles([file], props.attachmentLimits).length === 0) {
+  const stagedBytes = stagedAttachmentBytes(props);
+  if (admitAttachmentFiles([file], props.attachmentLimits, stagedBytes).length === 0) {
     // The rejection toast named the file; the clipboard still holds the text.
     return true;
   }
@@ -167,11 +179,12 @@ function readChatClipboardImages(clipboard: DataTransfer | null): {
 export function chatAttachmentFromDataUrl(
   dataUrl: string,
   fileName: string,
-  limits?: ChatAttachmentControlsProps["attachmentLimits"],
+  limits: ChatAttachmentControlsProps["attachmentLimits"],
+  stagedBytes: number,
 ): ChatAttachment | null {
   const baseName = fileName.replace(/\.[a-z0-9]+$/i, "") || "image";
   const parsed = dataImageClipboardFile(dataUrl, baseName);
-  if (!parsed || admitAttachmentFiles([parsed.file], limits).length === 0) {
+  if (!parsed || admitAttachmentFiles([parsed.file], limits, stagedBytes).length === 0) {
     return null;
   }
   return chatAttachmentFromFile(parsed.file, parsed.dataUrl);
@@ -264,8 +277,8 @@ function readAttachmentFile(
     if (settled) {
       return;
     }
-    // Reapply strict admission to the encoded result before any base64 read.
-    if (admitAttachmentFiles([prepared], props.attachmentLimits).length === 0) {
+    // Intake reserved this file's batch share at its per-file ceiling; preparation can only shrink it.
+    if (admitAttachmentFiles([prepared], props.attachmentLimits, 0).length === 0) {
       finish("error");
       return;
     }
@@ -310,9 +323,11 @@ export function appendChatAttachmentFiles(
   if (unsupported.length) {
     showToast({ message: t("chat.attachments.imagesOnly") });
   }
+  const stagedBytes = stagedAttachmentBytes(props);
   const files = admitAttachmentFiles(
     candidates.filter((file) => !unsupported.includes(file)),
     props.attachmentLimits,
+    stagedBytes,
     { resizeImages: true },
   );
   if (files.length === 0) {
@@ -365,7 +380,8 @@ export function handleChatAttachmentPaste(
     pasted &&
     (!props.attachmentLimits || pasted.file.size <= props.attachmentLimits.maxImageBytes)
   ) {
-    if (admitAttachmentFiles([pasted.file], props.attachmentLimits).length === 0) {
+    const stagedBytes = stagedAttachmentBytes(props);
+    if (admitAttachmentFiles([pasted.file], props.attachmentLimits, stagedBytes).length === 0) {
       return;
     }
     props.onAttachmentsChange([
