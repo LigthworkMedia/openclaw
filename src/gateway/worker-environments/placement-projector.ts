@@ -7,7 +7,6 @@ import type {
   SessionPlacementWorkerRuntimeInstall,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider-identity.js";
-import type { GatewayNodeWorkerBundleInstallObservation } from "./node-worker-bundle-installer.js";
 import type { WorkerPlacementMoveIntent } from "./placement-move-intent.js";
 import type { WorkerEnvironmentPlacementFacts } from "./placement-read-projection.types.js";
 import type { WorkerSessionPlacementRecord } from "./placement-store.js";
@@ -50,13 +49,16 @@ export type WorkerPlacementRuntimeInstallReader = {
   version(): number;
 };
 
+// Structural so the projector does not import the installer module (import cycle).
+type WorkerRuntimeInstallObservation = SessionPlacementWorkerRuntimeInstall & {
+  bundleHash: string;
+};
+
 export function createWorkerPlacementRuntimeInstallReader(params: {
   environments: Pick<WorkerEnvironmentServiceContract, "get">;
   installer: {
-    readInstall(nodeId: string): GatewayNodeWorkerBundleInstallObservation | undefined;
-    readInstallForEnvironment(
-      environmentId: string,
-    ): GatewayNodeWorkerBundleInstallObservation | undefined;
+    readInstall(nodeId: string): WorkerRuntimeInstallObservation | undefined;
+    readInstallForEnvironment(environmentId: string): WorkerRuntimeInstallObservation | undefined;
     version(): number;
   };
 }): WorkerPlacementRuntimeInstallReader {
