@@ -135,11 +135,11 @@ stored transcripts use the provider name **Slack huddle**.
 ## Handle manual actions
 
 With `chrome.autoJoin: true`, the adapter clicks **Join Huddle** for an active
-huddle, and only while the account is not already in another huddle. It joins
-muted unless Slack already reports the virtual microphone as its input, so the
-host's physical microphone never goes live. For talk-back, it selects the
-virtual microphone in the call and then unmutes; `transcribe` stays muted. The
-camera stays off.
+huddle, and only while the account is not already in another huddle. It always
+joins muted, because the Join transition itself can switch Slack's input. For
+talk-back, it selects the virtual microphone in the call and unmutes only once
+Slack reports it as the input, so the host's physical microphone never goes
+live; `transcribe` stays muted. The camera stays off.
 
 | Reason                        | Action                                                                                                                |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |

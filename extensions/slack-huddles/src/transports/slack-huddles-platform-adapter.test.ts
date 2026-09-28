@@ -62,13 +62,14 @@ describe("Slack huddle browser adapter", () => {
   });
 
   it.each([
-    { mode: "agent" as const, initial: true, virtual: false, target: false },
-    { mode: "bidi" as const, initial: true, virtual: false, target: false },
-    { mode: "agent" as const, initial: false, virtual: true, target: true },
-    { mode: "transcribe" as const, initial: true, virtual: true, target: false },
+    { mode: "agent" as const, initial: true, virtual: false, clicks: 1 },
+    { mode: "bidi" as const, initial: true, virtual: false, clicks: 1 },
+    { mode: "agent" as const, initial: true, virtual: true, clicks: 1 },
+    { mode: "agent" as const, initial: false, virtual: true, clicks: 0 },
+    { mode: "transcribe" as const, initial: true, virtual: true, clicks: 1 },
   ])(
-    "joins $mode with the preview microphone $target when virtual input is $virtual",
-    async ({ mode, initial, virtual, target }) => {
+    "always joins $mode muted (preview mic on: $initial, virtual input: $virtual)",
+    async ({ mode, initial, virtual, clicks }) => {
       const { document, join, mic } = preview("Join Huddle", initial);
       if (virtual) {
         document.body.append(new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch"));
@@ -80,8 +81,8 @@ describe("Slack huddle browser adapter", () => {
       const result = await fixture({ document }).status({ mode });
       expect(result.clickedJoin).toBe(true);
       expect(join.clicks).toBe(1);
-      expect(mic.clicks).toBe(1);
-      expect(microphoneAtJoin).toBe(String(target));
+      expect(mic.clicks).toBe(clicks);
+      expect(microphoneAtJoin).toBe("false");
     },
   );
 

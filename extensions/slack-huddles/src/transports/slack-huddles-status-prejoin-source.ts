@@ -179,9 +179,10 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     }
   }
   if (canMutateSession && identityVerified && !manualAction && (inCall || (autoJoin && join && /^join huddle$/i.test(text(join))))) {
-    // Join muted until Slack reports the virtual input; the host's physical microphone must never go live.
+    // Always join muted: the Join transition itself can switch Slack's input. Unmute only in the call,
+    // once membership is proven and Slack reports the virtual input, so a physical microphone never goes live.
     refreshAudioInput();
-    let desiredMicrophoneState = allowMicrophone && audioInputRouted ? "on" : "off";
+    let desiredMicrophoneState = inCall && allowMicrophone && audioInputRouted ? "on" : "off";
     await setMicrophone(desiredMicrophoneState);
     // Muting is safe whatever the input, so one post-check ends the race: if Slack left the virtual
     // input during that await, mute rather than leave a physical microphone live.
@@ -209,8 +210,8 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
       authorityLost = true;
     } else if (toggleState(currentCamera(), "camera") === "on") {
       manualAction = manualActionFor("slack-camera-required", "Turn off the Slack huddle camera, then retry.");
-    } else if (readMicrophone() === "on" && !selectedMicrophoneLabel()) {
-      manualAction = manualActionFor("slack-microphone-required", "Mute the Slack huddle microphone until the OpenClaw virtual microphone is selected, then retry.");
+    } else if (readMicrophone() === "on") {
+      manualAction = manualActionFor("slack-microphone-required", "Mute the Slack huddle microphone before joining, then retry.");
     } else {
       window.__openclawSlackHuddle.joinRequested = true;
       window.__openclawSlackHuddle.joinRequestedAt = Date.now();
