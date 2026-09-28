@@ -560,7 +560,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
     return board.available && Boolean(this.resolveBoardSessionKey(board.snapshot.sessionKey));
   }
 
-  private fullscreenBoardWidget(layout: SidebarLayout | undefined, board: ResolvedBoardView) {
+  private pageBoardWidget(layout: SidebarLayout | undefined, board: ResolvedBoardView) {
     if (
       !layout ||
       !this.state ||
@@ -568,7 +568,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       !this.visuallyPresented ||
       !board.provider.hasLoadedSnapshot ||
       !customElements.get("openclaw-board-view") ||
-      sidebarDashboardPresentation(layout) !== "expanded"
+      !isSidebarSlotVisible(layout, "dashboard")
     ) {
       return undefined;
     }
@@ -577,11 +577,11 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
     return widget?.sizeW === BOARD_GRID_COLUMNS ? widget : undefined;
   }
 
-  protected fullscreenBoardWidgetMenu(
+  protected pageBoardWidgetMenu(
     layout: SidebarLayout | undefined,
     board = this.resolveBoardView(),
   ): BoardWidgetPageMenu | undefined {
-    const widget = this.fullscreenBoardWidget(layout, board);
+    const widget = this.pageBoardWidget(layout, board);
     if (!widget) {
       return undefined;
     }
@@ -595,7 +595,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
         const current = this.resolveBoardView();
         if (
           current.provider !== board.provider ||
-          this.fullscreenBoardWidget(this.state?.sidebarLayout, current) !== widget
+          this.pageBoardWidget(this.state?.sidebarLayout, current) !== widget
         ) {
           return;
         }
@@ -639,7 +639,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
         session,
         snapshot: board.snapshot,
         activeTabId: board.activeTabId,
-        pageWidgetName: this.fullscreenBoardWidget(layout, board)?.name,
+        pageWidgetName: this.pageBoardWidget(layout, board)?.name,
         canMutate: board.provider.canMutate,
         canGrant: board.provider.canGrant,
         callbacks: {

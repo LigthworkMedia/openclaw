@@ -602,7 +602,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
               .settings=${this.state.settings}
               .panelActions=${panelMenuActions}
               .layoutActions=${layoutMenuActions}
-              .boardWidgetMenu=${this.fullscreenBoardWidgetMenu(currentLayout)}
+              .boardWidgetMenu=${this.pageBoardWidgetMenu(currentLayout)}
               .sharing=${sharing}
               .groups=${knownGroups}
               .currentOwner=${row.owner?.actor ?? null}
