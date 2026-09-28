@@ -65,24 +65,27 @@ describe("SIWC model discovery", () => {
   });
   afterEach(() => vi.restoreAllMocks());
   it("discovers SIWC models with the selected profile and preserves visible server order", async () => {
-    const fetchGuard = vi.fn<LiveModelCatalogFetchGuard>().mockImplementation(async ({ init }) => {
-      const selected =
-        new Headers(init?.headers).get("Authorization") === "Bearer sharing-selected";
-      return {
-        response: Response.json({
-          models: selected
-            ? [
-                { slug: "fixture-z", display_name: "First choice", visibility: "list" },
-                { slug: "fixture-hidden", display_name: "Hidden", visibility: "hide" },
-                { slug: "fixture-unlisted", display_name: "Unlisted" },
-                { slug: "gpt-5.4", display_name: "Account model name", visibility: "list" },
-                { slug: "fixture-a", display_name: "Last choice", visibility: "list" },
-              ]
-            : [{ slug: "fixture-other", display_name: "Other account", visibility: "list" }],
-        }),
-        release: async () => {},
-      };
-    });
+    const fetchGuard = vi
+      .fn<LiveModelCatalogFetchGuard>()
+      .mockImplementation(async ({ init, url }) => {
+        const selected =
+          new Headers(init?.headers).get("Authorization") === "Bearer sharing-selected";
+        return {
+          finalUrl: url,
+          response: Response.json({
+            models: selected
+              ? [
+                  { slug: "fixture-z", display_name: "First choice", visibility: "list" },
+                  { slug: "fixture-hidden", display_name: "Hidden", visibility: "hide" },
+                  { slug: "fixture-unlisted", display_name: "Unlisted" },
+                  { slug: "gpt-5.4", display_name: "Account model name", visibility: "list" },
+                  { slug: "fixture-a", display_name: "Last choice", visibility: "list" },
+                ]
+              : [{ slug: "fixture-other", display_name: "Other account", visibility: "list" }],
+          }),
+          release: async () => {},
+        };
+      });
     const selected = await runCatalogWithFetchGuard({
       fetchGuard,
       auth: {
@@ -157,6 +160,7 @@ describe("SIWC model discovery", () => {
     "handles a %s SIWC catalog without inventing account access",
     async (_label, body, status, outcome, fallback) => {
       const fetchGuard = vi.fn<LiveModelCatalogFetchGuard>().mockResolvedValue({
+        finalUrl: `${OPENAI_API_BASE_URL}/models`,
         response: Response.json(body, { status }),
         release: async () => {},
       });
