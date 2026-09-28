@@ -2,12 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  resolveBunRuntimeInfo,
   resolvePinnedDaemonRuntimePath,
   resolvePreferredBunPath,
   resolvePreferredNodePath,
 } from "../daemon/runtime-paths.js";
 import type { GatewayServiceEnvironmentValueSource } from "../daemon/service-types.js";
 import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
+import type { DaemonInstallWarnFn } from "./daemon-install-runtime-warning.js";
 import type { GatewayDaemonRuntime } from "./daemon-runtime.js";
 
 export type GatewayInstallPlan = {
@@ -32,14 +34,16 @@ function resolveGatewayDevMode(argv: string[] = process.argv): boolean {
 export async function resolveDaemonInstallRuntimeInputs(params: {
   env: Record<string, string | undefined>;
   runtime: GatewayDaemonRuntime;
+  runtimeExplicit?: boolean;
   devMode?: boolean;
   runtimePath?: string;
   pinnedRuntimePath?: string;
   wrapperPath?: string;
-}): Promise<{ devMode: boolean; runtimePath?: string }> {
+  warn?: DaemonInstallWarnFn;
+}): Promise<{ devMode: boolean; runtime: GatewayDaemonRuntime; runtimePath?: string }> {
   const devMode = params.devMode ?? resolveGatewayDevMode();
   if (params.wrapperPath?.trim()) {
-    return { devMode, runtimePath: params.runtimePath };
+    return { devMode, runtime: params.runtime, runtimePath: params.runtimePath };
   }
   const pinnedRuntimePath =
     params.pinnedRuntimePath === undefined
@@ -51,7 +55,19 @@ export async function resolveDaemonInstallRuntimeInputs(params: {
     (params.runtime === "bun"
       ? await resolvePreferredBunPath({ env: params.env, runtime: params.runtime })
       : await resolvePreferredNodePath({ env: params.env, runtime: params.runtime }));
-  return { devMode, runtimePath };
+  if (
+    params.runtime === "node" &&
+    !params.runtimeExplicit &&
+    params.pinnedRuntimePath === undefined &&
+    params.runtimePath === undefined &&
+    runtimePath === undefined &&
+    process.versions.bun &&
+    (await resolveBunRuntimeInfo(process.execPath, undefined, params.env)).status === "supported"
+  ) {
+    params.warn?.("No supported Node runtime was found; using the running Bun for the service.");
+    return { devMode, runtime: "bun", runtimePath: process.execPath };
+  }
+  return { devMode, runtime: params.runtime, runtimePath };
 }
 
 /** Return the runtime binary directory that should be added to daemon PATH. */

@@ -232,6 +232,7 @@ describe("runNodeDaemonInstall", () => {
       expect(mocks.runtime.error).not.toHaveBeenCalled();
       const plan = mocks.buildNodeInstallPlan.mock.calls[0]?.[0];
       expect(plan?.runtime).toBe(runtime ?? (retained ? recorded : "node"));
+      expect(plan?.runtimeExplicit).toBe(runtime !== undefined);
       expect(plan?.pinnedRuntimePath).toBeUndefined();
       expect(plan?.runtimePath).toBe(retained ? recordedPath : undefined);
       expect(mocks.service.install).toHaveBeenCalledWith(

@@ -304,6 +304,7 @@ describe("maybeInstallDaemon", () => {
       expect(buildGatewayInstallPlan).toHaveBeenCalledWith(
         expect.objectContaining({
           runtime: daemonRuntime ?? "bun",
+          runtimeExplicit: daemonRuntime !== undefined,
           pinnedRuntimePath: daemonRuntime ? undefined : pin.path,
           existingCommand,
           env: expect.objectContaining({ OPENCLAW_WRAPPER: "/opt/wrapper" }),

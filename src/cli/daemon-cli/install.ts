@@ -457,6 +457,7 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
       pinnedRuntimePath,
       wrapperPath,
       existingCommand: existingServiceCommand,
+      runtimeExplicit: opts.runtime !== undefined || opts.runtimePath !== undefined,
       existingEnvironment: existingServiceEnv,
       existingEnvironmentValueSources: existingManagedCommand?.environmentValueSources,
       warn,

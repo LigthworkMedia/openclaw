@@ -41,7 +41,11 @@ describe("setup runtime intent", () => {
       existingCommand: null,
       selectRuntime,
     });
-    expect(result).toMatchObject({ runtime: "bun", runtimePinUpdate: { pin: undefined } });
+    expect(result).toMatchObject({
+      runtime: "bun",
+      runtimeExplicit: false,
+      runtimePinUpdate: { pin: undefined },
+    });
     expect(result.pinnedRuntimePath).toBeUndefined();
     expect(selectRuntime).toHaveBeenCalledOnce();
   });

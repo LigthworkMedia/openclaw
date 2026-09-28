@@ -248,7 +248,7 @@ warnings, workspace status, gateway auth and health, and supervisors.
     pin, Doctor defaults its runtime picker to the supported recorded Node or Bun.
     Keeping that runtime retains its executable without creating a pin; choosing
     the other runtime selects a new executable. An unavailable or unsupported
-    recorded runtime falls back to the fresh-install runtime default.
+    recorded runtime falls back to the fresh-install default of Node, or the running supported Bun without creating a pin when no supported Node is found and no explicit runtime, pin, or wrapper is set.
 
     Explicit runtime-path pins are retained during service repair.
     Doctor still checks their runtime capabilities, but does not migrate a valid

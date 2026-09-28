@@ -235,6 +235,7 @@ export async function runNodeDaemonInstall(opts: NodeDaemonInstallOptions) {
       commands: opts.commands,
       allCommands: opts.allCommands,
       runtime: retainedRuntime?.runtime ?? runtimeRaw,
+      runtimeExplicit: opts.runtime !== undefined || opts.runtimePath !== undefined,
       runtimePath: retainedRuntime?.path,
       pinnedRuntimePath,
       warn,

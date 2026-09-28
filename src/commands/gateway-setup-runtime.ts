@@ -38,6 +38,7 @@ export async function resolveGatewaySetupRuntime(params: {
     DEFAULT_GATEWAY_DAEMON_RUNTIME;
   return {
     runtime,
+    runtimeExplicit: params.runtime !== undefined,
     runtimePath: runtime === retainedRuntime?.runtime ? retainedRuntime.path : undefined,
     pinnedRuntimePath: pin?.path,
     runtimePinUpdate: { expected, pin },
