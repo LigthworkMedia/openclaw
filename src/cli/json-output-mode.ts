@@ -1,12 +1,12 @@
 // Early JSON-output detection and console-log routing for parseable CLI stdout.
-import { withNoteOutput } from "../../packages/terminal-core/src/note.js";
+import { withNoteOutput } from "../../packages/terminal-core/src/note-output.js";
 import { loggingState } from "../logging/state.js";
 import { isConfigSetJsonParseOnly } from "./config-output-mode.js";
 import { resolveCliParentCommandPath } from "./parent-command-path.js";
 
 let resolvedJsonOutputMode: boolean | null = null;
 // Read at write time so preaction refinement and later routeLogsToStderr() calls also move notes.
-const resolveNoteOutput = () =>
+const noteOutputForConsoleRouting = () =>
   loggingState.forceConsoleToStderr ? process.stderr : process.stdout;
 
 /** Detects CLI JSON mode before Commander parses options, stopping at the argv sentinel. */
@@ -45,7 +45,7 @@ export async function withConsoleLogsRoutedToStderrForJson<T>(
 ): Promise<T> {
   const forceStderr = hasJsonOutputFlag(argv) || options.machineOutput;
   if (!forceStderr && !options.restoreChanges) {
-    return withNoteOutput(resolveNoteOutput, run);
+    return withNoteOutput(noteOutputForConsoleRouting, run);
   }
   const previousForceStderr = loggingState.forceConsoleToStderr;
   const previousEarlyRestore = loggingState.earlyConsoleRoutingRestore;
@@ -56,7 +56,7 @@ export async function withConsoleLogsRoutedToStderrForJson<T>(
     loggingState.forceConsoleToStderr = true;
   }
   try {
-    return await withNoteOutput(resolveNoteOutput, run);
+    return await withNoteOutput(noteOutputForConsoleRouting, run);
   } finally {
     if (!options.retainRoutingUntilProcessExit) {
       // Restore the process-wide logging switch so nested/serial CLI calls keep their own output mode.
