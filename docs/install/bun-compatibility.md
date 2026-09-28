@@ -75,10 +75,10 @@ The browser plugin starts its helper processes with the Bun executable that runs
 
 ## Bun-only installs
 
-Pin the Gateway service to your Bun executable so updates and Doctor retain it:
+Pin the Gateway service to your Bun executable so updates and Doctor retain it. Without Node, the `openclaw` launcher cannot start, so run the package entry point with Bun:
 
 ```sh
-openclaw gateway install --runtime-path <bun> --force
+<bun> <package-root>/openclaw.mjs gateway install --runtime bun --runtime-path <bun> --force
 ```
 
 Update, repair, and Doctor maintenance children use the running Bun executable. The Bun package-manager command resolves as `bun` from PATH; the CLI prepends its own executable directory, so the executable must be named `bun` for package-manager operations.
