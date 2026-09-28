@@ -127,6 +127,7 @@ jobs:
           path: |
             apps/ios/fastlane/screenshots/en-US/*.png
             apps/ios/build/SnapshotTestResults/capture-attempts.json
+            apps/ios/build/screenshot-diagnostics.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

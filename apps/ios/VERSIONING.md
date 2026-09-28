@@ -105,10 +105,12 @@ same diagnostics locally:
 OPENCLAW_SNAPSHOT_DIAGNOSTICS=1 pnpm ios:screenshots
 ```
 
-Sanitized startup, resource, and crash facts are recorded with capture attempts
-in `apps/ios/build/SnapshotTestResults/capture-attempts.json`. GitHub retains that
-ledger and fixture PNGs in `ios-screenshots-<run-id>-<run-attempt>`. Raw Xcode
-logs and XCTest result bundles are excluded from the uploaded diagnostics.
+Sanitized startup, resource, and crash facts are recorded in
+`apps/ios/build/screenshot-diagnostics.json`. The separate
+`capture-attempts.json` ledger keeps its existing schema for release evidence.
+GitHub retains both files and fixture PNGs in
+`ios-screenshots-<run-id>-<run-attempt>`. Raw Xcode logs and XCTest result bundles
+are excluded from the uploaded diagnostics.
 
 ## Apple bundle mapping
 

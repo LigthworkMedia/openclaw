@@ -1260,6 +1260,9 @@ def make_product(derived_data_path)
   File.write(File.join(app, "Info.plist"), "fixture.watch") unless @scenario == "invalid-plist"
 end
 module Open3
+  def self.popen2(*)
+    raise Errno::ENOENT
+  end
   def self.capture3(command, *args)
     raise "unexpected external command: #{command}" unless command == "/usr/libexec/PlistBuddy"
     [File.read(args.last), "", Struct.new(:success?).new(true)]
@@ -1319,15 +1322,19 @@ def sh(command, *arguments, **_options)
   end
 end
 
-results = %w[combined prepared iphone standalone standalone-build-failure missing invalid-plist invalid-install build-failure busy boot-failure capture-failure capture-cleanup-failure cleanup-failure].map do |scenario|
+results = %w[combined diagnostics prepared iphone standalone standalone-build-failure missing invalid-plist invalid-install build-failure busy boot-failure capture-failure capture-cleanup-failure cleanup-failure].map do |scenario|
   Dir.mktmpdir("openclaw-watch-build-") do |root|
     @root, @scenario, @builds, @commands, @installed = root, scenario, [], [], nil
     @owned, @created = {}, 0
     ENV["HOME"] = root
     ENV["OPENCLAW_CI_SIMSLIM_BINARY"] = scenario == "prepared" ? "/fixture/simslim" : ""
+    ENV["OPENCLAW_SNAPSHOT_DIAGNOSTICS"] = scenario == "diagnostics" ? "1" : "0"
     logs = File.join(ios_root, "build", "SnapshotLogs")
     FileUtils.mkdir_p(logs)
     File.write(File.join(logs, "stale.log"), "previous invocation")
+    unless scenario.start_with?("standalone")
+      File.write(File.join(ios_root, "build", "screenshot-diagnostics.json"), JSON.generate({ stale: true }))
+    end
     %w[SnapshotDerivedData WatchScreenshotDerivedData].each do |directory|
       app = File.join(ios_root, "build", directory, "Build", "Products", "Debug-watchsimulator", "OpenClawWatchApp.app")
       FileUtils.mkdir_p(app)
@@ -1346,6 +1353,8 @@ results = %w[combined prepared iphone standalone standalone-build-failure missin
     rescue => failure
       error = failure.message.sub(root, "")
     end
+    ledger_path = File.join(ios_root, "build", "SnapshotTestResults", "capture-attempts.json")
+    diagnostics_path = File.join(ios_root, "build", "screenshot-diagnostics.json")
     {
       scenario: scenario, builds: @builds, error: error, installed: @installed,
       owned: @owned.keys,
@@ -1354,6 +1363,8 @@ results = %w[combined prepared iphone standalone standalone-build-failure missin
       pngs: Dir[File.join(ios_root, "fastlane", "screenshots", "en-US", "*.png")].length,
       xcresults: Dir[File.join(ios_root, "build", "SnapshotTestResults", "*.xcresult")].length,
       attempts: File.exist?(File.join(ios_root, "build", "SnapshotTestResults", "capture-attempts.json")),
+      ledgerKeys: File.exist?(ledger_path) ? JSON.parse(File.read(ledger_path)).keys.sort : nil,
+      diagnostics: File.exist?(diagnostics_path) ? JSON.parse(File.read(diagnostics_path)) : nil,
       evidenceEntries: Dir.glob(File.join(ios_root, "build", "SnapshotTestResults", "*")).map { |entry| File.basename(entry) }.sort,
       logs: Dir.children(logs).sort,
       versions: @commands.select { |args| args.any? { |arg| arg.end_with?("/ios-write-version-xcconfig.sh") } }
@@ -1373,6 +1384,8 @@ puts JSON.generate(results)
       pngs: number;
       xcresults: number;
       attempts: boolean;
+      ledgerKeys: string[] | null;
+      diagnostics: { schemaVersion: number; diagnostics: unknown[] } | null;
       evidenceEntries: string[];
       logs: string[];
       versions: string[][];
@@ -1409,6 +1422,25 @@ puts JSON.generate(results)
       error: null,
       installed: null,
       pngs: 8,
+    });
+    expect(row("combined").ledgerKeys).toEqual(["attempts", "schemaVersion"]);
+    expect(row("combined").diagnostics).toBeNull();
+    expect(row("diagnostics").evidenceEntries).toEqual(row("combined").evidenceEntries);
+    expect(row("diagnostics")).toMatchObject({
+      error: null,
+      pngs: 9,
+      ledgerKeys: ["attempts", "schemaVersion"],
+      diagnostics: {
+        schemaVersion: 1,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ phase: "boot", outcome: "succeeded", activeSimulatorCount: 1 }),
+          expect.objectContaining({
+            phase: "delete",
+            outcome: "succeeded",
+            activeSimulatorCount: 0,
+          }),
+        ]),
+      },
     });
     expect(row("standalone")).toMatchObject({
       builds: ["watch"],

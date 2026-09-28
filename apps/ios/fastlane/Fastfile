@@ -1847,13 +1847,23 @@ def archive_snapshot_test_result!(result_bundle_path:, archive_directory:, devic
   FileUtils.mv(result_bundle_path, archive_path)
 end
 
-def write_release_ios_screenshot_attempts!(attempts:, output_path:, diagnostics: nil)
+def write_release_ios_screenshot_attempts!(attempts:, output_path:)
   temporary_path = "#{output_path}.tmp"
   evidence = { "schemaVersion" => 1, "attempts" => attempts }
-  evidence["diagnostics"] = diagnostics.events if diagnostics
   File.write(
     temporary_path,
     "#{JSON.pretty_generate(evidence)}\n"
+  )
+  FileUtils.mv(temporary_path, output_path)
+ensure
+  FileUtils.rm_f(temporary_path) if defined?(temporary_path)
+end
+
+def write_release_ios_screenshot_diagnostics!(diagnostics:, output_path:)
+  temporary_path = "#{output_path}.tmp"
+  File.write(
+    temporary_path,
+    "#{JSON.pretty_generate({ "schemaVersion" => 1, "diagnostics" => diagnostics.events })}\n"
   )
   FileUtils.mv(temporary_path, output_path)
 ensure
@@ -1866,8 +1876,7 @@ def record_release_ios_screenshot_attempt!(
   device:,
   screenshot_name:,
   attempt:,
-  capture_outcome:,
-  diagnostics: nil
+  capture_outcome:
 )
   attempts << {
     "deviceName" => device,
@@ -1877,8 +1886,7 @@ def record_release_ios_screenshot_attempt!(
   }
   write_release_ios_screenshot_attempts!(
     attempts: attempts,
-    output_path: output_path,
-    diagnostics: diagnostics
+    output_path: output_path
   )
 end
 
@@ -1963,8 +1971,7 @@ def capture_release_ios_screenshot!(
       device: device,
       screenshot_name: screenshot_name,
       attempt: attempt,
-      capture_outcome: "failed",
-      diagnostics: diagnostics
+      capture_outcome: "failed"
     )
     raise
   end
@@ -1982,8 +1989,7 @@ def capture_release_ios_screenshot!(
     device: device,
     screenshot_name: screenshot_name,
     attempt: attempt,
-    capture_outcome: "succeeded",
-    diagnostics: diagnostics
+    capture_outcome: "succeeded"
   )
 end
 
@@ -2437,7 +2443,9 @@ platform :ios do
     result_bundle_archive_directory = File.join(ios_root, "build", "SnapshotTestResults")
     log_directory = File.join(ios_root, "build", "SnapshotLogs")
     capture_attempts_path = File.join(result_bundle_archive_directory, "capture-attempts.json")
+    diagnostics_path = File.join(ios_root, "build", "screenshot-diagnostics.json")
     derived_data_path = File.join(ios_root, "build", "SnapshotDerivedData")
+    FileUtils.rm_f(diagnostics_path)
     FileUtils.rm_rf(result_bundle_archive_directory)
     FileUtils.mkdir_p(result_bundle_archive_directory)
     FileUtils.rm_rf(log_directory)
@@ -2445,7 +2453,7 @@ platform :ios do
     capture_attempts = []
     diagnostics = if ENV["OPENCLAW_SNAPSHOT_DIAGNOSTICS"] == "1"
       ScreenshotDiagnostics.new do
-        write_release_ios_screenshot_attempts!(attempts: capture_attempts, output_path: capture_attempts_path, diagnostics: diagnostics)
+        write_release_ios_screenshot_diagnostics!(diagnostics: diagnostics, output_path: diagnostics_path)
       end
     end
     write_release_ios_screenshot_attempts!(
