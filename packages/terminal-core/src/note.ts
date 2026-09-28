@@ -7,6 +7,7 @@ import { stylePromptTitle } from "./prompt-style.js";
 const MIN_NOTE_COLUMNS = 80;
 const FILE_LIKE_RE = /^[a-zA-Z0-9._-]+$/;
 const suppressNotesStorage = new AsyncLocalStorage<boolean>();
+const noteOutputStorage = new AsyncLocalStorage<() => NodeJS.WriteStream>();
 
 function isSuppressedByEnv(value: string | undefined): boolean {
   const normalized = normalizeLowercaseStringOrEmpty(value);
@@ -167,7 +168,12 @@ export function noteToStream(
 }
 
 export function note(message: unknown, title?: string) {
-  noteToStream(message, title, process.stdout);
+  noteToStream(message, title, noteOutputStorage.getStore()?.() ?? process.stdout);
+}
+
+/** The invocation's output-mode owner chooses where notes render for work in callback. */
+export function withNoteOutput<T>(resolveOutput: () => NodeJS.WriteStream, callback: () => T): T {
+  return noteOutputStorage.run(resolveOutput, callback);
 }
 
 export function withSuppressedNotes<T>(callback: () => T): T {
