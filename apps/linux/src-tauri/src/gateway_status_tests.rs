@@ -27,7 +27,7 @@ case "$*" in
     else
       cat "$root/status.json"
     fi ;;
-  'gateway install --json')
+  'gateway install --json' | "gateway install --json --runtime bun --runtime-path $root/bun")
     touch "$root/installed"
     printf '{"ok":true}\n' ;;
   'gateway start --json')
@@ -116,6 +116,7 @@ fn cli_service_status_lifecycle_contract() {
     let cases = [
         (
             "unknown-healthy",
+            "openclaw",
             unknown_healthy.to_string(),
             Expected::Ready {
                 install: false,
@@ -125,6 +126,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "loaded-runtime-unknown",
+            "openclaw",
             unknown_runtime.to_string(),
             Expected::Ready {
                 install: false,
@@ -134,6 +136,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "loaded-runtime-status-omitted",
+            "openclaw",
             missing_runtime_status.to_string(),
             Expected::Ready {
                 install: false,
@@ -143,6 +146,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "unknown-unreachable-no-command",
+            "openclaw",
             unknown.to_string(),
             Expected::Unknown {
                 inspection: true,
@@ -151,6 +155,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "unknown-unreachable-with-command",
+            "openclaw",
             unknown_with_command.to_string(),
             Expected::Unknown {
                 inspection: true,
@@ -159,6 +164,27 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "known-absent",
+            "openclaw",
+            status(json!(false), false, false).to_string(),
+            Expected::Ready {
+                install: true,
+                start: true,
+                recover: false,
+            },
+        ),
+        (
+            "known-absent-node",
+            "node",
+            status(json!(false), false, false).to_string(),
+            Expected::Ready {
+                install: true,
+                start: true,
+                recover: false,
+            },
+        ),
+        (
+            "known-absent-bun",
+            "bun",
             status(json!(false), false, false).to_string(),
             Expected::Ready {
                 install: true,
@@ -168,6 +194,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "loaded-stopped",
+            "openclaw",
             status(json!(true), false, false).to_string(),
             Expected::Ready {
                 install: false,
@@ -177,6 +204,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "healthy-unmanaged",
+            "openclaw",
             status(json!(false), true, true).to_string(),
             Expected::Ready {
                 install: false,
@@ -186,6 +214,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "healthy-managed",
+            "openclaw",
             status(json!(true), true, true).to_string(),
             Expected::Ready {
                 install: false,
@@ -195,6 +224,7 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "missing-loaded",
+            "openclaw",
             missing_loaded.to_string(),
             Expected::Unknown {
                 inspection: false,
@@ -203,25 +233,32 @@ fn cli_service_status_lifecycle_contract() {
         ),
         (
             "malformed-loaded",
+            "openclaw",
             status(json!("false"), false, false).to_string(),
             Expected::Invalid,
         ),
         (
             "missing-service",
+            "openclaw",
             json!({"rpc": {"ok": false}}).to_string(),
             Expected::Invalid,
         ),
-        ("malformed-json", "{invalid".to_string(), Expected::Invalid),
+        (
+            "malformed-json",
+            "openclaw",
+            "{invalid".to_string(),
+            Expected::Invalid,
+        ),
     ];
     let mut failures = Vec::new();
-    for (name, initial_status, expected) in cases {
+    for (name, executable_name, initial_status, expected) in cases {
         let directory = TestDirectory(
             std::env::temp_dir().join(format!("openclaw-status-contract-{}", uuid::Uuid::new_v4())),
         );
         let root = &directory.0;
         fs::create_dir(root).unwrap();
         fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
-        let executable = root.join("openclaw");
+        let executable = root.join(executable_name);
         fs::write(&executable, CLI).unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(root.join("status.json"), initial_status).unwrap();
@@ -272,10 +309,18 @@ fn cli_service_status_lifecycle_contract() {
             .filter(|call| *call != "--version" && *call != "gateway status --json")
             .collect();
         let mut expected_calls = Vec::new();
+        let install_command = if executable_name == "bun" {
+            format!(
+                "gateway install --json --runtime bun --runtime-path {}",
+                executable.display()
+            )
+        } else {
+            "gateway install --json".to_string()
+        };
         let valid = match expected {
             Expected::Ready { install, start, .. } => {
                 if install {
-                    expected_calls.push("gateway install --json");
+                    expected_calls.push(install_command.as_str());
                 }
                 if start {
                     expected_calls.push("gateway start --json");
