@@ -73,6 +73,11 @@ async function inspectUpdateAdmission(
       const checks: UpdateAdmissionVerdict["facts"]["checks"] = [];
       const reasons: UpdateAdmissionVerdict["reasons"] = [];
       const warnings: UpdateAdmissionVerdict["warnings"] = [];
+      const legacyConfigWarning = {
+        code: "config-warning",
+        message:
+          "Configuration contains legacy fields that candidate Doctor can repair after installation.",
+      };
       const refuse = (name: string, code: string, message: string, nextAction?: string) => {
         checks.push({ name, status: "refuse", detail: message });
         reasons.push({ code, message, ...(nextAction ? { nextAction } : {}) });
@@ -95,11 +100,7 @@ async function inspectUpdateAdmission(
             : undefined;
         databaseContext = await captureTargetDatabaseSchemaContext(env, { legacyConfigPlan });
         if (legacyConfigPlan) {
-          warnings.push({
-            code: "config-warning",
-            message:
-              "Configuration contains legacy fields that candidate Doctor can repair after installation.",
-          });
+          warnings.push(legacyConfigWarning);
         }
         checks.push({ name: "config", status: warnings.length ? "warn" : "ok" });
       } catch (error) {
@@ -117,11 +118,11 @@ async function inspectUpdateAdmission(
       }
       let schemasAccepted = false;
       let pluginInstallRecords: Record<string, PluginInstallRecord> | undefined;
-      if (databaseContext) {
+      const checkDatabaseSchemas = async (
+        context: NonNullable<typeof databaseContext>,
+      ): Promise<boolean> => {
         try {
-          const schemas = await checkTargetDatabaseSchemasForContexts(schemaVersions, [
-            databaseContext,
-          ]);
+          const schemas = await checkTargetDatabaseSchemasForContexts(schemaVersions, [context]);
           if (hasSchemaRefusal(schemas)) {
             refuse(
               "database-schema",
@@ -129,8 +130,10 @@ async function inspectUpdateAdmission(
               formatSchemaRefusalLines(schemas).join("\n"),
             );
           } else {
-            checks.push({ name: "database-schema", status: "ok" });
-            schemasAccepted = true;
+            if (!checks.some((check) => check.name === "database-schema")) {
+              checks.push({ name: "database-schema", status: "ok" });
+            }
+            return true;
           }
         } catch (error) {
           if (!(error instanceof UpdatePreMutationError)) {
@@ -138,35 +141,53 @@ async function inspectUpdateAdmission(
           }
           refuse("database-schema", error.reason, error.message);
         }
+        return false;
+      };
+      if (databaseContext) {
+        schemasAccepted = await checkDatabaseSchemas(databaseContext);
       }
       // Plugin metadata reads require compatible stores; never let them mask a schema refusal.
       if (databaseContext && schemasAccepted && !databaseContext.legacyConfigPlan) {
-        const { snapshot, pluginMetadataSnapshot } = await createConfigIO({
+        const { snapshot, writeOptions } = await createConfigIO({
           env: cloneEnvWithPlatformSemantics(env),
           observe: false,
           suppressFutureVersionWarning: true,
           shellEnvFallback: "defer",
-        }).readConfigFileSnapshotWithPluginMetadata();
-        if (!snapshot.valid || snapshot.readError) {
-          const failure = createUpdateConfigFailure(snapshot);
-          checks[0] = { name: "config", status: "refuse", detail: failure.message };
-          reasons.push({
-            code: failure.reason,
-            message: failure.message,
-            nextAction: failure.nextAction,
-          });
-          databaseContext = undefined;
-        } else {
-          pluginInstallRecords = pluginMetadataSnapshot?.index.installRecords;
+        }).readConfigFileSnapshotForWrite();
+        try {
+          if (!snapshot.valid || snapshot.readError) {
+            const legacyConfigPlan = !snapshot.readError
+              ? planLegacyConfigForUpdateChannel(snapshot, writeOptions)
+              : undefined;
+            if (!legacyConfigPlan) {
+              throw createUpdateConfigFailure(snapshot);
+            }
+            databaseContext = await captureTargetDatabaseSchemaContext(env, { legacyConfigPlan });
+            // Plugin repairs can change configured stores; validate the source-bound projection too.
+            schemasAccepted = await checkDatabaseSchemas(databaseContext);
+            warnings.push(legacyConfigWarning);
+          }
+          pluginInstallRecords = writeOptions.basePluginMetadataSnapshot?.index.installRecords;
           warnings.push(
             ...snapshot.warnings.map((warning) => ({
               code: warning.code ?? "config-warning",
               message: `${warning.path}: ${warning.message}`,
             })),
           );
-          if (snapshot.warnings.length) {
+          if (snapshot.warnings.length || databaseContext.legacyConfigPlan) {
             checks[0] = { name: "config", status: "warn" };
           }
+        } catch (error) {
+          if (!(error instanceof UpdatePreMutationError)) {
+            throw error;
+          }
+          checks[0] = { name: "config", status: "refuse", detail: error.message };
+          reasons.push({
+            code: error.reason,
+            message: error.message,
+            nextAction: error.nextAction,
+          });
+          databaseContext = undefined;
         }
       }
       const nodeEngines =

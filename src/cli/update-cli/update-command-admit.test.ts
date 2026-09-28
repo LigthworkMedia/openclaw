@@ -203,6 +203,37 @@ describe("candidate update admission", () => {
     expect(snapshotFiles()).toEqual(before);
   });
 
+  it.each([
+    { policy: "allowlist", verdict: "admit", exitCode: 0 },
+    { policy: "invalid-policy", verdict: "refuse", exitCode: 3 },
+  ])(
+    "$verdict plugin-owned legacy Discord DM config ($policy) without writing",
+    async ({ policy, verdict, exitCode }) => {
+      vi.stubEnv("OPENCLAW_DISABLE_BUNDLED_PLUGINS", undefined);
+      writeConfig({
+        plugins: { allow: ["discord"] },
+        channels: { discord: { dm: { policy, allowFrom: ["123456789"] } } },
+      });
+      const before = snapshotFiles();
+
+      await updateAdmitCommand(contextPath);
+
+      expect(readVerdict()).toMatchObject({
+        verdict,
+        ...(verdict === "admit"
+          ? {
+              reasons: [],
+              warnings: expect.arrayContaining([
+                { code: "config-warning", message: expect.stringContaining("legacy fields") },
+              ]),
+            }
+          : { reasons: [expect.objectContaining({ code: "invalid-config" })] }),
+      });
+      expect(process.exitCode).toBe(exitCode);
+      expect(snapshotFiles()).toEqual(before);
+    },
+  );
+
   it("validates plugin compatibility against the candidate despite inherited host identity", async () => {
     const pluginDir = path.join(home, "version-sensitive-plugin");
     fs.mkdirSync(pluginDir);
