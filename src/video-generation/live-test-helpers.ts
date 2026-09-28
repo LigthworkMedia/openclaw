@@ -18,6 +18,7 @@ export const DEFAULT_LIVE_VIDEO_MODELS: Record<string, string> = {
   deepinfra: "deepinfra/Pixverse/Pixverse-T2V",
   fal: "fal/fal-ai/minimax/video-01-live",
   google: "google/veo-3.1-fast-generate-preview",
+  kie: "kie/kling-2.6/text-to-video",
   minimax: "minimax/MiniMax-Hailuo-2.3",
   openrouter: "openrouter/google/veo-3.1-fast",
   pixverse: "pixverse/v6",

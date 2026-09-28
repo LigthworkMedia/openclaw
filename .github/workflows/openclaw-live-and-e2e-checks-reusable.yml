@@ -486,6 +486,8 @@ on:
         required: false
       GROQ_API_KEY:
         required: false
+      KIE_API_KEY:
+        required: false
       KIMI_API_KEY:
         required: false
       MODELSTUDIO_API_KEY:
@@ -1545,6 +1547,7 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      KIE_API_KEY: ${{ secrets.KIE_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       MODELSTUDIO_API_KEY: ${{ secrets.MODELSTUDIO_API_KEY }}
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
@@ -1957,6 +1960,7 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      KIE_API_KEY: ${{ secrets.KIE_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       MODELSTUDIO_API_KEY: ${{ secrets.MODELSTUDIO_API_KEY }}
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
@@ -4405,6 +4409,7 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      KIE_API_KEY: ${{ secrets.KIE_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       MODELSTUDIO_API_KEY: ${{ secrets.MODELSTUDIO_API_KEY }}
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
@@ -4566,6 +4571,7 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      KIE_API_KEY: ${{ secrets.KIE_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       MODELSTUDIO_API_KEY: ${{ secrets.MODELSTUDIO_API_KEY }}
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
@@ -4783,7 +4789,7 @@ jobs:
           - suite_id: native-live-extensions-media-video-b
             suite_group: native-live-extensions-media-video
             label: Native live media video plugins B
-            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,minimax node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
+            command: OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,kie,minimax OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000 node .release-harness/scripts/test-live-shard.mjs native-live-extensions-media-video
             timeout_minutes: 30
             profile_env_only: false
             profiles: full
@@ -4813,6 +4819,7 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      KIE_API_KEY: ${{ secrets.KIE_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       MODELSTUDIO_API_KEY: ${{ secrets.MODELSTUDIO_API_KEY }}
       MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}

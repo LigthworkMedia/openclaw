@@ -77,6 +77,10 @@ export const pluginRegistrationContractCases = {
     pluginId: "groq",
     mediaUnderstandingProviderIds: ["groq"],
   },
+  kie: {
+    pluginId: "kie",
+    videoGenerationProviderIds: ["kie"],
+  },
   lmstudio: {
     pluginId: "lmstudio",
     providerIds: ["lmstudio"],

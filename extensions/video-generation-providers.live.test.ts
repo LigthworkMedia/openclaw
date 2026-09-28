@@ -49,6 +49,7 @@ import byteplusPlugin from "./byteplus/index.js";
 import deepinfraPlugin from "./deepinfra/index.js";
 import falPlugin from "./fal/index.js";
 import googlePlugin from "./google/index.js";
+import kiePlugin from "./kie/index.js";
 import minimaxPlugin from "./minimax/index.js";
 import openrouterPlugin from "./openrouter/index.js";
 import pixversePlugin from "./pixverse/index.js";
@@ -116,6 +117,7 @@ const CASES: LiveProviderCase[] = [
   },
   { plugin: falPlugin, pluginId: "fal", pluginName: "fal Provider", providerId: "fal" },
   { plugin: googlePlugin, pluginId: "google", pluginName: "Google Provider", providerId: "google" },
+  { plugin: kiePlugin, pluginId: "kie", pluginName: "Kie AI Provider", providerId: "kie" },
   {
     plugin: minimaxPlugin,
     pluginId: "minimax",

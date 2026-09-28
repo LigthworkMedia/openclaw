@@ -1,5 +1,5 @@
 ---
-summary: "Generate videos via video_generate from text, image, or video references across 15 provider backends"
+summary: "Generate videos via video_generate from text, image, or video references across 16 provider backends"
 read_when:
   - Generating videos via the agent
   - Configuring video-generation providers and models
@@ -9,7 +9,7 @@ sidebarTitle: "Video generation"
 ---
 
 OpenClaw agents generate videos from text prompts, reference images, or
-existing videos through `video_generate`. Fifteen provider backends are
+existing videos through `video_generate`. Sixteen provider backends are
 supported; the agent picks the right one automatically based on config and
 available API keys.
 
@@ -103,6 +103,7 @@ of failing the task if local persistence rejects an oversized file.
 | DeepInfra             | `Pixverse/Pixverse-T2V`         |  ✓   | -                                                    | -                                               | `DEEPINFRA_API_KEY`                      |
 | fal                   | `fal-ai/minimax/video-01-live`  |  ✓   | 1 image; up to 9 with Seedance reference-to-video    | Up to 3 videos with Seedance reference-to-video | `FAL_KEY`                                |
 | Google                | `veo-3.1-fast-generate-preview` |  ✓   | 1 image                                              | 1 video                                         | `GEMINI_API_KEY`                         |
+| Kie AI                | `kling-2.6/text-to-video`       |  ✓   | 1 local or remote image                              | -                                               | `KIE_API_KEY`                            |
 | MiniMax               | `MiniMax-Hailuo-2.3`            |  ✓   | 1 image                                              | -                                               | `MINIMAX_API_KEY` or MiniMax OAuth       |
 | OpenRouter            | `google/veo-3.1-fast`           |  ✓   | Up to 4 images (first/last frame or references)      | -                                               | `OPENROUTER_API_KEY`                     |
 | Qwen                  | `wan2.6-t2v`                    |  ✓   | Yes (remote URL)                                     | Yes (remote URL)                                | `QWEN_API_KEY`                           |
@@ -130,6 +131,7 @@ the shared live sweep:
 | DeepInfra  |     ✓      |       -        |       -        | `generate`; native DeepInfra video schemas are text-to-video in the plugin contract                                                     |
 | fal        |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; `videoToVideo` only when using Seedance reference-to-video                                                  |
 | Google     |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; shared `videoToVideo` skipped because the current buffer-backed Gemini/Veo sweep does not accept that input |
+| Kie AI     |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | MiniMax    |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | OpenRouter |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | Qwen       |     ✓      |       ✓        |       ✓        | `generate`, `imageToVideo`; `videoToVideo` skipped because this provider needs remote `http(s)` video URLs                              |
@@ -379,6 +381,14 @@ OpenClaw does not append auto-detected providers.
     ignored with a warning on the Gemini API path because that API rejects
     the `generateAudio` parameter for current Veo video generation.
   </Accordion>
+  <Accordion title="Kie AI">
+    Uses Kie's market task API for Kling, Grok Imagine, Wan, Hailuo, and
+    Seedance. A single reference image automatically selects the family's
+    image-to-video variant. Local images are uploaded through Kie's
+    documented base64 upload API. Generation can take several minutes;
+    the provider waits up to ten minutes by default. See [Kie AI](/providers/kie)
+    for model-specific limits.
+  </Accordion>
   <Accordion title="MiniMax">
     Single image reference only. MiniMax accepts `768P` and `1080P`
     resolutions; requests such as `720P` are normalized to the closest
@@ -538,6 +548,7 @@ openclaw config set agents.defaults.mediaModels.video.primary "qwen/wan2.6-t2v"
 - [Configuration reference](/gateway/config-agents#agent-defaults)
 - [fal](/providers/fal)
 - [Google (Gemini)](/providers/google)
+- [Kie AI](/providers/kie)
 - [MiniMax](/providers/minimax)
 - [Models](/concepts/models)
 - [OpenRouter](/providers/openrouter)
