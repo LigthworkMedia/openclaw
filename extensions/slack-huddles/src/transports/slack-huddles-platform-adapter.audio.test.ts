@@ -312,3 +312,19 @@ it("re-mutes when Slack leaves the virtual input during the shared routing await
   }).status({ mode: "agent" });
   expect(mic.getAttribute("aria-checked")).toBe("false");
 });
+
+it("reports but does not click during a read-only pass when the virtual input disappears", async () => {
+  const { document, mic } = inCall(undefined, true);
+  const selected = new PageNode("div", { id: "microphone-info" }, "BlackHole 2ch");
+  const playback = Object.assign(new PageNode("audio"), { setSinkId: async () => {} });
+  document.body.append(selected, playback);
+  const result = await fixture({
+    document,
+    joined: true,
+    onEnumerateDevices: () => {
+      selected.textContent = "Built-in Microphone";
+    },
+  }).status({ mode: "agent", readOnly: true });
+  expect(mic.clicks).toBe(0);
+  expect(result.audioInputRouted).toBe(false);
+});

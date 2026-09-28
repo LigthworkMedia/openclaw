@@ -8,7 +8,7 @@ export function slackHuddleStatusCallSource(): string {
     afterAudioRoutingSource: `if (inCall && !authorityHolds()) inCall = false;
   if (inCall && allowMicrophone) {
     refreshAudioInput();
-    if (!audioInputRouted && readMicrophone() === "on") await setMicrophone("off");
+    if (canMutateSession && !audioInputRouted && readMicrophone() === "on") await setMicrophone("off");
   }`,
     platform: {
       audioOutputElementIdPrefix: "openclaw-slack-huddle-audio-output-",
