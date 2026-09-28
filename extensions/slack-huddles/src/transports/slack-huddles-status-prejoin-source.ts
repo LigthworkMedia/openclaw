@@ -209,8 +209,10 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
     inCall = false;
     authorityLost = true;
   }
-  // A workspace binding ends only on proven departure: Slack's header shows this device out of the huddle.
+  // A workspace binding ends only on proven departure: this session's own channel view (the identity
+  // enforces the bound workspace) shows this device out of the huddle.
   if (canMutateSession && channelOnlySession && !inCallControl && !joinSettling &&
+      meetingIdentity(location.href) === expectedIdentity &&
       firstRaw(selectors.channelHeader) && !firstRaw(selectors.channelHeaderInHuddle)) {
     delete window.__openclawSlackHuddleWorkspaces?.[expectedIdentity];
   }

@@ -198,6 +198,8 @@ export function fixture(params: {
   /** Runs inside the shared runtime's awaited device enumeration. */
   onEnumerateDevices?: () => void;
   devices?: { kind: string; label: string; deviceId: string }[];
+  /** Adds a microphone permission query and runs this inside its await. */
+  onPermissionQuery?: () => void;
 }) {
   const window =
     params.window ??
@@ -225,6 +227,16 @@ export function fixture(params: {
       throw new Error("audio capture passed ownership");
     },
     navigator: {
+      ...(params.onPermissionQuery
+        ? {
+            permissions: {
+              query: async () => {
+                params.onPermissionQuery?.();
+                return { state: "granted" };
+              },
+            },
+          }
+        : {}),
       mediaDevices: {
         enumerateDevices: async () => {
           params.onEnumerateDevices?.();

@@ -3,6 +3,13 @@ import { MeetingPlatformAdapter } from "openclaw/plugin-sdk/meeting-runtime";
 export function slackHuddleStatusCallSource(): string {
   return MeetingPlatformAdapter.createStatusCallSource({
     liveOwnershipSource: "authorityHolds()",
+    // Shared routing awaits device work after the prelude's checks: re-verify membership and never
+    // leave the microphone live on an input that is no longer the virtual device.
+    afterAudioRoutingSource: `if (inCall && !authorityHolds()) inCall = false;
+  if (inCall && allowMicrophone) {
+    refreshAudioInput();
+    if (!audioInputRouted && readMicrophone() === "on") await setMicrophone("off");
+  }`,
     platform: {
       audioOutputElementIdPrefix: "openclaw-slack-huddle-audio-output-",
       displayName: "Slack huddle",

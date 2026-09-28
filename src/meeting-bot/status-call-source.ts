@@ -14,6 +14,8 @@ type MeetingStatusCallSourceOptions = {
   extraResultSource?: string;
   /** In-page boolean expression that revalidates call ownership after media-routing awaits. */
   liveOwnershipSource?: string;
+  /** In-page statements run once audio routing settles, before captions and the status result. */
+  afterAudioRoutingSource?: string;
   transcriptMaxLines?: number;
 };
 
@@ -332,7 +334,7 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     audioOutputRouted = false;
     if (canMutateSession) retireOwnedAudioBridges();
   }
-${withLiveOwnership("  }\n")}  let captioning = false;
+${withLiveOwnership("  }\n")}${options.afterAudioRoutingSource ? `  ${options.afterAudioRoutingSource}\n` : ""}  let captioning = false;
   let captionsEnabledAttempted = false;
   let transcriptLines = 0;
   let lastCaptionAt;
