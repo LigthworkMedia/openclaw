@@ -55,7 +55,7 @@ import {
 } from "./chat-transcript-scroll-restore.ts";
 import {
   CHAT_TRANSCRIPT_ESTIMATED_ROW_PX,
-  CHAT_TRANSCRIPT_INITIAL_OVERSCAN,
+  CHAT_TRANSCRIPT_OVERSCAN,
   TranscriptPresentation,
   type ChatTranscriptSession,
   type TranscriptCallbacks,
@@ -72,7 +72,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
   private readonly virtualizerController: VirtualizerController<HTMLDivElement, HTMLElement>;
   private readonly presentation: TranscriptPresentation;
   private threadInnerElement: HTMLDivElement | null = null;
-  private connected = false;
+  connected = false;
   private observedWidth: number | null = null;
   private observedHeight: number | null = null;
   private contentReady = false;
@@ -258,7 +258,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       // scheduleCommittedChatScroll owns end-follow on content changes and source: "resize".
       // Disable isAtEnd()'s default too; callers must supply an explicit threshold.
       scrollEndThreshold: -1,
-      overscan: CHAT_TRANSCRIPT_INITIAL_OVERSCAN,
+      overscan: CHAT_TRANSCRIPT_OVERSCAN,
     });
     this.presentation = new TranscriptPresentation(
       this,
@@ -447,8 +447,15 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     announce: boolean,
     overlay: unknown = nothing,
     header: TranscriptHeader | null = null,
+    navigationPending = false,
   ): TemplateResult {
-    this.presentation.prepare();
+    this.presentation.prepare(
+      navigationPending ||
+        this.focusedRowKey !== null ||
+        this.prependAnchor.messageKey !== null ||
+        this.offsetState.pendingInteractionAnchor !== null ||
+        this.offsetState.scrollCommand !== null,
+    );
     this.offsetState.renderedScrollState = this.offsetState.renderState(
       this.scrollElement !== null && this.endAnchor.atEnd,
     );

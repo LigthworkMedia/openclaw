@@ -140,9 +140,11 @@ input layout while navigating results, and remeasures edits, width changes, and
 reconnected fields. Status clocks pause in hidden tabs and render only when their
 displayed value or properties change.
 
-The first presented transcript commit renders two neighboring rows beyond each
+The first connected, presented transcript commit renders two neighboring rows beyond each
 viewport edge. The next animation frame restores the six-row scrolling buffer;
-focused and anchored rows remain retained independently. Link-preview discovery
+pending navigation, focus, or anchor reconciliation uses that full buffer immediately,
+including neighboring controls such as folded-work headers. Focused and anchored
+rows remain retained independently. Link-preview discovery
 waits for browser idle time, then follows transcript mutations instead of rescanning
 unchanged content on every pane update. Hiding or retiring the pane cancels pending
 discovery.

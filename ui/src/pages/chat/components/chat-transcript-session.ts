@@ -58,6 +58,7 @@ export type ChatTranscriptSession = {
     announce: boolean,
     overlay?: unknown,
     header?: TranscriptHeader | null,
+    navigationPending?: boolean,
   ): TemplateResult;
   syncMessageRows(
     messageRowKeysById: ReadonlyMap<string, string>,
@@ -103,6 +104,7 @@ export class TranscriptPresentation implements ReactiveController {
 
   constructor(
     private readonly host: ReactiveControllerHost & {
+      readonly connected: boolean;
       readonly scrollElement: HTMLDivElement | null;
     },
     private readonly virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
@@ -112,9 +114,12 @@ export class TranscriptPresentation implements ReactiveController {
     host.addController(this);
   }
 
-  prepare(): void {
-    const presented = this.callbacks.visuallyPresented?.() ?? true;
-    if (presented === this.presented) {
+  prepare(requiresFullBuffer = false): void {
+    const presented = this.host.connected && (this.callbacks.visuallyPresented?.() ?? true);
+    if (
+      presented === this.presented &&
+      (!requiresFullBuffer || this.virtualizer.options.overscan === CHAT_TRANSCRIPT_OVERSCAN)
+    ) {
       return;
     }
     this.presented = presented;
@@ -125,7 +130,8 @@ export class TranscriptPresentation implements ReactiveController {
     if (presented) {
       this.virtualizer.setOptions({
         ...this.virtualizer.options,
-        overscan: CHAT_TRANSCRIPT_INITIAL_OVERSCAN,
+        // Navigation can need neighboring controls before its target is revealed.
+        overscan: requiresFullBuffer ? CHAT_TRANSCRIPT_OVERSCAN : CHAT_TRANSCRIPT_INITIAL_OVERSCAN,
       });
     }
   }
@@ -135,7 +141,9 @@ export class TranscriptPresentation implements ReactiveController {
   }
 
   hostUpdated(): void {
-    this.prepare();
+    // A detached render can connect at commit. Its full first frame has already
+    // rendered; starting the reduced phase now would shrink a presented range.
+    this.prepare(this.renderedRows && !this.presented);
     const renderedRows = this.renderedRows;
     this.renderedRows = false;
     const element = this.host.scrollElement;
@@ -185,5 +193,9 @@ export class TranscriptPresentation implements ReactiveController {
     }
     this.presented = false;
     this.renderedRows = false;
+    this.virtualizer.setOptions({
+      ...this.virtualizer.options,
+      overscan: CHAT_TRANSCRIPT_OVERSCAN,
+    });
   }
 }
