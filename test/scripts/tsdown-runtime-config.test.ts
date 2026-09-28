@@ -373,20 +373,21 @@ describe("tsdown config", () => {
           ),
         ),
     );
-    const testRoot = new URL("../e2e/", import.meta.url);
-    const clients = readdirSync(testRoot, { recursive: true, encoding: "utf8" }).filter((file) =>
-      file.endsWith("-docker-client.ts"),
-    );
+    const clients = ["test/e2e", "scripts/e2e"].flatMap((root) => {
+      const clientRoot = new URL(`../../${root}/`, import.meta.url);
+      return readdirSync(clientRoot, { recursive: true, encoding: "utf8" })
+        .filter((file) => file.endsWith("-docker-client.ts"))
+        .map((file) => new URL(file, clientRoot));
+    });
     expect(clients.length).toBeGreaterThan(0);
-    for (const client of clients) {
-      const clientUrl = new URL(client, testRoot);
+    for (const clientUrl of clients) {
       const runtimeSource = stripTypeScriptTypes(readFileSync(clientUrl, "utf8"));
       // Include literal paths assigned to variables used by dynamic imports, but not erased types.
       for (const match of runtimeSource.matchAll(
         /["'`]((?:\.{1,2}\/)+dist\/[^"'`\s]+\.[cm]?js)["'`]/gu,
       )) {
         const specifier = expectDefined(match[1], "Docker dist module path");
-        expect(emittedPaths, `${client}: ${specifier}`).toContain(
+        expect(emittedPaths, `${fileURLToPath(clientUrl)}: ${specifier}`).toContain(
           fileURLToPath(new URL(specifier, clientUrl)),
         );
       }
