@@ -150,15 +150,22 @@ describe("SIWC model discovery", () => {
   });
 
   it.each([
-    ["empty", { models: [] }, 200, "ready", false],
-    ["hidden", { models: [{ slug: "fixture-hidden", visibility: "hide" }] }, 200, "ready", false],
-    ["unauthorized", {}, 401, "auth-rejected", false],
-    ["forbidden", {}, 403, "auth-rejected", false],
-    ["unavailable", {}, 503, "unavailable", true],
-    ["wrong shape", { data: [{ id: "fixture-platform" }] }, 200, "unavailable", true],
+    ["empty", { models: [] }, 200, "ready", false, undefined],
+    [
+      "hidden",
+      { models: [{ slug: "fixture-hidden", visibility: "hide" }] },
+      200,
+      "ready",
+      false,
+      undefined,
+    ],
+    ["unauthorized", {}, 401, "auth-rejected", false, undefined],
+    ["forbidden", {}, 403, "auth-rejected", false, "catalog"],
+    ["unavailable", {}, 503, "unavailable", true, undefined],
+    ["wrong shape", { data: [{ id: "fixture-platform" }] }, 200, "unavailable", true, undefined],
   ] as const)(
     "handles a %s SIWC catalog without inventing account access",
-    async (_label, body, status, outcome, fallback) => {
+    async (_label, body, status, outcome, fallback, rejectionScope) => {
       const fetchGuard = vi.fn<LiveModelCatalogFetchGuard>().mockResolvedValue({
         finalUrl: `${OPENAI_API_BASE_URL}/models`,
         response: Response.json(body, { status }),
@@ -181,6 +188,7 @@ describe("SIWC model discovery", () => {
           provider: "openai",
           profileId: "openai:sharing",
           status: outcome,
+          ...(rejectionScope ? { rejectionScope } : {}),
           ...(outcome === "ready" ? { modelOrder: [] } : {}),
         },
       ]);

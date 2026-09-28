@@ -26,6 +26,7 @@ export async function buildTokenSharingCatalog(params: {
   const sharing = auth.authFlow === TOKEN_SHARING_AUTH_FLOW;
   let models = sharing ? params.models.filter((model) => model.api === "openai-responses") : [];
   let status: ProviderCatalogOutcome["status"] = sharing ? "unavailable" : "auth-rejected";
+  let rejectionScope: ProviderCatalogOutcome["rejectionScope"];
   const discoveryApiKey = auth.preparationFailed
     ? undefined
     : (auth.discoveryApiKey ??
@@ -79,6 +80,8 @@ export async function buildTokenSharingCatalog(params: {
       ) {
         models = [];
         status = "auth-rejected";
+        // A catalog 403 does not establish that the inference credential is invalid.
+        rejectionScope = error.status === 403 ? "catalog" : undefined;
       }
       // Temporary discovery failures retain static hints, explicitly unavailable.
     }
@@ -92,6 +95,7 @@ export async function buildTokenSharingCatalog(params: {
         provider: "openai",
         profileId: auth.profileId,
         status,
+        ...(rejectionScope ? { rejectionScope } : {}),
         ...(status === "ready" ? { modelOrder: models.map(({ id }) => id) } : {}),
       },
     ],
