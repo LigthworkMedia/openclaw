@@ -1,3 +1,5 @@
+import { createMeetingRoutingOwnershipSource } from "./status-call-ownership-source.js";
+
 type MeetingStatusCallSourceOptions = {
   captionEnableSource: string;
   captionSettleMs?: number;
@@ -34,32 +36,14 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
   return `  let audioOutputRouted;
   let audioOutputDeviceLabel;
   let audioOutputRouteError;
-  let audioOutputRouteRetryable = false;${withLiveOwnership(`
-  const routingSources = [];
-  const routingBridges = [];
-  const recheckAudioOwnership = () => {
-    if (${options.liveOwnershipSource}) return true;
-    // A session that took over the page now owns this media; undoing our pass would clobber its routing.
-    const replacedBy = window[${meetingGlobal}]?.sessionId;
-    if (canMutateSession && !(replacedBy && replacedBy !== sessionId)) {
-      routingBridges.forEach((entry) => retireAudioBridge(entry, false));
-      retireOwnedAudioBridges();
-      routingSources.forEach((source) => {
-        restoreAudioBridgeSource(source);
-        // A direct sink change can finish after ownership moved; return that exact source's playback.
-        if (bridgeSourceMatches(source.element, source) && source.element.sinkId !== source.sinkId) {
-          (window.__openclawMeetingSinkRestores ||= []).push(source.element.setSinkId(source.sinkId).catch(() => {}));
-        }
-      });
-    }
-    audioOutputRouted = false;
-    audioOutputRouteRetryable = true;
-    notes.push("Call ownership changed during audio routing; stopped this pass.");
-    return false;
-  };
-  // A restore from an earlier ownership loss must land before this pass routes again.
-  if (window.__openclawMeetingSinkRestores?.length) await Promise.allSettled(window.__openclawMeetingSinkRestores.splice(0));
-  audioOutputRouting: {`)}
+  let audioOutputRouteRetryable = false;${
+    options.liveOwnershipSource === undefined
+      ? ""
+      : createMeetingRoutingOwnershipSource({
+          liveOwnershipSource: options.liveOwnershipSource,
+          meetingGlobal,
+        })
+  }
   const remoteCapture = window.__openclawMeetingRemoteAudio;
   if (remoteCapture && remoteCapture.sessionId === sessionId && remoteCapture.isCurrent()) {
     if (canMutateSession) remoteCapture.scan();

@@ -231,6 +231,39 @@ describe("meeting status live ownership", () => {
     expect(secondDone).toBe(true);
   });
 
+  it("makes overlapping passes all wait for an in-flight sink restore", async () => {
+    const fixture = routingFixture();
+    let finishRestore: () => void = () => {};
+    fixture.first.setSinkId.mockImplementation(async function (
+      this: { sinkId: string },
+      sinkId: string,
+    ) {
+      if (sinkId === "physical-out") {
+        await new Promise<void>((resolve) => {
+          finishRestore = resolve;
+        });
+      } else {
+        fixture.loseOwnership();
+      }
+      this.sinkId = sinkId;
+    });
+    await fixture.status();
+    fixture.regainOwnership();
+    const done = [false, false];
+    const passes = [0, 1].map((index) =>
+      fixture.status().then(() => {
+        done[index] = true;
+      }),
+    );
+    for (let tick = 0; tick < 20; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(done).toEqual([false, false]);
+    finishRestore();
+    await Promise.all(passes);
+    expect(done).toEqual([true, true]);
+  });
+
   it("returns a completed direct sink change to its original output when ownership ends", async () => {
     const fixture = routingFixture();
     fixture.first.setSinkId.mockImplementationOnce(async function (
