@@ -63,18 +63,23 @@ describe("Slack huddle URLs", () => {
       expect(normalizeSlackHuddleUrl(input)).toBe(
         "https://app.slack.com/huddle/T0123ABCD/C0123ABCD",
       );
-      expect(normalizeSlackHuddleUrlForReuse(input)).toBe("slack-huddle:C0123ABCD");
+      expect(normalizeSlackHuddleUrlForReuse(input)).toBe("slack-huddle:T0123ABCD:C0123ABCD");
     },
   );
 
-  it("reuses channel identity across workspace-qualified and bare references", () => {
+  it("keeps workspace scope in reuse identity and never matches across workspaces", () => {
     const qualified = "https://app.slack.com/huddle/T0123ABCD/C0123ABCD";
+    const otherWorkspace = "https://app.slack.com/huddle/T9999ABCD/C0123ABCD";
     const bare = "https://app.slack.com/huddle/C0123ABCD";
-    expect(normalizeSlackHuddleUrlForReuse(qualified)).toBe("slack-huddle:C0123ABCD");
+    expect(normalizeSlackHuddleUrlForReuse(qualified)).toBe("slack-huddle:T0123ABCD:C0123ABCD");
     expect(normalizeSlackHuddleUrlForReuse("channel:C0123ABCD")).toBe("slack-huddle:C0123ABCD");
-    expect(isSameSlackHuddleUrl(qualified, bare)).toBe(true);
-    expect(isSameSlackHuddleUrl(qualified, "channel:C9999ABCD")).toBe(false);
-    expect(isRecoverableSlackHuddleTab({ targetId: "tab-1", url: qualified }, bare)).toBe(true);
+    expect(isSameSlackHuddleUrl(qualified, "team:T0123ABCD:channel:C0123ABCD")).toBe(true);
+    expect(isSameSlackHuddleUrl(qualified, otherWorkspace)).toBe(false);
+    expect(isSameSlackHuddleUrl(qualified, bare)).toBe(false);
+    expect(isSameSlackHuddleUrl(bare, "channel:C0123ABCD")).toBe(true);
+    expect(isRecoverableSlackHuddleTab({ targetId: "tab-1", url: qualified }, otherWorkspace)).toBe(
+      false,
+    );
     expect(
       isRecoverableSlackHuddleTab(
         { targetId: "tab-1", url: "https://app.slack.com/client/T0123ABCD/C0123ABCD" },

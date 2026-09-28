@@ -52,9 +52,16 @@ export function normalizeSlackHuddleUrl(input: unknown): string {
   return `https://app.slack.com/huddle/${identity.team ? `${identity.team}/` : ""}${identity.channel}`;
 }
 
+// Channel ids are only workspace-scoped, so team-qualified links keep their team; a bare channel
+// reference stays channel-only and never matches a team-qualified session.
 export function normalizeSlackHuddleUrlForReuse(url: string | undefined): string | undefined {
   const identity = parseSlackHuddleIdentity(url);
-  return identity ? `slack-huddle:${identity.channel}` : undefined;
+  if (!identity) {
+    return undefined;
+  }
+  return identity.team
+    ? `slack-huddle:${identity.team}:${identity.channel}`
+    : `slack-huddle:${identity.channel}`;
 }
 
 export function isSameSlackHuddleUrl(left: string | undefined, right: string | undefined): boolean {

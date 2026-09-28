@@ -201,7 +201,7 @@ export function fixture(params: {
     (params.joined
       ? {
           __openclawSlackHuddle: {
-            identity: "slack-huddle:C0123ABCD",
+            identity: "slack-huddle:T0123ABCD:C0123ABCD",
             sessionId: "session-1",
             joinRequested: true,
           },

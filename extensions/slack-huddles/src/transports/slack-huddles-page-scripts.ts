@@ -12,7 +12,9 @@ import {
 } from "./slack-huddles-status-prejoin-source.js";
 import { normalizeSlackHuddleUrlForReuse } from "./slack-huddles-urls.js";
 
-function pageIdentityFunctionSource(): string {
+function pageIdentityFunctionSource(expectedIdentity: string | undefined): string {
+  // Team-scoped requests need the page's team to match; a page URL without one fails closed.
+  const teamScoped = /^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity ?? "");
   const ownershipHooks = JSON.stringify({
     inHuddle: SLACK_HUDDLE_SELECTORS.channelHeaderInHuddle,
     inCall: SLACK_HUDDLE_SELECTORS.inCall,
@@ -23,10 +25,12 @@ function pageIdentityFunctionSource(): string {
       const url = new URL(rawUrl);
       if (url.protocol !== "https:" || url.port || url.username || url.password ||
           !/^[a-z0-9-]+\\.slack\\.com$/i.test(url.hostname)) return undefined;
-      const match = url.pathname.match(/^\\/huddle\\/(?:[TE][A-Z0-9]{8,}\\/)?([CGD][A-Z0-9]{8,})\\/?$/) ||
-        (url.hostname === "app.slack.com" && url.pathname.match(/^\\/client\\/[TE][A-Z0-9]{8,}\\/([CGD][A-Z0-9]{8,})(?:\\/.*)?$/));
-      const identity = match ? "slack-huddle:" + match[1] : undefined;
-      if (!identity || rawUrl !== location.href) return identity;
+      const match = url.pathname.match(/^\\/huddle\\/(?:([TE][A-Z0-9]{8,})\\/)?([CGD][A-Z0-9]{8,})\\/?$/) ||
+        (url.hostname === "app.slack.com" && url.pathname.match(/^\\/client\\/([TE][A-Z0-9]{8,})\\/([CGD][A-Z0-9]{8,})(?:\\/.*)?$/));
+      if (!match) return undefined;
+      const key = ${teamScoped} ? (match[1] || "unknown-team") + ":" + match[2] : match[2];
+      const identity = "slack-huddle:" + key;
+      if (rawUrl !== location.href) return identity;
       // The URL names only the viewed channel. While a call is live, only Slack's membership header for
       // that channel (or this session's own settling Join) vouches for it; anything else fails closed.
       const hooks = ${ownershipHooks};
@@ -39,7 +43,7 @@ function pageIdentityFunctionSource(): string {
       const captions = window.__openclawSlackHuddleCaptions;
       const captionsActive = Boolean(captions && captions.finalized !== true);
       return captionsActive || (found(hooks.inCall) && !settlingJoin)
-        ? "slack-huddle-unverified:" + match[1]
+        ? "slack-huddle-unverified:" + key
         : identity;
     } catch { return undefined; }
   };`;
@@ -50,7 +54,7 @@ export function slackHuddleAudioCaptureScript(params: MeetingBrowserAudioCapture
     ...params,
     audioOutputsGlobal: "__openclawSlackHuddleAudioOutputs",
     ownershipSource: `
-      ${pageIdentityFunctionSource()}
+      ${pageIdentityFunctionSource(normalizeSlackHuddleUrlForReuse(params.meetingUrl))}
       const expectedIdentity = ${JSON.stringify(normalizeSlackHuddleUrlForReuse(params.meetingUrl))};
       const state = window.__openclawSlackHuddle;
       // Audio never rides on the join-settle exception: Slack's header must show membership.
@@ -78,7 +82,9 @@ export function slackHuddleStatusScript(params: {
     slackHuddleStatusPreludeSource({
       ...params,
       expectedIdentity: normalizeSlackHuddleUrlForReuse(params.meetingUrl),
-      pageIdentitySource: pageIdentityFunctionSource(),
+      pageIdentitySource: pageIdentityFunctionSource(
+        normalizeSlackHuddleUrlForReuse(params.meetingUrl),
+      ),
       selectors: JSON.stringify(SLACK_HUDDLE_SELECTORS),
       toggleStateFunction: `(input) => {
       if (input?.ariaChecked === "true") return "on";
@@ -105,7 +111,7 @@ export function slackHuddleTranscriptScript(
       meeting: "__openclawSlackHuddle",
     },
     meetingSessionId,
-    pageIdentitySource: pageIdentityFunctionSource(),
+    pageIdentitySource: pageIdentityFunctionSource(normalizeSlackHuddleUrlForReuse(meetingUrl)),
     platformDisplayName: "Slack huddle",
   });
 }
@@ -135,7 +141,9 @@ export function slackHuddleLeaveScript(params: {
     leaveInitiated: params.leaveInitiated,
     meetingSessionId: params.meetingSessionId,
     meetingStateSource: "sessionId: expectedSessionId || state?.sessionId,",
-    pageIdentitySource: pageIdentityFunctionSource(),
+    pageIdentitySource: pageIdentityFunctionSource(
+      normalizeSlackHuddleUrlForReuse(params.meetingUrl),
+    ),
     platform: {
       displayName: "Slack huddle",
       globals: {

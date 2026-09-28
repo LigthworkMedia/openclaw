@@ -238,7 +238,10 @@ describe("Slack huddle browser adapter", () => {
     browser.location.href = CLIENT_URL;
     expect(await browser.status()).toMatchObject({ inCall: true });
     expect(browser.window).toMatchObject({
-      __openclawSlackHuddle: { identity: "slack-huddle:C0123ABCD", inCallUrl: CLIENT_URL },
+      __openclawSlackHuddle: {
+        identity: "slack-huddle:T0123ABCD:C0123ABCD",
+        inCallUrl: CLIENT_URL,
+      },
     });
     browser.location.href = "https://app.slack.com/client/T0123ABCD/C9999ABCD";
     expect(await browser.status()).toMatchObject({
@@ -344,6 +347,17 @@ describe("Slack huddle browser adapter", () => {
     expect(camera.clicks).toBe(0);
   });
 
+  it("does not verify a page of another workspace that shows the same channel id", async () => {
+    const { document, marker } = inCall();
+    const result = await fixture({
+      document,
+      currentUrl: "https://app.slack.com/client/T9999ABCD/C0123ABCD",
+      joined: true,
+    }).status({ readOnly: true });
+    expect(result).toMatchObject({ inCall: false });
+    expect(marker.clicks).toBe(0);
+  });
+
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {
     const { document } = inCall(undefined, false, false);
     document.body.append(channelHeader(true));
@@ -359,7 +373,7 @@ describe("Slack huddle browser adapter", () => {
       currentUrl: CLIENT_URL,
       window: {
         __openclawSlackHuddle: {
-          identity: "slack-huddle:C0123ABCD",
+          identity: "slack-huddle:T0123ABCD:C0123ABCD",
           sessionId: "session-1",
           inCallControl: marker,
         },
@@ -440,7 +454,7 @@ describe("Slack huddle browser adapter", () => {
       currentUrl: CLIENT_URL,
       window: {
         __openclawSlackHuddle: {
-          identity: "slack-huddle:C0123ABCD",
+          identity: "slack-huddle:T0123ABCD:C0123ABCD",
           sessionId: "session-1",
           inCallControl: stale,
         },
@@ -565,7 +579,7 @@ describe("Slack huddle browser adapter", () => {
       currentUrl: CLIENT_URL,
       window: {
         __openclawSlackHuddle: {
-          identity: "slack-huddle:C0123ABCD",
+          identity: "slack-huddle:T0123ABCD:C0123ABCD",
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -583,7 +597,7 @@ describe("Slack huddle browser adapter", () => {
       currentUrl: CLIENT_URL,
       window: {
         __openclawSlackHuddle: {
-          identity: "slack-huddle:C0123ABCD",
+          identity: "slack-huddle:T0123ABCD:C0123ABCD",
           sessionId: "session-1",
           inCallControl: marker,
           inCallUrl: CLIENT_URL,
@@ -659,7 +673,7 @@ describe("Slack huddle browser adapter", () => {
       currentUrl: CLIENT_URL,
       window: {
         __openclawSlackHuddle: {
-          identity: "slack-huddle:C0123ABCD",
+          identity: "slack-huddle:T0123ABCD:C0123ABCD",
           sessionId: "session-1",
           joinRequested: true,
           joinRequestedAt: Date.now(),
@@ -802,7 +816,7 @@ it("omits another huddle's title and participants while membership is unverified
     currentUrl: CLIENT_URL,
     window: {
       __openclawSlackHuddle: {
-        identity: "slack-huddle:C0123ABCD",
+        identity: "slack-huddle:T0123ABCD:C0123ABCD",
         sessionId: "session-1",
         joinRequested: true,
         joinRequestedAt: Date.now(),
