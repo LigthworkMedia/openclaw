@@ -631,7 +631,6 @@ openclaw-chat-sidebar-region,
   background: var(--bg);
   font: 500 12px/1.4 var(--font-body, system-ui);
   text-decoration: none;
-  cursor: pointer;
 }
 .plugin-session-header-link:hover {
   background: var(--bg-hover);
