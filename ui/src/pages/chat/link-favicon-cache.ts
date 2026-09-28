@@ -1,4 +1,4 @@
-import type { LinkFaviconFetcher } from "./link-favicon-loader.ts";
+export type LinkFaviconFetcher = (hostname: string, signal: AbortSignal) => Promise<string | null>;
 
 // Retain blob URLs for the page lifetime: header tabs reuse them across renders.
 const caches = new WeakMap<

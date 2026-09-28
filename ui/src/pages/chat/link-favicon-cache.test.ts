@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
-import { readLinkFavicon } from "./link-favicon-cache.ts";
-import type { LinkFaviconFetcher } from "./link-favicon-loader.ts";
+import { readLinkFavicon, type LinkFaviconFetcher } from "./link-favicon-cache.ts";
 
 afterEach(() => {
   vi.useRealTimers();

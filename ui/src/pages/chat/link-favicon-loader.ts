@@ -1,9 +1,7 @@
 import { resolveControlUiAuthCandidates } from "../../app/control-ui-auth.ts";
 import { hasSameOriginGatewayTransport } from "../../dev-gateway.ts";
 import { fetchLinkFaviconBlobUrl } from "../plugins/icon-loader.ts";
-import { readLinkFavicon } from "./link-favicon-cache.ts";
-
-export type LinkFaviconFetcher = (hostname: string, signal: AbortSignal) => Promise<string | null>;
+import { readLinkFavicon, type LinkFaviconFetcher } from "./link-favicon-cache.ts";
 
 let currentFetcher:
   | {
