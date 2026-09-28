@@ -94,6 +94,8 @@ node openclaw.mjs gateway stop
 ```
 
 Keep any profile selector, for example `node openclaw.mjs --profile work gateway stop`.
+In a non-interactive shell (for example SSH without a TTY), `gateway stop` requires
+`--force`: `node openclaw.mjs gateway stop --force`.
 These commands do not rebuild the checkout. If the existing build is missing or
 cannot start, stop the Gateway through its actual supervisor or foreground process
 owner instead. After verifying it is stopped, retry the original source command.
