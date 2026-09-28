@@ -70,11 +70,52 @@ describe("tool activity preparation cache", () => {
       replacement,
     ]);
     expect(prepare).toHaveBeenCalledTimes(2);
+  });
 
-    coalesceToolActivityMessages([]);
+  it("retains interleaved transcripts and replaces only the changed owner's turn", () => {
+    const transcript = (id: string) => [
+      item(
+        { role: "assistant", content: [{ type: "tool_call", id, name: "custom", arguments: {} }] },
+        `call-${id}`,
+      ),
+      item({ role: "toolResult", content: [result(id)] }, `result-${id}`),
+    ];
+    const first = transcript("first-pane");
+    const second = transcript("second-pane");
+    const prepare = vi.spyOn(toolIdentity, "extractToolMessageRefs");
+    const firstOutput = coalesceToolActivityMessages(first);
+    const secondOutput = coalesceToolActivityMessages(second);
+    expect(prepare).toHaveBeenCalledTimes(4);
+
     prepare.mockClear();
-    coalesceToolActivityMessages(initial);
-    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(coalesceToolActivityMessages(first)).toEqual(firstOutput);
+    expect(coalesceToolActivityMessages(second)).toEqual(secondOutput);
+    coalesceToolActivityMessages([]);
+    expect(coalesceToolActivityMessages(first)).toEqual(firstOutput);
+    expect(prepare).not.toHaveBeenCalled();
+
+    const changed = [
+      first[0]!,
+      item(
+        { role: "toolResult", content: [{ ...result("first-pane"), text: "updated" }] },
+        "result-first-pane",
+      ),
+    ];
+    const changedOutput = coalesceToolActivityMessages(changed);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(changedOutput).not.toEqual(firstOutput);
+    prepare.mockClear();
+    expect(coalesceToolActivityMessages(second)).toEqual(secondOutput);
+    expect(coalesceToolActivityMessages(changed)).toEqual(changedOutput);
+    expect(prepare).not.toHaveBeenCalled();
+
+    // The owner retains one current entry, not every historical input variant.
+    expect(coalesceToolActivityMessages(first)).toEqual(firstOutput);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    prepare.mockClear();
+    expect(coalesceToolActivityMessages(second)).toEqual(secondOutput);
+    expect(coalesceToolActivityMessages(first)).toEqual(firstOutput);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("invalidates ordered wrapper inputs and bypasses transient turns", () => {

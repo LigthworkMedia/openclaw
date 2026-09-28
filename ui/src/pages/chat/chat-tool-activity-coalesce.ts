@@ -48,7 +48,8 @@ type Invocation = {
 type CachedBundle = { inputs: unknown[]; message: ProjectedItem["message"] };
 const messagesBySource = new WeakMap<object, Map<string, CachedBundle>>();
 type CachedTurn = { inputs: unknown[]; items: ChatItem[] };
-let previousTurns = new WeakMap<object, CachedTurn>();
+// Interleaved transcript builds share the cache without evicting other owners.
+const turnsByOwner = new WeakMap<object, CachedTurn>();
 
 function resultBlock(card: ToolCard): Record<string, unknown> {
   return {
@@ -494,7 +495,6 @@ function coalesceTurn(items: ChatItem[]): ChatItem[] {
 
 export function coalesceToolActivityMessages(items: ChatItem[]): ChatItem[] {
   const result: ChatItem[] = [];
-  const nextTurns = new WeakMap<object, CachedTurn>();
   const appendTurn = (turn: ChatItem[]) => {
     if (turn.length === 0) {
       return;
@@ -516,13 +516,13 @@ export function coalesceToolActivityMessages(items: ChatItem[]): ChatItem[] {
         inputs.push(...message.content);
       }
     }
-    const cached = previousTurns.get(owner!);
+    const cached = turnsByOwner.get(owner!);
     const entry =
       cached?.inputs.length === inputs.length &&
       inputs.every((input, index) => input === cached.inputs[index])
         ? cached
         : { inputs, items: coalesceTurn(turn).map((item) => ({ ...item })) };
-    nextTurns.set(owner!, entry);
+    turnsByOwner.set(owner!, entry);
     // Grouping annotates wrappers. Neither misses nor hits expose cache storage.
     result.push(...entry.items.map((item) => ({ ...item })));
   };
@@ -537,6 +537,5 @@ export function coalesceToolActivityMessages(items: ChatItem[]): ChatItem[] {
     }
   }
   appendTurn(turn);
-  previousTurns = nextTurns;
   return result;
 }
