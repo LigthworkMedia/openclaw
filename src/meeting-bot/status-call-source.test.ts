@@ -119,6 +119,9 @@ function routingFixture(extraOptions: { afterAudioRoutingSource?: string } = {})
     loseOwnership: () => {
       owned = false;
     },
+    regainOwnership: () => {
+      owned = true;
+    },
     async status() {
       return JSON.parse(
         await runInNewContext(`(${prelude}${createMeetingStatusCallSource(options)})()`, {
@@ -180,6 +183,52 @@ describe("meeting status live ownership", () => {
     await Promise.resolve();
     expect(fixture.first.sinkId).toBe("physical-out");
     expect(fixture.first.muted).toBe(false);
+  });
+
+  it("leaves media alone when another session takes over during routing", async () => {
+    const fixture = routingFixture();
+    fixture.first.setSinkId.mockImplementationOnce(async function (
+      this: { sinkId: string },
+      sinkId: string,
+    ) {
+      this.sinkId = sinkId;
+      fixture.loseOwnership();
+      Object.assign(fixture.window, { __testMeeting: { sessionId: "session-2" } });
+    });
+    expect(await fixture.status()).toMatchObject({ audioOutputRouted: false });
+    expect(fixture.first.sinkId).toBe("virtual-out");
+    expect(fixture.first.muted).toBe(true);
+  });
+
+  it("finishes an earlier sink restore before routing again", async () => {
+    const fixture = routingFixture();
+    let finishRestore: () => void = () => {};
+    fixture.first.setSinkId.mockImplementation(async function (
+      this: { sinkId: string },
+      sinkId: string,
+    ) {
+      if (sinkId === "physical-out") {
+        await new Promise<void>((resolve) => {
+          finishRestore = resolve;
+        });
+      } else {
+        fixture.loseOwnership();
+      }
+      this.sinkId = sinkId;
+    });
+    await fixture.status();
+    fixture.regainOwnership();
+    let secondDone = false;
+    const second = fixture.status().then(() => {
+      secondDone = true;
+    });
+    for (let tick = 0; tick < 20; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(secondDone).toBe(false);
+    finishRestore();
+    await second;
+    expect(secondDone).toBe(true);
   });
 
   it("returns a completed direct sink change to its original output when ownership ends", async () => {
