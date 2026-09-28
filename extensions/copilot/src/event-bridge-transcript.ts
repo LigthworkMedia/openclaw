@@ -6,6 +6,7 @@ import {
   asNonArrayRecord,
   readNonEmptyStringPreservingWhitespace as readNonEmptyString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { AttemptTranscriptJournal } from "./attempt-transcript-journal.js";
 import { buildCopilotAssistantUsage, type CopilotUsageSnapshot } from "./usage-bridge.js";
 
 export type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
@@ -23,27 +24,14 @@ export type AssistantProjectionGroup = {
   chunks: AssistantProjectionChunk[];
 };
 
-export interface AttemptTranscriptJournalProjection {
-  markReplayIncomplete(): void;
-  recordAssistantProjectionGap(): void;
-  recordAssistant(input: {
-    eventId: string;
-    message: AssistantMessage;
-    replayIncomplete?: boolean;
-    toolCallIds: string[];
-  }): void;
-  recordSdkUser(input: {
-    autopilotContinuation: boolean;
-    eventId: string;
-    message: Extract<AgentMessage, { role: "user" }>;
-    replayIncomplete?: boolean;
-  }): void;
-  recordToolResult(input: {
-    eventId: string;
-    message: Extract<AgentMessage, { role: "toolResult" }>;
-    replayIncomplete?: boolean;
-  }): void;
-}
+export type AttemptTranscriptJournalProjection = Pick<
+  AttemptTranscriptJournal,
+  | "markReplayIncomplete"
+  | "recordAssistantProjectionGap"
+  | "recordAssistant"
+  | "recordSdkUser"
+  | "recordToolResult"
+>;
 
 export function buildAssistantMessage(params: {
   assistantTexts: string[];
