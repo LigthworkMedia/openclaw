@@ -5189,6 +5189,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       .filter((file) => !isCiProofTestFile(file))
       .slice(0, 96);
     expect(selected).toHaveLength(96);
+    vi.spyOn(testTimings, "readToolingFileTimings").mockReturnValue({});
     vi.spyOn(shardMetadata, "estimateVitestToolingFileSeconds").mockReturnValue(20_000);
     // Every selected file is now indivisible above the admission cap. Overflow
     // must retain these 96 files without adding unrelated dist owners or the full suite.
@@ -7762,14 +7763,17 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
           expect(policies(serial, beforeInherited)).toEqual(policies(before, beforeInherited)),
         ).toThrow();
         const promoted = structuredClone(before);
+        const isInheritedHostedGroup = (group: Group) =>
+          group.timing_key !== undefined &&
+          parseCompactSplitTimingKey(group.timing_key) !== undefined &&
+          beforeInherited.has(group.shard_name);
         const recipient = expectDefined(
           promoted.find(
             (job) =>
               job.planConcurrency === 2 &&
               job.groups.some(
                 (group) =>
-                  group.timing_key &&
-                  parseCompactSplitTimingKey(group.timing_key) &&
+                  isInheritedHostedGroup(group) &&
                   group.env?.OPENCLAW_VITEST_MAX_WORKERS === undefined,
               ) &&
               job.groups.every(
@@ -7807,12 +7811,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
           group.env = { OPENCLAW_VITEST_MAX_WORKERS: "2", ...group.env };
         }
         const hosted = expectDefined(
-          recipient.groups.find(
-            (group) =>
-              group.timing_key &&
-              parseCompactSplitTimingKey(group.timing_key) &&
-              beforeInherited.has(group.shard_name),
-          ),
+          recipient.groups.find(isInheritedHostedGroup),
           "hosted recipient group",
         );
         const original = expectDefined(
