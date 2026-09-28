@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { agentVitestProjectOwners } from "../../test/vitest/vitest.agents-paths.mjs";
+import { databaseWorkerCoreTestFiles } from "../../test/vitest/vitest.database-worker-core-paths.mjs";
 import {
   matchesVitestCliSelection,
   matchesVitestGlob,
@@ -93,8 +94,23 @@ const nativeCompilerTestFiles = [
 // The canonical inventories continue to own all other membership.
 const runtimePartitions = new Map<
   string,
-  { files: (cwd: string) => string[]; nodeRequired: ReadonlySet<string>; includeAfterShard?: true }
+  {
+    files: (cwd: string) => string[];
+    nodeRequired: ReadonlySet<string> | ((file: string) => boolean);
+    includeAfterShard?: true;
+  }
 >([
+  [
+    "test/vitest/vitest.process.config.ts",
+    {
+      files: (cwd) =>
+        globSync("src/process/**/*.test.ts", { cwd, exclude: databaseWorkerCoreTestFiles })
+          .map((file) => file.replaceAll("\\", "/"))
+          .toSorted(),
+      // Only this native-Bun contract is qualified; process siblings retain Node.
+      nodeRequired: (file) => file !== "src/process/terminal-pty-bun.test.ts",
+    },
+  ],
   [
     unitFastConfig,
     {
@@ -143,6 +159,15 @@ const runtimePartitions = new Map<
     },
   ],
 ]);
+
+function partitionRequiresNode(
+  partition: { nodeRequired: ReadonlySet<string> | ((file: string) => boolean) },
+  file: string,
+): boolean {
+  return typeof partition.nodeRequired === "function"
+    ? partition.nodeRequired(file)
+    : partition.nodeRequired.has(file);
+}
 
 function unitFastFiles(): string[] {
   const otherOwners = new Set([...getUnitFastTimerTestFiles(), ...getUnitFastIsolatedTestFiles()]);
@@ -307,7 +332,9 @@ export function resolveCiTestRuntimeSelections(
     }
     const files = new Set(partition.files(cwd));
     if (
-      !selection.targets.every((target) => files.has(target) && !partition.nodeRequired.has(target))
+      !selection.targets.every(
+        (target) => files.has(target) && !partitionRequiresNode(partition, target),
+      )
     ) {
       return node;
     }
@@ -383,11 +410,11 @@ export function resolveCiTestRuntimeSelections(
         ? requested.has(file)
         : selection.includePatterns.some((pattern) => matchesVitestGlob(file, pattern))),
   );
-  const bunFiles = files.filter((file) => !partition.nodeRequired.has(file));
+  const bunFiles = files.filter((file) => !partitionRequiresNode(partition, file));
   if (!bunFiles.length) {
     return node;
   }
-  const nodeFiles = files.filter((file) => partition.nodeRequired.has(file));
+  const nodeFiles = files.filter((file) => partitionRequiresNode(partition, file));
   // Ordinary CI passes no extra Vitest argv. Collection, filters and overrides
   // keep Vitest's interpretation rather than silently changing native semantics.
   const nativeFiles =
