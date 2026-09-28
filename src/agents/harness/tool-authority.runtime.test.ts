@@ -15,6 +15,7 @@ import {
 import { rotateAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
 import {
+  createAdmittedRunOperatorAuthority,
   createOperationalRunInstanceRef,
   prepareAgentRunAdmission,
 } from "../admitted-run-context.js";
@@ -69,10 +70,12 @@ async function admitted<T>(
     admittedRunContext: Awaited<ReturnType<ReturnType<typeof prepareAgentRunAdmission>["admit"]>>;
     close: () => void;
   }) => Promise<T>,
+  operatorAuthority?: ReturnType<typeof createAdmittedRunOperatorAuthority>,
 ) {
   const admission = prepareAgentRunAdmission({
     cfg: {},
     operationalRunInstance: createOperationalRunInstanceRef(attempt.runId),
+    operatorAuthority,
     facts: {
       agentId: "main",
       runId: attempt.runId,
@@ -146,6 +149,26 @@ afterEach(() => {
 });
 
 describe("host-prepared embedded tool authority", () => {
+  it("carries the admitted operator into the embedded run caller scope", async () => {
+    const operatorAuthority = createAdmittedRunOperatorAuthority({
+      profileId: "synthetic-operator",
+      scopes: ["operator.write"],
+      assertCurrent: () => {},
+    });
+    await admitted(
+      async ({ admittedRunContext }) =>
+        await withPreparedEmbeddedRunToolAuthority(
+          { admittedRunContext },
+          attempt,
+          undefined,
+          async () => {
+            expect(getGatewayToolCallerIdentity()?.operatorAuthority).toBe(operatorAuthority);
+          },
+        ),
+      operatorAuthority,
+    );
+  });
+
   it.each([
     { change: "trace-only", outcome: { status: "accepted" } },
     { change: "permissions", outcome: { status: "rejected", reason: "tool_authority_mismatch" } },
