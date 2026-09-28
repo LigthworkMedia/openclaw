@@ -588,9 +588,7 @@ export async function maybeSpawnVisibleSession(params: {
       };
     }
     const runId = response.runId?.trim();
-    const runError = response.runError
-      ? summarizeSessionsSpawnError(response.runError)
-      : "Visible session run failed";
+    const runError = summarizeSessionsSpawnError(response.runError || "Visible session run failed");
     if (!childSessionKey) {
       return {
         status: "error",

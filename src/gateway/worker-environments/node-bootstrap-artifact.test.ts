@@ -26,6 +26,20 @@ describe("node bootstrap distribution", () => {
   it("preserves an installed bundled dependency's runtime layout and assets", async () => {
     const { root, packageRoot, provider } = await fixture();
     const browserRoot = await writeBundledBrowser(packageRoot);
+    await write(
+      browserRoot,
+      "build/src/index.js",
+      'import notice from "./common/index.cjs"; export { notice };',
+    );
+    await write(browserRoot, "build/src/common/package.json", { type: "commonjs" });
+    await write(
+      browserRoot,
+      "build/src/common/index.cjs",
+      'module.exports = require("./notice") + require("./suffix");',
+    );
+    await write(browserRoot, "build/src/common/notice.js", 'module.exports = "bundled-";');
+    await write(browserRoot, "build/src/common/suffix/package.json", { main: "lib" });
+    await write(browserRoot, "build/src/common/suffix/lib/index.js", 'module.exports = "notice";');
     await write(browserRoot, ".env", "FAKE_PRIVATE_VALUE=do-not-transfer");
     await write(root, "nested-native/host-native", "do-not-transfer-native");
     await fs.symlink(
@@ -465,15 +479,19 @@ describe("node bootstrap distribution", () => {
     }
   });
 
-  it.each(["plugin", "private runtime", "bundled runtime"])(
+  it.each(["plugin", "private runtime", "bundled runtime", "bundled CommonJS"])(
     "rejects an incomplete %s import closure before publishing the artifact",
     async (owner) => {
       const { packageRoot, provider } = await fixture();
       if (owner === "plugin") {
         await fs.rm(path.join(packageRoot, "dist/shared.js"));
-      } else if (owner === "bundled runtime") {
+      } else if (owner === "bundled runtime" || owner === "bundled CommonJS") {
         const browserRoot = await writeBundledBrowser(packageRoot);
-        await write(browserRoot, "build/src/transport.js", 'import "./missing.js";');
+        await write(
+          browserRoot,
+          "build/src/transport.js",
+          owner === "bundled CommonJS" ? 'require("./missing");' : 'import "./missing.js";',
+        );
         await fs.appendFile(
           path.join(browserRoot, "build/src/index.js"),
           'import "./transport.js";',

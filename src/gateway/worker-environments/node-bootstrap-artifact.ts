@@ -490,6 +490,7 @@ async function prepareNodeBootstrapArtifact(
   // Observe output errors immediately, but join the pipeline after in-flight reads drain.
   void archiveDone.catch(() => undefined);
   const manifest: WorkerBundleHashEntry[] = [];
+  const packageManifests = new Map<string, string>();
   try {
     // One batch holds at most 16 source buffers under the existing expanded-byte budget.
     // Pack's jobs limit does not bound ReadEntry input, so consume each output entry below.
@@ -511,6 +512,11 @@ async function prepareNodeBootstrapArtifact(
         const [relative, entry] = batch[index]!;
         const { contents, mode } = read.results[index]!;
         const importerPath = relative.slice(entry.scope.prefix.length);
+        // Resolve directory imports from the exact bounded bytes sent to this archive, not
+        // a later filesystem read. JavaScript buffers still drain with each batch.
+        if (path.posix.basename(relative) === "package.json") {
+          packageManifests.set(relative, contents.toString("utf8"));
+        }
         const identity = {
           path: `package/${relative}`,
           size: contents.byteLength,
@@ -557,7 +563,16 @@ async function prepareNodeBootstrapArtifact(
             files: new Set(scope.files),
             sha256: (file) => scope.patchedMcp?.hashes.get(file),
           })
-        : collectPackageDistImportErrors(scope);
+        : collectPackageDistImportErrors({
+            ...scope,
+            readText: (relative) => {
+              const text = packageManifests.get(`${scope.prefix}${relative}`);
+              if (text === undefined) {
+                throw new Error(`Missing packaged import metadata: ${scope.prefix}${relative}`);
+              }
+              return text;
+            },
+          });
       if (errors.length > 0) {
         throw new Error(
           `Node distribution ${scope.label} ${scope.patchedMcp ? "has an invalid patched dependency" : "has an incomplete built import closure"}; rebuild and restart the Gateway: ${errors.slice(0, 5).join("; ")}`,

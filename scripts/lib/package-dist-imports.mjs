@@ -26,7 +26,7 @@ function literal(node) {
 
 function appendImportEdges(source, importerPath, imports) {
   function visit(node) {
-    let kind;
+    let kind = "import";
     let specifier;
     if (
       ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)
@@ -39,6 +39,7 @@ function appendImportEdges(source, importerPath, imports) {
       node.callee.type === "Identifier" &&
       node.callee.name === "require"
     ) {
+      kind = "require";
       specifier = literal(node.arguments[0]);
     } else if (
       node.type === "NewExpression" &&
@@ -65,7 +66,10 @@ function appendImportEdges(source, importerPath, imports) {
       (kind !== "import-meta-url" || hasJavaScriptFileExtension(specifier))
     ) {
       const importedPath = path.posix.normalize(
-        path.posix.join(path.posix.dirname(importerPath), stripSpecifierSuffix(specifier)),
+        path.posix.join(
+          path.posix.dirname(importerPath),
+          kind === "require" ? specifier : stripSpecifierSuffix(specifier),
+        ),
       );
       // stageManagedHandoffRuntime copies this entry and stages its private Koffi
       // closure before launch; this URL belongs to that runtime, not the tarball.
@@ -74,7 +78,12 @@ function appendImportEdges(source, importerPath, imports) {
         importerPath === "dist/managed-handoff-runtime.mjs" &&
         importedPath === "dist/node_modules/koffi/indirect.cjs";
       if (!stagedNativeUrl && (kind !== "import-meta-url" || importedPath.startsWith("dist/"))) {
-        imports.push({ importerPath, importedPath });
+        imports.push({
+          importerPath,
+          importedPath,
+          kind,
+          ...(kind === "require" ? { specifier } : {}),
+        });
       }
     }
     for (const value of Object.values(node)) {
@@ -103,6 +112,50 @@ function appendImportEdges(source, importerPath, imports) {
   );
 }
 
+function isPackagePath(value) {
+  return !path.posix.isAbsolute(value) && value !== ".." && !value.startsWith("../");
+}
+
+// Node's default LOAD_AS_FILE / LOAD_AS_DIRECTORY rules, but only over archive entries.
+// Host require.resolve() could accept omitted files or leave this package's inventory.
+function resolveCommonJsImport(edge, fileSet, readText) {
+  const target = edge.importedPath.replace(/\/$/u, "");
+  if (!isPackagePath(target)) {
+    return undefined;
+  }
+  const extensions = [".js", ".json", ".node"];
+  const loadExtensions = (base) =>
+    extensions.map((ext) => base + ext).find((file) => fileSet.has(file));
+  const loadFile = (base) => (fileSet.has(base) ? base : loadExtensions(base));
+  // A trailing slash or dot segment forces directory loading even when X.js exists.
+  if (!/(?:\/|(?:^|\/)\.{1,2})$/u.test(edge.specifier)) {
+    const file = loadFile(target);
+    if (file) {
+      return file;
+    }
+  }
+  const manifestPath = path.posix.join(target, "package.json");
+  if (fileSet.has(manifestPath)) {
+    if (!readText) {
+      throw new Error(`CommonJS import validation requires packaged metadata: ${manifestPath}`);
+    }
+    const manifest = JSON.parse(readText(manifestPath));
+    const main = manifest?.main;
+    if (typeof main === "string" && main) {
+      const entry = path.posix.join(target, main).replace(/\/$/u, "");
+      if (path.posix.isAbsolute(main) || !isPackagePath(entry)) {
+        return undefined;
+      }
+      const file = loadFile(entry) ?? loadExtensions(path.posix.join(entry, "index"));
+      if (file) {
+        return file;
+      }
+    }
+  }
+  // Node retains the directory index fallback even for an invalid/missing main target.
+  return loadExtensions(path.posix.join(target, "index"));
+}
+
 /** Collect missing-file errors for relative imports inside package files. */
 export function collectPackageDistImportErrors(params) {
   const files = [...new Set(params.files.map(normalizePackagePath))];
@@ -110,8 +163,13 @@ export function collectPackageDistImportErrors(params) {
   const errors = [];
   const imports = params.imports ?? collectPackageDistImports({ files, readText: params.readText });
 
-  for (const { importerPath, importedPath } of imports) {
-    if (!fileSet.has(importedPath)) {
+  for (const edge of imports) {
+    const { importerPath, importedPath } = edge;
+    const resolved =
+      edge.kind === "require"
+        ? resolveCommonJsImport(edge, fileSet, params.readText)
+        : fileSet.has(importedPath);
+    if (!resolved) {
       errors.push(`${importerPath} imports missing ${importedPath}`);
     }
   }

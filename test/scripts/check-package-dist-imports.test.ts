@@ -1,8 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { collectPackageDistImports } from "../../scripts/lib/package-dist-imports.mjs";
+import {
+  collectPackageDistImportErrors,
+  collectPackageDistImports,
+} from "../../scripts/lib/package-dist-imports.mjs";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const CHECK_SCRIPT = "scripts/check-package-dist-imports.mjs";
@@ -53,7 +57,14 @@ describe("collectPackageDistImports", () => {
     ].join("\n");
     expect(
       collectPackageDistImports({ files: ["dist/index.cjs"], readText: () => source }),
-    ).toEqual([{ importerPath: "dist/index.cjs", importedPath: "dist/leaf.cjs" }]);
+    ).toEqual([
+      {
+        importerPath: "dist/index.cjs",
+        importedPath: "dist/leaf.cjs",
+        kind: "require",
+        specifier: "./leaf.cjs",
+      },
+    ]);
     expect(() =>
       collectPackageDistImports({
         files: ["dist/index.cjs"],
@@ -93,6 +104,9 @@ describe("collectPackageDistImports", () => {
       ["value.js", "exports.js", "dynamic.js", "common.cjs", "worker.mjs"].map((name) => ({
         importerPath: "dist/index.js",
         importedPath: `dist/${name}`,
+        kind:
+          name === "common.cjs" ? "require" : name === "worker.mjs" ? "import-meta-url" : "import",
+        specifier: name === "common.cjs" ? "./common.cjs" : undefined,
       })),
     );
   });
@@ -112,13 +126,25 @@ describe("collectPackageDistImports", () => {
         files: [importerPath],
         readText: () => source,
       });
-      const expectedNativeEdges = importerPath === "dist/managed-handoff-runtime.mjs" ? 4 : 5;
+      const kinds = [
+        ...(importerPath === "dist/managed-handoff-runtime.mjs" ? [] : ["import-meta-url"]),
+        "import",
+        "import",
+        "import",
+        "require",
+      ];
       expect(imports).toEqual([
-        ...Array.from({ length: expectedNativeEdges }, () => ({
+        ...kinds.map((kind) => ({
           importerPath,
           importedPath: "dist/node_modules/koffi/indirect.cjs",
+          kind,
+          specifier: kind === "require" ? stagedPath : undefined,
         })),
-        { importerPath, importedPath: "dist/node_modules/koffi/other.cjs" },
+        {
+          importerPath,
+          importedPath: "dist/node_modules/koffi/other.cjs",
+          kind: "import-meta-url",
+        },
       ]);
     }
   });
@@ -139,8 +165,161 @@ describe("collectPackageDistImports", () => {
       ["dist/data.json", "outside.cjs", "dist/worker.mjs"].map((importedPath) => ({
         importerPath: "dist/index.mjs",
         importedPath,
+        kind:
+          importedPath === "outside.cjs"
+            ? "require"
+            : importedPath === "dist/worker.mjs"
+              ? "import-meta-url"
+              : "import",
+        specifier: importedPath === "outside.cjs" ? "../outside.cjs" : undefined,
       })),
     );
+  });
+});
+
+describe("collectPackageDistImportErrors", () => {
+  it("uses CommonJS file and directory resolution without relaxing ESM imports", () => {
+    const sources: Record<string, string> = {
+      "index.cjs": [
+        'require("./leaf");',
+        'require("./data");',
+        'require("./native");',
+        'require("./directory");',
+        'require("./directory/");',
+        'require("./main-file");',
+        'require("./main-directory");',
+        'require("./legacy-main");',
+        'require("./literal?query");',
+      ].join("\n"),
+      "leaf.js": "",
+      "data.json": "{}",
+      "native.node": "",
+      "directory/index.js": "",
+      "main-file/package.json": '{"main":"entry"}',
+      "main-file/entry.json": "{}",
+      "main-directory/package.json": '{"main":"lib"}',
+      "main-directory/lib/index.js": "",
+      "legacy-main/package.json": '{"main":"missing"}',
+      "legacy-main/index.json": "{}",
+      "literal?query.js": "",
+    };
+    const files = Object.keys(sources);
+    const readText = (file: string) => sources[file]!;
+    expect(collectPackageDistImportErrors({ files, readText })).toEqual([]);
+    // The streaming bootstrap validates the same collected edges after source buffers drain.
+    const imports = collectPackageDistImports({ files, readText });
+    expect(collectPackageDistImportErrors({ files, imports, readText })).toEqual([]);
+    sources["index.cjs"] = [
+      'require("./missing");',
+      'require("./leaf/");',
+      'require("./only-mjs");',
+      'require("./only-cjs");',
+      'require("./data?query");',
+      'import("./leaf");',
+      'import("./directory");',
+    ].join("\n");
+    sources["only-mjs.mjs"] = "";
+    sources["only-cjs.cjs"] = "";
+    expect(collectPackageDistImportErrors({ files: Object.keys(sources), readText })).toEqual(
+      ["missing", "leaf/", "only-mjs", "only-cjs", "data?query", "leaf", "directory"].map(
+        (target) => `index.cjs imports missing ${target}`,
+      ),
+    );
+  });
+
+  it("matches native CommonJS resolution for packaged directory entry points", () => {
+    const root = tempDirs.make("openclaw-package-commonjs-");
+    const sources: Record<string, string> = {
+      "index.cjs": "",
+      "index.js": "",
+      exact: "",
+      "directory/index.node": "",
+      "directory.js": "",
+      "main-file/package.json": '{"main":"entry.js"}',
+      "main-file/entry.js": "",
+      "main-trailing/package.json": '{"main":"entry/"}',
+      "main-trailing/entry.js": "",
+      "main-parent/package.json": '{"main":"../exact"}',
+      "main-dot/package.json": '{"main":"."}',
+      "main-dot/index.json": "{}",
+      "non-string/package.json": '{"main":42}',
+      "non-string/index.js": "",
+      "nested-main/package.json": '{"main":"nested"}',
+      "nested-main/nested/package.json": '{"main":"entry.js"}',
+      "nested-main/nested/entry.js": "",
+      "malformed/package.json": "malformed",
+      "malformed/index.js": "",
+    };
+    // Extension probing must win before reading a same-named directory's metadata.
+    sources["preferred.js"] = "";
+    sources["preferred/package.json"] = "malformed";
+    for (const [relative, contents] of Object.entries(sources)) {
+      mkdirSync(join(root, relative, ".."), { recursive: true });
+      writeFileSync(join(root, relative), contents);
+    }
+    const resolve = createRequire(join(root, "index.cjs")).resolve;
+    for (const specifier of [
+      ".",
+      "./",
+      "./exact",
+      "./preferred",
+      "./directory",
+      "./directory/",
+      "./directory/.",
+      "./main-file",
+      "./main-trailing",
+      "./main-parent",
+      "./main-dot",
+      "./non-string",
+      "./nested-main",
+      "./malformed",
+    ]) {
+      let resolvable = false;
+      try {
+        resolve(specifier);
+        resolvable = true;
+      } catch {
+        /* Native missing/invalid-package failures must remain rejected. */
+      }
+      const imports = collectPackageDistImports({
+        files: ["index.cjs"],
+        readText: () => `require(${JSON.stringify(specifier)});`,
+      });
+      let errors: string[];
+      try {
+        errors = collectPackageDistImportErrors({
+          files: Object.keys(sources),
+          imports,
+          readText: (file) => sources[file]!,
+        });
+      } catch {
+        errors = ["invalid metadata"];
+      }
+      expect(errors.length === 0, specifier).toBe(resolvable);
+    }
+  });
+
+  it("does not read or resolve files outside the packaged inventory", () => {
+    const sources: Record<string, string> = {
+      "index.cjs": 'require("./directory"); require("../outside");',
+      "directory/package.json": '{"main":"../../outside"}',
+      "outside.js": "",
+    };
+    const readText = vi.fn((file: string) => sources[file]!);
+    expect(collectPackageDistImportErrors({ files: Object.keys(sources), readText })).toEqual([
+      "index.cjs imports missing directory",
+      "index.cjs imports missing ../outside",
+    ]);
+    expect(readText.mock.calls.every(([file]) => Object.hasOwn(sources, file))).toBe(true);
+    sources["directory/package.json"] = '{"main":"omitted"}';
+    sources["directory/omitted.js"] = "";
+    expect(
+      collectPackageDistImportErrors({
+        files: ["index.cjs", "directory/package.json"],
+        readText,
+      }),
+    ).toEqual(["index.cjs imports missing directory", "index.cjs imports missing ../outside"]);
+    expect(readText).not.toHaveBeenCalledWith("directory/omitted.js");
   });
 });
 

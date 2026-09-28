@@ -769,6 +769,7 @@ console.log("relocated Bash parser works without native grammar package");
       const sealedAnchorEdge = {
         importerPath: `dist/${relay}.${extension}`,
         importedPath: `dist/${anchor}.mjs`,
+        kind: "import-meta-url",
       };
       if (worker) {
         expect(imports).toContainEqual(sealedAnchorEdge);
