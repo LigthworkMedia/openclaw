@@ -284,6 +284,7 @@ it("keeps session modes scoped while trace changes and delivery stays process-ow
     );
     const targetOutput = targetRows.join("\n");
     expect(targetOutput).toContain("deliver:on");
+    expect(targetOutput).not.toContain(" | fast | ");
     expect(targetOutput).not.toContain("fast:auto");
     expect(targetOutput).not.toContain("verbose full");
     expect(targetOutput).not.toContain("trace:raw");
