@@ -424,7 +424,7 @@ export function resolveMessageGroupSenderLabel(
   return normalizedRole === "user"
     ? isOwnSenderGroup(group, opts.userId)
       ? resolvedUserName
-      : (userLabel ?? resolvedUserName)
+      : (userLabel ?? t("sessionsView.user"))
     : normalizedRole === "assistant"
       ? (userLabel ?? opts.assistantName ?? "Assistant")
       : normalizedRole === "tool"
@@ -469,16 +469,15 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
   const normalizedRole = normalizeRoleForGrouping(group.role);
   const sourceOnly = isSourceOnlyUserGroup(group);
   const assistantName = opts.assistantName ?? "Assistant";
+  const isOwnGroup = isOwnSenderGroup(group, opts.userId);
   const isPeerGroup =
-    normalizedRole === "user" &&
-    Boolean(opts.userId && group.sender) &&
-    !isOwnSenderGroup(group, opts.userId);
+    normalizedRole === "user" && Boolean(opts.userId && group.sender) && !isOwnGroup;
   const forwardedSource = hasForwardedSource(group);
   const isForwarded = normalizedRole === "assistant" && forwardedSource;
   const showSenderName =
     !isForwarded &&
     !sourceOnly &&
-    (normalizedRole !== "user" || isPeerGroup || opts.showOwnSenderName !== false);
+    (normalizedRole !== "user" || !isOwnGroup || opts.showOwnSenderName !== false);
   const visibleSources = group.sourceClients?.filter(
     (source) => gatewayClientKind(source) !== "web",
   );
@@ -582,7 +581,10 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
               avatar: opts.assistantAvatar ?? null,
               textAvatar: opts.assistantTextAvatar,
             },
-            { name: opts.userName ?? null, avatar: opts.userAvatar ?? null },
+            // Missing historical attribution is not evidence that the viewer sent it.
+            isOwnGroup
+              ? { name: opts.userName ?? null, avatar: opts.userAvatar ?? null }
+              : undefined,
             group.sender,
           )
       : nothing;

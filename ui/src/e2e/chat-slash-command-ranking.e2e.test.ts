@@ -96,7 +96,7 @@ suite.define(() => {
       }
       const markdown = await text(stream);
       expect(markdown).toContain("# Chat with OpenClaw");
-      expect(markdown).toContain("## You");
+      expect(markdown).toContain("## User");
       expect(markdown).toContain(question);
       expect(markdown).toContain("## OpenClaw");
       expect(markdown).toContain(answer);
