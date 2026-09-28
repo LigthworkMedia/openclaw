@@ -165,9 +165,9 @@ export function qaNode(qa: string, text = "", tag = "button"): PageNode {
   return new PageNode(tag, { "data-qa": qa }, text);
 }
 
-export function microphone(on: boolean, preview = false): PageNode {
+export function microphone(on: boolean, inPreview = false): PageNode {
   const node = new PageNode("button", {
-    "data-qa": preview ? "huddle_join_preview_mic_button" : "huddle_sidebar_footer_mute_button",
+    "data-qa": inPreview ? "huddle_join_preview_mic_button" : "huddle_sidebar_footer_mute_button",
     role: "switch",
     "aria-label": "Microphone",
     "aria-checked": String(on),
@@ -310,4 +310,35 @@ export function fixture(params: {
       return JSON.parse(runInNewContext(`(${source})()`, sandbox)) as Record<string, unknown>;
     },
   };
+}
+
+export function preview(label: string, micOn = false, fallback = false) {
+  const join = fallback
+    ? new PageNode("button", {}, label)
+    : qaNode("huddle_join_preview_modal_go", label);
+  const mic = microphone(micOn, true);
+  const modal = qaNode("huddle_join_preview_modal", "", "div").append(mic, join);
+  return { document: page(modal), join, mic };
+}
+
+/** An in-call page; `member` renders Slack's header proof that this device is in the channel's huddle. */
+export function inCall(
+  marker = qaNode("huddle_toolbar__leave_button", "Leave Huddle"),
+  micOn = false,
+  member = true,
+) {
+  const mic = microphone(micOn);
+  const nodes = member ? [marker, mic, channelHeader(true)] : [marker, mic];
+  return { document: page(...nodes), marker, mic };
+}
+
+export function channelHeader(inHuddle: boolean) {
+  const classes = ["p-huddle_channel_header_button__container"];
+  if (inHuddle) {
+    classes.push("p-huddle_channel_header_button--in_huddle");
+  }
+  return new PageNode("div", {
+    class: classes.join(" "),
+    "data-qa": "huddle_channel_header_button",
+  });
 }
