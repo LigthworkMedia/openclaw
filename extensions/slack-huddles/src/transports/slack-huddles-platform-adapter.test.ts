@@ -451,6 +451,23 @@ describe("Slack huddle browser adapter", () => {
     });
   });
 
+  it("binds a channel-only session admitted without a settling Join", async () => {
+    const { document } = inCall();
+    const browser = fixture({
+      document,
+      currentUrl: CLIENT_URL,
+      window: {
+        __openclawSlackHuddle: { identity: "slack-huddle:C0123ABCD", sessionId: "session-1" },
+      },
+    });
+    expect(await browser.status({ url: "https://app.slack.com/huddle/C0123ABCD" })).toMatchObject({
+      inCall: true,
+    });
+    expect(browser.window).toMatchObject({
+      __openclawSlackHuddleWorkspaces: { "slack-huddle:C0123ABCD": "T0123ABCD" },
+    });
+  });
+
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {
     const { document } = inCall(undefined, false, false);
     document.body.append(channelHeader(true));

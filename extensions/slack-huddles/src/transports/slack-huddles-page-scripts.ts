@@ -40,10 +40,6 @@ function pageIdentityFunctionSource(expectedIdentity: string | undefined): strin
       const marker = window.__openclawSlackHuddle;
       const settlingJoin = marker?.identity === identity && marker.joinRequested === true &&
         Date.now() - (marker.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
-      // An unbound channel-only session cannot tell workspaces apart while a call is live.
-      if (!${teamScoped} && !boundWorkspace && found(hooks.inCall) && !settlingJoin) {
-        return "slack-huddle-unverified:" + key;
-      }
       if (found(hooks.inHuddle)) return identity;
       // Live captions always need membership; a live call without it passes only while our Join settles.
       const captions = window.__openclawSlackHuddleCaptions;

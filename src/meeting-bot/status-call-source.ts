@@ -334,7 +334,12 @@ export function createMeetingStatusCallSource(options: MeetingStatusCallSourceOp
     audioOutputRouted = false;
     if (canMutateSession) retireOwnedAudioBridges();
   }
-${withLiveOwnership("  }\n")}${options.afterAudioRoutingSource ? `  ${options.afterAudioRoutingSource}\n` : ""}  let captioning = false;
+${withLiveOwnership("  }\n")}${
+    options.afterAudioRoutingSource
+      ? // The hook may await; recheck ownership after it so this pass's routing still rolls back.
+        `  ${options.afterAudioRoutingSource}\n${withLiveOwnership("  recheckAudioOwnership();\n")}`
+      : ""
+  }  let captioning = false;
   let captionsEnabledAttempted = false;
   let transcriptLines = 0;
   let lastCaptionAt;

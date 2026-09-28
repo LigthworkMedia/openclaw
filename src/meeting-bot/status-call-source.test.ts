@@ -15,7 +15,7 @@ const platform = {
   manualActionReasonPrefix: "test",
 };
 
-function routingFixture() {
+function routingFixture(extraOptions: { afterAudioRoutingSource?: string } = {}) {
   let owned = true;
   const effectsAfterLoss: string[] = [];
   const recordEffect = (effect: string) => {
@@ -72,7 +72,12 @@ function routingFixture() {
   const enumerateDevices = vi.fn(async () => [
     { kind: "audiooutput", label: "BlackHole 2ch", deviceId: "virtual-out" },
   ]);
-  const options = { platform, captionEnableSource: "", liveOwnershipSource: "ownsCall()" };
+  const options = {
+    platform,
+    captionEnableSource: "",
+    liveOwnershipSource: "ownsCall()",
+    ...extraOptions,
+  };
   const prelude = createMeetingStatusPreludeSource(
     {
       allowMicrophone: true,
@@ -121,6 +126,9 @@ function routingFixture() {
           location: { href: "https://example.test/meeting" },
           navigator: { mediaDevices: { enumerateDevices } },
           ownsCall: () => owned,
+          afterRouting: async () => {
+            owned = false;
+          },
           document: {
             title: "Test meeting",
             querySelectorAll: () => media,
@@ -162,6 +170,17 @@ describe("meeting status live ownership", () => {
       expect(fixture.foreign.bridge.pause).not.toHaveBeenCalled();
     },
   );
+
+  it("rolls back this pass when ownership ends inside the after-routing hook", async () => {
+    const fixture = routingFixture({ afterAudioRoutingSource: "await afterRouting();" });
+    expect(await fixture.status()).toMatchObject({
+      audioOutputRouted: false,
+      notes: expect.arrayContaining([expect.stringContaining("ownership")]),
+    });
+    await Promise.resolve();
+    expect(fixture.first.sinkId).toBe("physical-out");
+    expect(fixture.first.muted).toBe(false);
+  });
 
   it("returns a completed direct sink change to its original output when ownership ends", async () => {
     const fixture = routingFixture();
