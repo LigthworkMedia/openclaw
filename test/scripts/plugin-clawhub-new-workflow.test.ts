@@ -85,7 +85,7 @@ describe("Plugin ClawHub New workflow", () => {
     expect(guard).toContain('GITHUB_ACTOR}" == "github-actions[bot]"');
     expect(guard).toContain("refs/tags/release-publish/");
     expect(guard).toContain(
-      "Plugin ClawHub New workflow SHA does not match the parent-approved trusted-main SHA.",
+      "Plugin ClawHub New workflow SHA does not match the parent-approved workflow SHA.",
     );
     const target = step(resolve, "Resolve checked-out ref").run ?? "";
     expect(target).toContain('[[ "${TARGET_REF}" =~ ^[a-f0-9]{40}$ ]]');
