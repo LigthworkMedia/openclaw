@@ -450,16 +450,13 @@ struct GatewayLaunchAgentManagerTests {
 @Suite(.serialized)
 struct GatewayLaunchAgentLocalRoutingTests {
     @Test(arguments: [
-        (["/fixture/managed/openclaw"], []),
-        (["/fixture/node", "/fixture/openclaw.mjs"], []),
-        (
-            ["/fixture/app runtime/bun", "/fixture/openclaw.mjs"],
-            ["--runtime", "bun", "--runtime-path", "/fixture/app runtime/bun"]),
-        (["bun", "/fixture/openclaw.mjs"], []),
+        ["/fixture/managed/openclaw"],
+        ["/fixture/node", "/fixture/openclaw.mjs"],
+        ["/fixture/app runtime/bun", "/fixture/openclaw.mjs"],
+        ["bun", "/fixture/openclaw.mjs"],
     ])
     func `all daemon actions resolve locally before the execution intercept`(
-        cliPrefix: [String],
-        installRuntimeArguments: [String]) async
+        cliPrefix: [String]) async
     {
         await TestIsolation.withIsolatedState(env: ["OPENCLAW_CONFIG_PATH": TestIsolation.tempConfigPath()]) {
             let marker = FileManager.default.temporaryDirectory
@@ -493,10 +490,9 @@ struct GatewayLaunchAgentLocalRoutingTests {
             }
             #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot() == actions)
             let prefix = cliPrefix + AppProfile.current.cliRootArguments + ["gateway"]
-            let expectedCommands = [prefix + actions[0] + ["--json"] + installRuntimeArguments]
-                + actions.dropFirst().map {
-                    prefix + $0 + ($0.contains("--json") ? [] : ["--json"])
-                }
+            let expectedCommands = actions.map {
+                prefix + $0 + ($0.contains("--json") ? [] : ["--json"])
+            }
             #expect(GatewayLaunchAgentManager.testingResolvedDaemonCommandsSnapshot() == expectedCommands)
         }
     }

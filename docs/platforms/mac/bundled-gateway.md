@@ -98,8 +98,8 @@ Plist location (per-user): `~/Library/LaunchAgents/ai.openclaw.gateway.plist`
 The macOS app owns LaunchAgent install/update for the default profile in
 Local mode. The CLI can also install it directly: `openclaw gateway install`
 (named profiles are selected via the `OPENCLAW_PROFILE` env var).
-The app preserves a runtime pinned with `--runtime-path`; when its CLI runs under
-Bun, it pins that Bun executable instead.
+Enabling the Gateway from the app no longer overrides a runtime pinned with `--runtime-path`.
+Disabling it uninstalls the LaunchAgent, which removes the pin.
 
 Behavior:
 

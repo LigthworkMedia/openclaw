@@ -407,16 +407,8 @@ extension GatewayLaunchAgentManager {
         _ args: [String],
         resolveCLI: CommandResolver.LocalCLIResolver = CommandResolver.resolveLocalCLI) async -> [String]
     {
-        var command = await CommandResolver.localOpenclawCommand(
+        await CommandResolver.localOpenclawCommand(
             subcommand: "gateway", extraArgs: self.withJsonFlag(args), resolveCLI: resolveCLI)
-        if args.first == "install",
-           let runtime = command.first,
-           (runtime as NSString).isAbsolutePath,
-           (runtime as NSString).lastPathComponent == "bun"
-        {
-            command.append(contentsOf: ["--runtime", "bun", "--runtime-path", runtime])
-        }
-        return command
     }
 
     private static func withJsonFlag(_ args: [String]) -> [String] {

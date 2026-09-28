@@ -1,8 +1,6 @@
 use crate::cli::OpenClawCli;
 use crate::gateway_ws::{GatewayOwnership, GatewayWsConfig};
 use serde::{Deserialize, Serialize};
-use std::ffi::OsString;
-use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
@@ -367,28 +365,14 @@ mod dashboard_tests {
 }
 
 fn run_service_command(cli: &OpenClawCli, action: &str) -> Result<(), String> {
-    let mut args: Vec<OsString> = vec!["gateway".into(), action.into(), "--json".into()];
-    if action == "install" {
-        let command = cli
-            .command(std::iter::empty::<&str>())
-            .map_err(|error| error.to_string())?;
-        let runtime = Path::new(command.get_program());
-        if runtime.is_absolute() && runtime.file_name().is_some_and(|name| name == "bun") {
-            args.extend([
-                "--runtime".into(),
-                "bun".into(),
-                "--runtime-path".into(),
-                runtime.as_os_str().to_owned(),
-            ]);
-        }
-    }
     // A native Stop click supplies operator consent. Restart's --force would
     // instead bypass draining and must remain unset.
-    if action == "stop" {
-        args.push("--force".into());
-    }
     let response = cli
-        .json::<CommandResponse, _, _>(args)
+        .json::<CommandResponse, _, _>(
+            ["gateway", action, "--json"]
+                .into_iter()
+                .chain((action == "stop").then_some("--force")),
+        )
         .map_err(|error| error.to_string())?;
     if response.ok {
         return Ok(());
