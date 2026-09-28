@@ -537,7 +537,6 @@ export function createManagedHandoffLeaseStore(
   }
   function canRelease(lease: ManagedHandoffLease) {
     if (
-      lease.version === 3 ||
       lease.version === 4 ||
       hasOriginalUpdateExecutorCustody(lease) ||
       !withDatabase(false, (db) => storedCurrent(lease, db)) ||
