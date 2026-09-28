@@ -74,18 +74,21 @@ describe("setup runtime intent", () => {
         sqliteProbe: { available: true, version: "3.53.4", text: true, blob: true, json: true },
         nodeSharedSqlite: false,
       });
-      const select = vi.fn(async <T>({ initialValue }: WizardSelectParams<T>): Promise<T> => {
-        if (initialValue === undefined) {
-          throw new Error("Missing runtime suggestion");
-        }
-        return initialValue;
-      });
+      const prompter = {
+        async select<T>({ initialValue }: WizardSelectParams<T>): Promise<T> {
+          if (initialValue === undefined) {
+            throw new Error("Missing runtime suggestion");
+          }
+          return initialValue;
+        },
+      };
+      const select = vi.spyOn(prompter, "select");
       try {
         const selection = await resolveOnboardingGatewayRuntime({
           env: {},
           existingCommand: null,
           flow,
-          prompter: { select, note: vi.fn() },
+          prompter,
         });
         expect(selection.runtime).toBe(suggested);
         expect(selection.runtimeExplicit).toBe(flow === "advanced");

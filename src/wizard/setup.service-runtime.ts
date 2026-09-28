@@ -30,9 +30,9 @@ export async function resolveOnboardingGatewayRuntime(params: {
   existingCommand: GatewayServiceCommandConfig | null;
   runtime?: GatewayDaemonRuntime;
   flow: WizardFlow;
-  prompter: Pick<WizardPrompter, "select" | "note">;
+  prompter: Pick<WizardPrompter, "select">;
 }) {
-  const selection = await resolveGatewaySetupRuntime({
+  return resolveGatewaySetupRuntime({
     env: params.env,
     existingCommand: params.existingCommand,
     runtime: params.runtime,
@@ -46,15 +46,4 @@ export async function resolveOnboardingGatewayRuntime(params: {
               initialValue: suggested,
             }),
   });
-  if (
-    params.flow === "quickstart" &&
-    selection.runtime === "node" &&
-    !selection.pinnedRuntimePath
-  ) {
-    await params.prompter.note(
-      t("wizard.finalize.quickstartNodeRuntime"),
-      t("wizard.finalize.daemonRuntime"),
-    );
-  }
-  return selection;
 }

@@ -3,11 +3,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { formatCliCommand } from "../cli/command-format.js";
 import type { ExtraGatewayService } from "../daemon/inspect.js";
 import * as launchd from "../daemon/launchd.js";
-import * as runtimePaths from "../daemon/runtime-paths.js";
 import type { GatewayRestartHandoff } from "../infra/restart-handoff.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { buildGatewayInstallPlan } from "./daemon-install-helpers.js";
-import { createPrompter, setPlatform } from "./doctor-gateway-daemon-flow.test-support.js";
+import {
+  createPrompter,
+  registerRunningBunFallbackTest,
+  setPlatform,
+} from "./doctor-gateway-daemon-flow.test-support.js";
 import { createDoctorPrompter } from "./doctor-prompter.js";
 import {
   formatServiceRepairDeferredNote,
@@ -734,6 +737,7 @@ describe("maybeRepairGatewayDaemon", () => {
         warnings: [],
       });
       vi.mocked(buildGatewayInstallPlan).mockResolvedValueOnce({
+        runtime: "bun",
         programArguments: managedDefinition.programArguments,
         environment: { NODE_OPTIONS: "" },
       });
@@ -783,57 +787,7 @@ describe("maybeRepairGatewayDaemon", () => {
     },
   );
 
-  it("uses running Bun for the non-interactive runtime fallback on a Bun-only host", async () => {
-    const bunVersion = Object.getOwnPropertyDescriptor(process.versions, "bun");
-    Object.defineProperty(process.versions, "bun", { configurable: true, value: "1.4.2" });
-    const discoverNode = vi
-      .spyOn(runtimePaths, "resolvePreferredNodePath")
-      .mockResolvedValue(undefined);
-    const probeBun = vi.spyOn(runtimePaths, "resolveBunRuntimeInfo").mockResolvedValue({
-      status: "supported",
-      version: "1.4.2",
-      sqliteVersion: "3.53.4",
-      sqliteProbe: { available: true, version: "3.53.4", text: true, blob: true, json: true },
-      nodeSharedSqlite: false,
-    });
-    setPlatform("linux");
-    service.isLoaded.mockResolvedValue(false);
-    service.readRuntime.mockResolvedValue({ status: "stopped" });
-    vi.mocked(resolveGatewayInstallToken).mockResolvedValueOnce({ warnings: [] });
-    vi.mocked(buildGatewayInstallPlan).mockResolvedValueOnce({
-      programArguments: [],
-      environment: {},
-    });
-    // Service-install consent is separate from Doctor's --fix --non-interactive runtime selection.
-    const prompter = createPrompter(() => true);
-    prompter.select.mockImplementation(
-      createDoctorPrompter({
-        runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
-        options: { repair: true, nonInteractive: true },
-      }).select,
-    );
-    try {
-      await runDoctor({ prompter });
-      const selection = vi.mocked(buildGatewayInstallPlan).mock.calls[0]?.[0];
-      expect(selection?.runtime).toBe("bun");
-      expect(selection?.runtimeExplicit).toBe(true);
-      expect(selection?.runtimePath).toBe(process.execPath);
-      expect(selection?.pinnedRuntimePath).toBeUndefined();
-      expect(prompter.select).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ initialValue: "bun" }),
-        "bun",
-      );
-      expect(service.install).toHaveBeenCalledOnce();
-    } finally {
-      discoverNode.mockRestore();
-      probeBun.mockRestore();
-      if (bunVersion) {
-        Object.defineProperty(process.versions, "bun", bunVersion);
-      } else {
-        delete process.versions.bun;
-      }
-    }
-  });
+  registerRunningBunFallbackTest({ runDoctor, service });
 
   it("skips gateway install during non-interactive doctor repairs", async () => {
     setPlatform("linux");

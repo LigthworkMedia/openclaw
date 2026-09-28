@@ -13,6 +13,7 @@ import type { DaemonInstallWarnFn } from "./daemon-install-runtime-warning.js";
 import type { GatewayDaemonRuntime } from "./daemon-runtime.js";
 
 export type GatewayInstallPlan = {
+  runtime: GatewayDaemonRuntime;
   programArguments: string[];
   workingDirectory?: string;
   environment: Record<string, string | undefined>;

@@ -739,6 +739,7 @@ export async function buildGatewayInstallPlan(params: {
 
   // Lowest to highest: preserved custom vars, durable config, SecretRef env, generated service env.
   return {
+    runtime,
     programArguments,
     workingDirectory:
       workingDirectory ||

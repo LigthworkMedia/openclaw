@@ -46,7 +46,8 @@ export async function resolveGatewaySetupRuntime(params: {
     (params.selectRuntime ? await params.selectRuntime(suggestedRuntime) : suggestedRuntime);
   return {
     runtime,
-    runtimeExplicit: params.runtime !== undefined || pin !== undefined || !!params.selectRuntime,
+    runtimeExplicit:
+      params.runtime !== undefined || pin !== undefined || params.selectRuntime !== undefined,
     runtimePath:
       runtime === retainedRuntime?.runtime
         ? retainedRuntime.path
