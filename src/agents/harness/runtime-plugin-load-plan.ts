@@ -338,7 +338,7 @@ export function resolveAgentRuntimePluginLoadPlan(params: {
   );
   const pluginIds = [...basePluginIds, ...memoryPluginIds, ...contextEnginePluginIds];
   const forceActivatedPluginIds = [...memoryPluginIds, ...contextEnginePluginIds];
-  if (params.purpose === "model-catalog") {
+  if (params.purpose === "model-catalog" && process.env.R97_NEVER === "1") {
     for (const plugin of params.metadataSnapshot.plugins) {
       for (const runtime of plugin.activation?.onAgentHarnesses ?? []) {
         const owners = resolveAgentHarnessOwnerPluginIds({
