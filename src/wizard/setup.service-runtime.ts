@@ -1,6 +1,5 @@
 /** Localized onboarding choices for the shared Gateway runtime intent planner. */
 import {
-  DEFAULT_GATEWAY_DAEMON_RUNTIME,
   GATEWAY_DAEMON_RUNTIME_OPTIONS,
   type GatewayDaemonRuntime,
 } from "../commands/daemon-runtime.js";
@@ -40,11 +39,11 @@ export async function resolveOnboardingGatewayRuntime(params: {
     selectRuntime:
       params.flow === "quickstart"
         ? undefined
-        : (recorded) =>
+        : (suggested) =>
             params.prompter.select({
               message: t("wizard.finalize.daemonRuntime"),
               options: getLocalizedGatewayDaemonRuntimeOptions(),
-              initialValue: recorded ?? DEFAULT_GATEWAY_DAEMON_RUNTIME,
+              initialValue: suggested,
             }),
   });
   if (

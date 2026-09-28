@@ -5,13 +5,14 @@ import {
   resolveManagedGatewayServiceCommand,
   type GatewayServiceCommandConfig,
 } from "../daemon/service-types.js";
+import { resolveRunningBunFallback } from "./daemon-install-plan.shared.js";
 import { DEFAULT_GATEWAY_DAEMON_RUNTIME, type GatewayDaemonRuntime } from "./daemon-runtime.js";
 
 export async function resolveGatewaySetupRuntime(params: {
   env: NodeJS.ProcessEnv;
   existingCommand: GatewayServiceCommandConfig | null;
   runtime?: GatewayDaemonRuntime;
-  selectRuntime?: (recorded?: GatewayDaemonRuntime) => Promise<GatewayDaemonRuntime>;
+  selectRuntime?: (suggested: GatewayDaemonRuntime) => Promise<GatewayDaemonRuntime>;
 }) {
   const expected = readDaemonRuntimePinForInstall(
     { kind: "gateway", env: params.env },
@@ -29,17 +30,29 @@ export async function resolveGatewaySetupRuntime(params: {
       ? await resolveRecordedDaemonRuntime(existing?.programArguments[0], env)
       : undefined;
   const retainedRuntime = recordedRuntime?.status === "supported" ? recordedRuntime : undefined;
+  const bunFallbackPath =
+    params.selectRuntime &&
+    params.runtime === undefined &&
+    !pin &&
+    !retainedRuntime &&
+    !env.OPENCLAW_WRAPPER?.trim()
+      ? await resolveRunningBunFallback({ env })
+      : undefined;
+  const suggestedRuntime =
+    retainedRuntime?.runtime ?? (bunFallbackPath ? "bun" : DEFAULT_GATEWAY_DAEMON_RUNTIME);
   const runtime =
     params.runtime ??
     pin?.runtime ??
-    (params.selectRuntime
-      ? await params.selectRuntime(retainedRuntime?.runtime)
-      : retainedRuntime?.runtime) ??
-    DEFAULT_GATEWAY_DAEMON_RUNTIME;
+    (params.selectRuntime ? await params.selectRuntime(suggestedRuntime) : suggestedRuntime);
   return {
     runtime,
-    runtimeExplicit: params.runtime !== undefined,
-    runtimePath: runtime === retainedRuntime?.runtime ? retainedRuntime.path : undefined,
+    runtimeExplicit: params.runtime !== undefined || pin !== undefined || !!params.selectRuntime,
+    runtimePath:
+      runtime === retainedRuntime?.runtime
+        ? retainedRuntime.path
+        : runtime === "bun"
+          ? bunFallbackPath
+          : undefined,
     pinnedRuntimePath: pin?.path,
     runtimePinUpdate: { expected, pin },
     env,

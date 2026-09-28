@@ -123,6 +123,12 @@ A missing, non-executable, or unsupported recorded Bun falls back to automatic
 Node selection. An explicit `--runtime node` or `--runtime bun` requests automatic
 selection of that runtime.
 
+Configure and advanced onboarding suggest the supported recorded runtime first.
+Without one, their runtime picker suggests the running supported Bun when no
+supported Node is available, otherwise Node. A picker choice is explicit: choosing
+Node on a Bun-only host reports that Node is unavailable before replacing the
+service. Quickstart keeps automatic selection without creating a runtime pin.
+
 Use `--runtime-path` to keep the service on an operator-selected Node or Bun
 executable instead of automatic runtime selection:
 

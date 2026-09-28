@@ -30,6 +30,28 @@ function resolveGatewayDevMode(argv: string[] = process.argv): boolean {
   );
 }
 
+/** Use the running Bun only when implicit Node discovery found no supported runtime. */
+export async function resolveRunningBunFallback(params: {
+  env: Record<string, string | undefined>;
+  /** Null carries an already completed discovery with no supported Node. */
+  nodePath?: string | null;
+}): Promise<string | undefined> {
+  if (!process.versions.bun) {
+    return undefined;
+  }
+  const nodePath =
+    params.nodePath === undefined
+      ? await resolvePreferredNodePath({ env: params.env, runtime: "node" })
+      : params.nodePath;
+  if (
+    nodePath ||
+    (await resolveBunRuntimeInfo(process.execPath, undefined, params.env)).status !== "supported"
+  ) {
+    return undefined;
+  }
+  return process.execPath;
+}
+
 /** Resolve dev-mode and executable inputs for daemon service install planning. */
 export async function resolveDaemonInstallRuntimeInputs(params: {
   env: Record<string, string | undefined>;
@@ -60,12 +82,13 @@ export async function resolveDaemonInstallRuntimeInputs(params: {
     !params.runtimeExplicit &&
     params.pinnedRuntimePath === undefined &&
     params.runtimePath === undefined &&
-    runtimePath === undefined &&
-    process.versions.bun &&
-    (await resolveBunRuntimeInfo(process.execPath, undefined, params.env)).status === "supported"
+    runtimePath === undefined
   ) {
-    params.warn?.("No supported Node runtime was found; using the running Bun for the service.");
-    return { devMode, runtime: "bun", runtimePath: process.execPath };
+    const bunPath = await resolveRunningBunFallback({ env: params.env, nodePath: null });
+    if (bunPath) {
+      params.warn?.("No supported Node runtime was found; using the running Bun for the service.");
+      return { devMode, runtime: "bun", runtimePath: bunPath };
+    }
   }
   return { devMode, runtime: params.runtime, runtimePath };
 }
