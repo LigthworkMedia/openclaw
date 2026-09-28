@@ -67,11 +67,16 @@ installGatewayTestHooks({
 await import("./server.js");
 
 for (const { name, fault, replaceParent } of [
-  ...[false, true].map((faultCase) => ({
-    name: `chat.abort interrupts all siblings before cleanup and preserves failure accounting (fault=${faultCase})`,
-    fault: faultCase,
+  {
+    name: "public session creation and child Stop publish readable cancellation state",
+    fault: false,
     replaceParent: false,
-  })),
+  },
+  {
+    name: "chat.abort interrupts all siblings before cleanup and preserves failure accounting",
+    fault: true,
+    replaceParent: false,
+  },
   {
     name: "typed Stop rejects a replaced parent while child cancellation drains",
     fault: false,
@@ -84,11 +89,11 @@ for (const { name, fault, replaceParent } of [
     const parentKey = `agent:main:sibling-abort-${suffix}`;
     const groupId = `sibling-abort-${suffix}`;
     const running = Array.from(
-      { length: replaceParent ? 1 : 8 },
+      { length: fault ? 8 : 1 },
       (_, index) => `running-${suffix}-${index}`,
     );
     const firstRunId = expectDefined(running[0], "first running child");
-    const queued = replaceParent ? [] : [`queued-${suffix}-0`, `queued-${suffix}-1`];
+    const queued = fault ? [`queued-${suffix}-0`, `queued-${suffix}-1`] : [];
     const selected = [...running, ...queued];
     const failedRunId = fault ? running[3] : undefined;
     const sessionKey = (runId: string) => `agent:main:subagent:${runId}`;
@@ -204,7 +209,7 @@ for (const { name, fault, replaceParent } of [
             activateSwarmRun({ groupId, runId, start, onStartFailure: () => true });
           }
         }
-        if (replaceParent) {
+        if (queued.length === 0) {
           expect(
             reserveSwarmRun({
               groupId,

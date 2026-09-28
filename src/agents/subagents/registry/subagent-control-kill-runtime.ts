@@ -1,5 +1,6 @@
 /** Session-lifecycle mutation and persistence for subagent kills. */
 
+import { isSessionDeliveryGenerationRevokedError } from "../../../config/sessions/session-delivery-generation.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { logVerbose } from "../../../globals.js";
 import { isAgentEventLifecycleGenerationCurrent } from "../../../infra/agent-events.js";
@@ -230,10 +231,10 @@ export async function killSubagentRun(params: {
       assertState();
       return true;
     } catch (error) {
-      if (hasSqliteWorkerOutcomeUnknown(error)) {
-        throw error;
+      if (isSessionDeliveryGenerationRevokedError(error)) {
+        return false;
       }
-      return false;
+      throw error;
     }
   };
   const releaseChangedSessionKill = async (claim: NonNullable<typeof killClaim>) => {
