@@ -662,7 +662,7 @@ export const inspectManagedPlugin = withManagedPluginCache(
                   : credential.kind === "literal" || credential.kind === "environment"
                     ? "configured"
                     : credential.kind;
-              return { ...descriptor, status };
+              return Object.assign({}, descriptor, { status });
             })
           : [],
         ...(mcpAuth ? { mcpAuth } : {}),
