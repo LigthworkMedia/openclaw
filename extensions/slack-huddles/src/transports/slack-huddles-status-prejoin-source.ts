@@ -31,23 +31,34 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   // Slack keeps a huddle running while the client shows other channels and may reuse its global
   // toolbar, so neither URLs nor call controls prove which huddle is live. Only the viewed channel's
   // header state establishes membership; without it the adapter fails closed.
-  const huddleMember = identityVerified && Boolean(firstRaw(selectors.channelHeaderInHuddle));
   const joinSettling = Boolean(sameRecordedIdentity && priorMeeting.joinRequested === true &&
     Date.now() - (priorMeeting.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS});
-  let inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
-  // Channel ids are workspace-scoped: a channel-only session binds, before any await, to the workspace
-  // where it first proves membership; the page identity then rejects other workspaces.
+  // Channel ids are workspace-scoped: a channel-only session counts as a member only once bound to its
+  // workspace. Binding happens here, before any await; read-only or team-less views cannot bind and
+  // fail closed. The page identity then rejects other workspaces.
   const channelOnlySession = Boolean(expectedIdentity && !/^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity));
-  if (canMutateSession && channelOnlySession && inCall && !window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]) {
+  const headerMember = identityVerified && Boolean(firstRaw(selectors.channelHeaderInHuddle));
+  let workspaceBound = !channelOnlySession || Boolean(window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]);
+  if (!workspaceBound && headerMember && canMutateSession && inCallControl && !preview && !confirmation && !multiDevice) {
     let pageTeam;
     try {
       pageTeam = new URL(location.href).pathname.match(/^\\/(?:client|huddle)\\/([TE][A-Z0-9]{8,})\\//)?.[1];
     } catch {}
-    if (pageTeam) (window.__openclawSlackHuddleWorkspaces ||= {})[expectedIdentity] = pageTeam;
+    if (pageTeam) {
+      (window.__openclawSlackHuddleWorkspaces ||= {})[expectedIdentity] = pageTeam;
+      workspaceBound = true;
+    }
   }
+  const huddleMember = headerMember && workspaceBound;
+  let inCall = Boolean(huddleMember && inCallControl && !preview && !confirmation && !multiDevice);
   // Status work awaits permission queries and UI settling, so authority is rechecked right before each
-  // click: the in-call membership header, or the same preview with no other call live.
-  const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity &&
+  // click: this session still owns the page marker (and is not leaving), plus the in-call membership
+  // header, or the same preview with no other call live.
+  const markerOwned = () => {
+    const marker = window.__openclawSlackHuddle;
+    return !marker || (marker.sessionId === sessionId && !marker.leavePending);
+  };
+  const authorityHolds = () => meetingIdentity(location.href) === expectedIdentity && markerOwned() &&
     !firstRaw(selectors.confirmation) && !firstRaw(selectors.multiDevice) && (inCall
     ? Boolean(firstRaw(selectors.channelHeaderInHuddle))
     : Boolean(preview && firstRaw(selectors.preview) === preview && !firstRaw(selectors.inCall)));

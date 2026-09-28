@@ -427,6 +427,30 @@ describe("Slack huddle browser adapter", () => {
     });
   });
 
+  it("accepts channel-only membership only after binding its workspace", async () => {
+    const { document } = inCall();
+    const browser = fixture({
+      document,
+      currentUrl: CLIENT_URL,
+      window: {
+        __openclawSlackHuddle: {
+          identity: "slack-huddle:C0123ABCD",
+          sessionId: "session-1",
+          joinRequested: true,
+          joinRequestedAt: Date.now(),
+        },
+      },
+    });
+    const channelOnly = { url: "https://app.slack.com/huddle/C0123ABCD" };
+    expect(await browser.status({ ...channelOnly, readOnly: true })).toMatchObject({
+      inCall: false,
+    });
+    expect(await browser.status(channelOnly)).toMatchObject({ inCall: true });
+    expect(browser.window).toMatchObject({
+      __openclawSlackHuddleWorkspaces: { "slack-huddle:C0123ABCD": "T0123ABCD" },
+    });
+  });
+
   it("adopts the huddle from Slack's own channel-header state without a join marker", async () => {
     const { document } = inCall(undefined, false, false);
     document.body.append(channelHeader(true));

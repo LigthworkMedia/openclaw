@@ -40,6 +40,10 @@ function pageIdentityFunctionSource(expectedIdentity: string | undefined): strin
       const marker = window.__openclawSlackHuddle;
       const settlingJoin = marker?.identity === identity && marker.joinRequested === true &&
         Date.now() - (marker.joinRequestedAt || 0) < ${SLACK_HUDDLE_JOIN_SETTLE_MS};
+      // An unbound channel-only session cannot tell workspaces apart while a call is live.
+      if (!${teamScoped} && !boundWorkspace && found(hooks.inCall) && !settlingJoin) {
+        return "slack-huddle-unverified:" + key;
+      }
       if (found(hooks.inHuddle)) return identity;
       // Live captions always need membership; a live call without it passes only while our Join settles.
       const captions = window.__openclawSlackHuddleCaptions;
@@ -59,12 +63,15 @@ export function slackHuddleAudioCaptureScript(params: MeetingBrowserAudioCapture
       ${pageIdentityFunctionSource(normalizeSlackHuddleUrlForReuse(params.meetingUrl))}
       const expectedIdentity = ${JSON.stringify(normalizeSlackHuddleUrlForReuse(params.meetingUrl))};
       const state = window.__openclawSlackHuddle;
-      // Audio never rides on the join-settle exception: Slack's header must show membership.
+      // Audio never rides on the join-settle exception: Slack's header must show membership, and a
+      // channel-only session must already be bound to its workspace.
       const member = ${JSON.stringify(SLACK_HUDDLE_SELECTORS.channelHeaderInHuddle)}
         .some((selector) => document.querySelector(selector));
+      const workspaceBound = /^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity || "") ||
+        Boolean(window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]);
       return Boolean(expectedIdentity && state?.sessionId === sessionId &&
         state.identity === expectedIdentity && !state.leavePending &&
-        meetingIdentity(location.href) === expectedIdentity && member);
+        meetingIdentity(location.href) === expectedIdentity && member && workspaceBound);
     `,
   });
 }

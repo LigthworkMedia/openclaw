@@ -328,3 +328,24 @@ it("reports but does not click during a read-only pass when the virtual input di
   expect(mic.clicks).toBe(0);
   expect(result.audioInputRouted).toBe(false);
 });
+
+it("stops clicking once another session takes over the page during an awaited step", async () => {
+  const { document, mic } = inCall(undefined, true);
+  const browser = fixture({ document, joined: true });
+  const camera = new PageNode("button", {
+    role: "switch",
+    "aria-label": "Camera",
+    "aria-checked": "true",
+  });
+  camera.onClick = () => {
+    camera.setAttribute("aria-checked", "false");
+    browser.window.__openclawSlackHuddle = {
+      identity: "slack-huddle:T0123ABCD:C0123ABCD",
+      sessionId: "session-2",
+    };
+  };
+  document.body.append(camera);
+  await browser.status({ mode: "transcribe" });
+  expect(camera.clicks).toBe(1);
+  expect(mic.clicks).toBe(0);
+});
