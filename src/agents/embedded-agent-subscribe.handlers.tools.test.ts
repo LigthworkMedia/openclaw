@@ -25,15 +25,15 @@ import { createProcessTool } from "./bash-tools.process.js";
 import { projectEmbeddedMessageDeliveryFact } from "./embedded-agent-message-delivery.js";
 import { buildEmbeddedRunPayloads } from "./embedded-agent-runner/run/payloads.js";
 import {
-  handleToolExecutionEnd,
   handleToolExecutionStart,
   handleToolExecutionUpdate,
 } from "./embedded-agent-subscribe.handlers.tools.js";
 import { registerToolChannelProgressTests } from "./embedded-agent-subscribe.handlers.tools.progress.test-support.js";
-import type {
-  ToolCallSummary,
-  ToolHandlerContext,
-} from "./embedded-agent-subscribe.handlers.types.js";
+import {
+  createTestContext,
+  endTool,
+} from "./embedded-agent-subscribe.handlers.tools.test-support.js";
+import type { ToolHandlerContext } from "./embedded-agent-subscribe.handlers.types.js";
 import { claimPendingAgentQuestionAnswer } from "./harness/gateway-question.js";
 import {
   createAskUserTool,
@@ -55,10 +55,6 @@ type ToolExecutionUpdateEvent = {
 
 function startTool(ctx: ToolHandlerContext, event: ToolExecutionStartEvent) {
   return handleToolExecutionStart(ctx, { type: "tool_execution_start", ...event });
-}
-
-function endTool(ctx: ToolHandlerContext, event: ToolExecutionEndEvent) {
-  return handleToolExecutionEnd(ctx, { type: "tool_execution_end", ...event });
 }
 
 async function executeTool(
@@ -139,80 +135,6 @@ afterEach(async () => {
 });
 
 const beforeToolCallTesting = { adjustedParamsByToolCallId, buildAdjustedParamsKey };
-
-function createTestContext(): {
-  ctx: ToolHandlerContext;
-  warn: ReturnType<typeof vi.fn>;
-  onBlockReplyFlush: ReturnType<
-    typeof vi.fn<NonNullable<ToolHandlerContext["params"]["onBlockReplyFlush"]>>
-  >;
-  onAgentEvent: ReturnType<typeof vi.fn>;
-  onExecutionPhase: ReturnType<typeof vi.fn>;
-  trace: ReturnType<typeof vi.fn>;
-  isEnabled: ReturnType<typeof vi.fn>;
-} {
-  const onBlockReplyFlush = vi.fn<NonNullable<ToolHandlerContext["params"]["onBlockReplyFlush"]>>();
-  const onAgentEvent = vi.fn();
-  const onExecutionPhase = vi.fn();
-  const warn = vi.fn();
-  const trace = vi.fn();
-  const isEnabled = vi.fn(() => false);
-  const ctx: ToolHandlerContext = {
-    params: {
-      runId: "run-test",
-      sessionKey: "agent:unit-session",
-      sessionId: "session-test-id",
-      agentId: "agent-test-id",
-      onBlockReplyFlush,
-      onAgentEvent,
-      onExecutionPhase,
-      onToolResult: undefined,
-    },
-    flushBlockReplyBuffer: vi.fn(),
-    hookRunner: undefined,
-    log: {
-      debug: vi.fn(),
-      trace,
-      isEnabled,
-      info: vi.fn(),
-      warn,
-    },
-    state: {
-      toolMetaById: new Map<string, ToolCallSummary>(),
-      toolMetas: [],
-      acceptedSessionSpawns: [],
-      toolSummaryById: new Set<string>(),
-      liveEditDiffStateById: new Map(),
-      itemActiveIds: new Set<string>(),
-      itemStartedCount: 0,
-      itemCompletedCount: 0,
-      pendingToolMediaUrls: [],
-      pendingToolMediaTrustByUrl: new Map(),
-      toolAutoDeliveryMediaUrls: new Set(),
-      pendingToolAudioAsVoice: false,
-      deterministicApprovalPromptPending: false,
-      replayState: { replayInvalid: false, hadPotentialSideEffects: false },
-      messagingToolSentTexts: [],
-      messagingToolSentTextsNormalized: [],
-      currentSourceMessagingToolSentTextsNormalized: [],
-      messagingToolSentMediaUrls: [],
-      messagingToolSourceReplyPayloads: [],
-      messageToolOnlySourceReplyDelivered: false,
-      messagingToolSentTargets: [],
-      successfulCronAdds: 0,
-      deterministicApprovalPromptSent: false,
-      toolExecutionSinceLastBlockReply: false,
-      assistantMessageIndex: 0,
-    },
-    shouldEmitToolResult: () => false,
-    shouldEmitToolOutput: () => false,
-    emitToolSummary: vi.fn(),
-    emitToolOutput: vi.fn(),
-    trimMessagingToolSent: vi.fn(),
-  };
-
-  return { ctx, warn, onBlockReplyFlush, onAgentEvent, onExecutionPhase, trace, isEnabled };
-}
 
 type CapturedAgentEvent = { stream?: string; data?: Record<string, unknown> };
 
@@ -1410,69 +1332,6 @@ describe("handleToolExecutionEnd MCP connect action tracking", () => {
       serverName: "calendar",
       authorizationUrl: "https://auth.example/authorize?state=opaque",
     });
-  });
-});
-
-describe("handleToolExecutionEnd sessions_spawn terminal success tracking", () => {
-  it("records accepted sessions_spawn completion ownership", async () => {
-    const { ctx } = createTestContext();
-
-    await endTool(ctx, {
-      toolName: "sessions_spawn",
-      toolCallId: "tool-spawn-accepted",
-      isError: false,
-      result: {
-        details: {
-          status: "accepted",
-          runId: " run-child ",
-          childSessionKey: " agent:claude:subagent:child ",
-          expectsCompletionMessage: true,
-        },
-      },
-    });
-
-    expect(ctx.state.acceptedSessionSpawns).toEqual([
-      {
-        runId: "run-child",
-        childSessionKey: "agent:claude:subagent:child",
-        expectsCompletionMessage: true,
-      },
-    ]);
-    expect(ctx.state.replayState).toEqual({
-      replayInvalid: true,
-      hadPotentialSideEffects: true,
-    });
-  });
-
-  it("does not record failed or malformed sessions_spawn results", async () => {
-    const { ctx } = createTestContext();
-
-    await endTool(ctx, {
-      toolName: "sessions_spawn",
-      toolCallId: "tool-spawn-failed",
-      isError: false,
-      result: {
-        details: {
-          status: "error",
-          runId: "run-child",
-          childSessionKey: "agent:claude:subagent:child",
-        },
-      },
-    });
-    await endTool(ctx, {
-      toolName: "sessions_spawn",
-      toolCallId: "tool-spawn-malformed",
-      isError: false,
-      result: {
-        details: {
-          status: "accepted",
-          runId: "run-child",
-          childSessionKey: " ",
-        },
-      },
-    });
-
-    expect(ctx.state.acceptedSessionSpawns).toEqual([]);
   });
 });
 
