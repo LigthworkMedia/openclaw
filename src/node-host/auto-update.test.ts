@@ -427,7 +427,7 @@ describe("node auto-update discovery runtime", () => {
     mocks.fetch.mockImplementation(
       async (_url, init) =>
         await new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+          init?.signal?.addEventListener("abort", () => reject(new Error("registry aborted")), {
             once: true,
           });
         }),
