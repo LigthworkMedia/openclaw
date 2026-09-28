@@ -449,23 +449,11 @@ vi.mock("../../acp/runtime/session-meta.js", () => ({
     agentId?: string;
     cfg?: OpenClawConfig;
   }) => acpMocks.readAcpSessionMeta(params),
-  // Mirrors the control-plane test helper: the ACP manager's default deps bind this export.
-  prepareAcpSessionControlRead: async (params: {
-    sessionKey: string;
-    agentId?: string;
-    cfg?: OpenClawConfig;
-    assertCurrent?: () => void;
-  }) => ({
-    readCurrent: async () => {
-      params.assertCurrent?.();
-      const session = acpMocks.readAcpSessionEntry(params);
-      return { session, entry: session?.entry };
-    },
-    assertCurrent: () => params.assertCurrent?.(),
-    release: () => {},
-  }),
+  prepareAcpSessionControlRead:
+    vi.fn<typeof import("../../acp/runtime/session-meta.js").prepareAcpSessionControlRead>(),
   upsertAcpSessionMeta: acpMocks.upsertAcpSessionMeta,
-  upsertAcpSessionMetaForControl: acpMocks.upsertAcpSessionMeta,
+  upsertAcpSessionMetaForControl:
+    vi.fn<typeof import("../../acp/runtime/session-meta.js").upsertAcpSessionMetaForControl>(),
 }));
 vi.mock("../../acp/runtime/registry.js", () => ({
   getAcpRuntimeBackend: acpMocks.getAcpRuntimeBackend,
