@@ -94,6 +94,14 @@ not recreate a missing file. Preparing a new database directory and quarantining
 orphaned sidecars require the existing schema-maintenance owner; later permission
 hardening never recreates a removed directory.
 
+Cached shared-state actors retain their original database-generation admission.
+The owner checks each matching actor separately from the caller: an invalid idle
+candidate retires before reuse, including after relocation or inode reuse. Active
+callbacks must settle before replacement. A current actor can serve a new schema
+scope, but a caller's ended scope still rejects with its original error.
+This prevents migrations from recreating retired paths or acquiring leases in the
+wrong database. Existing update drivers and stored schemas need no migration.
+
 Each SQLite broker worker admits up to 128 running and queued requests. A busy
 worker's admission queue does not consume another worker's request capacity;
 independent workers continue serving their databases. Requests on the same worker
@@ -666,6 +674,14 @@ physical target, and caller authority are unchanged. It never replays a dispatch
 operation or accepts target reassociation. Recovery callers await the result and
 recheck their live authority before admission or reply decisions.
 Transaction predicates and commit checks stay with their existing writers.
+Persistent reply admission uses that same executor for lease registration,
+initialization, and the entry read. It retains a claim on the worker's verified
+native generation while admission waits for writers, active turns, or delivery. Queued preparation retains its original target and borrows
+the executor after earlier attempts settle, so cancelling one opening does not
+retire another caller's pending admission. Clearing a reply revokes the claim
+immediately; the existing successor barrier joins its asynchronous release before
+later admission proceeds.
+Discarded reads and failed admission also join their borrowed executor release.
 Process-held incognito entries retain their native owner until its complete
 worker cutover; this does not make the whole reply path free of host SQLite.
 
