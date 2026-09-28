@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
+import { DESKTOP_PANEL_TOGGLE_EVENT } from "../panel-toggle-contract.ts";
 import type { DesktopClient } from "./desktop-client.ts";
 import {
   clickPanelButton,
@@ -43,8 +44,7 @@ describe("desktop panel presentation lifecycle", () => {
 
       document.dispatchEvent(new Event("fullscreenchange"));
       panel.available = true;
-      panel.embedded = true;
-      panel.workspaceControls = true;
+      window.dispatchEvent(new CustomEvent(DESKTOP_PANEL_TOGGLE_EVENT, { detail: { open: true } }));
       await panel.updateComplete;
       const button = panel.renderRoot.querySelector(".desktop-fullscreen-button");
       expect(button).not.toBeNull();
