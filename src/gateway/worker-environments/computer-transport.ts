@@ -555,15 +555,16 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
               ) {
                 throw new Error("Session computer command has no active policy or permission");
               }
-              // A replay must not evict a human who took control after the original request.
-              const takeoverKey = request.idempotencyKey
-                ? JSON.stringify([
-                    environment.environmentId,
-                    environment.ownerEpoch,
-                    request.idempotencyKey,
-                  ])
-                : undefined;
-              if (!takeoverKey || !completedTakeovers.has(takeoverKey)) {
+              // Every takeover needs a replay identity before it can evict a human controller.
+              if (!request.idempotencyKey) {
+                throw new Error("Agent takeover requires an idempotency key");
+              }
+              const takeoverKey = JSON.stringify([
+                environment.environmentId,
+                environment.ownerEpoch,
+                request.idempotencyKey,
+              ]);
+              if (!completedTakeovers.has(takeoverKey)) {
                 // Even without a controller, retire observations started before takeover.
                 inputNeedsObservation = true;
                 controlGeneration += 1;
@@ -571,9 +572,7 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
                   environment.environmentId,
                   environment.ownerEpoch,
                 );
-                if (takeoverKey) {
-                  completedTakeovers.add(takeoverKey);
-                }
+                completedTakeovers.add(takeoverKey);
               }
               assertCurrent();
               assertAuthorized?.();
