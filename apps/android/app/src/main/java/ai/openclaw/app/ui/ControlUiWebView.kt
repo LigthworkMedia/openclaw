@@ -16,6 +16,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebMessage
+import android.webkit.WebMessagePort
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -188,10 +190,10 @@ internal fun ControlUiWebView(
           )
         webView.webViewClient = client
         if (client.installAuth(webView) && client.isGatewayPage(currentUrl)) {
-          webView.loadUrl(currentUrl)
+          webView.loadUrl(client.authenticatedUrl(currentUrl))
         } else {
-          // Never silently create a separately paired browser identity on older WebViews.
-          webView.loadData("Update Android System WebView and reopen this page to use your app's gateway connection.", "text/plain", "UTF-8")
+          // Never silently create a separately paired browser identity for an invalid route.
+          webView.loadData("Reconnect the app to reopen this gateway page.", "text/plain", "UTF-8")
         }
         webView
       },
@@ -270,6 +272,9 @@ private class ControlUiWebViewClient(
   private var authInstalled = false
   private var documentStarted = false
   private var authScript: ScriptHandler? = null
+  private var usesMessagePort = false
+  private var authPort: WebMessagePort? = null
+  private val gatewayUrl = page.baseUrl.replaceFirst("http", "ws")
 
   fun isGatewayPage(url: String?): Boolean {
     val candidate = url?.toUri() ?: return false
@@ -284,68 +289,129 @@ private class ControlUiWebViewClient(
     return path == root || path.startsWith("$root/")
   }
 
+  fun authenticatedUrl(url: String): String {
+    if (!usesMessagePort) return url
+    val uri = url.toUri()
+    val fields =
+      uri.encodedFragment
+        .orEmpty()
+        .split('&')
+        .filter { it.isNotEmpty() && it.substringBefore('=') != "nativeControlAuth" }
+    // Public startup metadata selects native auth before any browser handshake.
+    // Unlike a JavaScript interface, the message port below is sent only to the main frame.
+    return uri
+      .buildUpon()
+      .encodedFragment((fields + "nativeControlAuth=${android.net.Uri.encode(gatewayUrl)}").joinToString("&"))
+      .build()
+      .toString()
+  }
+
   fun installAuth(view: WebView): Boolean {
-    if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
     val origin = controlUiOriginRule(page.baseUrl) ?: return false
-    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-      WebViewCompat.addWebMessageListener(view, NATIVE_GATEWAY_AUTH_BRIDGE, setOf(origin)) { source, message, sourceOrigin, isMainFrame, reply ->
-        if (released || navigationRetired || source !== view || !isMainFrame ||
-          !sameControlUiOrigin(sourceOrigin.toString(), page.baseUrl) || !isGatewayPage(source.url)
-        ) {
-          return@addWebMessageListener
-        }
-        val request = runCatching { Json.parseToJsonElement(message.data.orEmpty()) as? JsonObject }.getOrNull()
-        val id = (request?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-        if (id.isNullOrBlank() || id.length > 128) return@addWebMessageListener
-        val response =
-          buildJsonObject {
-            put("id", id)
-            try {
-              require(request.keys == setOf("id", "nonce", "signedAt")) { "Invalid native connect request" }
-              val nonce = (request["nonce"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-              val signedAt = (request["signedAt"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
-              require(nonce != null && signedAt != null) { "Invalid gateway challenge" }
-              val sign = checkNotNull(page.connectAuth) { "Reconnect the app to authenticate this page" }
-              put("result", sign(nonce, signedAt))
-            } catch (error: IllegalArgumentException) {
-              put("error", "Invalid gateway challenge")
-            } catch (error: IllegalStateException) {
-              put("error", "Reconnect the app to authenticate this page")
-            }
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+      if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+        WebViewCompat.addWebMessageListener(view, NATIVE_GATEWAY_AUTH_BRIDGE, setOf(origin)) { source, message, sourceOrigin, isMainFrame, reply ->
+          if (!isActiveDocument(view) || source !== view || !isMainFrame ||
+            !sameControlUiOrigin(sourceOrigin.toString(), page.baseUrl)
+          ) {
+            return@addWebMessageListener
           }
-        if (!released && !navigationRetired && isGatewayPage(view.url) && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-          reply.postMessage(response.toString())
+          val response = respondToChallenge(message.data) ?: return@addWebMessageListener
+          if (isActiveDocument(view) && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            reply.postMessage(response)
+          }
         }
+      } else {
+        // Platform WebMessagePort is available since API 23, below our minimum SDK.
+        usesMessagePort = true
+        return true
       }
       authInstalled = true
-    } else {
-      return false
+      val payload =
+        buildJsonObject {
+          put("gatewayUrl", gatewayUrl)
+          put("nativeConnectAuth", true)
+          put("token", JsonNull)
+        }
+      authScript =
+        WebViewCompat.addDocumentStartJavaScript(
+          view,
+          """
+          (() => {
+            if (window.top !== window) return;
+            Object.defineProperty(window, "__OPENCLAW_NATIVE_CONTROL_AUTH__", {
+              value: $payload,
+              configurable: true,
+            });
+          })();
+          """.trimIndent(),
+          setOf(origin),
+        )
+      return true
     }
+    usesMessagePort = true
+    return true
+  }
+
+  private fun isActiveDocument(view: WebView): Boolean = !released && !navigationRetired && isGatewayPage(view.url)
+
+  private fun respondToChallenge(data: String?): String? {
+    val request = runCatching { Json.parseToJsonElement(data.orEmpty()) as? JsonObject }.getOrNull()
+    val id = (request?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+    if (id.isNullOrBlank() || id.length > 128) return null
+    return buildJsonObject {
+      put("id", id)
+      try {
+        require(request.keys == setOf("id", "nonce", "signedAt")) { "Invalid native connect request" }
+        val nonce = (request["nonce"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        val signedAt = (request["signedAt"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
+        require(nonce != null && signedAt != null) { "Invalid gateway challenge" }
+        val sign = checkNotNull(page.connectAuth) { "Reconnect the app to authenticate this page" }
+        put("result", sign(nonce, signedAt))
+      } catch (error: IllegalArgumentException) {
+        put("error", "Invalid gateway challenge")
+      } catch (error: IllegalStateException) {
+        put("error", "Reconnect the app to authenticate this page")
+      }
+    }.toString()
+  }
+
+  override fun onPageFinished(
+    view: WebView,
+    url: String?,
+  ) {
+    if (!usesMessagePort || !documentStarted || !isActiveDocument(view) || !isGatewayPage(url) || authPort != null) return
+    val origin = controlUiOriginRule(page.baseUrl)?.toUri() ?: return
+    val ports = view.createWebMessageChannel()
+    val nativePort = ports[0]
+    authPort = nativePort
+    nativePort.setWebMessageCallback(
+      object : WebMessagePort.WebMessageCallback() {
+        override fun onMessage(
+          port: WebMessagePort,
+          message: WebMessage,
+        ) {
+          if (port !== authPort || !isActiveDocument(view)) return
+          val response = respondToChallenge(message.data) ?: return
+          if (port === authPort && isActiveDocument(view)) port.postMessage(WebMessage(response))
+        }
+      },
+    )
     val payload =
       buildJsonObject {
-        put("gatewayUrl", page.baseUrl.replaceFirst("http", "ws"))
-        put("nativeConnectAuth", true)
-        put("token", JsonNull)
+        put("type", "openclaw.native-control-auth")
+        put("gatewayUrl", gatewayUrl)
       }
-    authScript =
-      WebViewCompat.addDocumentStartJavaScript(
-        view,
-        """
-        (() => {
-          if (window.top !== window) return;
-          Object.defineProperty(window, "__OPENCLAW_NATIVE_CONTROL_AUTH__", {
-            value: $payload,
-            configurable: true,
-          });
-        })();
-        """.trimIndent(),
-        setOf(origin),
-      )
-    return true
+    // Page scripts have installed their listener by onPageFinished. The platform
+    // transfers only to this main-frame origin, never to subframes or a wildcard.
+    // The transferred end now belongs to JavaScript; retirement closes our end.
+    view.postWebMessage(WebMessage(payload.toString(), arrayOf(ports[1])), origin)
   }
 
   private fun retireAuth(view: WebView) {
     navigationRetired = true
+    authPort?.close()
+    authPort = null
     authScript?.remove()
     authScript = null
     if (authInstalled && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {

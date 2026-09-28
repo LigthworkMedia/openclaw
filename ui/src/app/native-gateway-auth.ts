@@ -29,6 +29,11 @@ export type NativeGatewayConnectAuth = (challenge: {
 }) => Promise<NativeGatewayAuthorization>;
 
 type ChallengeMessage = { id: string; nonce: string; signedAt: number };
+
+// A current native grant can become available again after the app reconnects.
+// Retry through that same owner; malformed proofs and route violations stay terminal.
+export class NativeGatewayAuthUnavailableError extends Error {}
+
 type NativeAuthHost = Window & {
   OpenClawNativeGatewayAuth?: {
     postMessage(message: string): void | Promise<unknown>;
@@ -107,12 +112,18 @@ function readAuthorization(
 }
 
 /** Adapts native challenge signing; the app remains the sole credential and grant owner. */
-export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewayConnectAuth {
+export function createNativeGatewayConnectAuth(
+  gatewayUrl: string,
+  options: { messagePort?: boolean } = {},
+): NativeGatewayConnectAuth {
   // SAFETY: This only adds optional app bridge properties; presence and responses are validated below.
   const host = window as NativeAuthHost;
   const bridge = host.OpenClawNativeGatewayAuth;
   const webkit = host.webkit?.messageHandlers?.OpenClawNativeGatewayAuth;
   const pending = new Map<string, (reply: Record<string, unknown>) => void>();
+  const waitingForPort = new Map<string, string>();
+  let port: MessagePort | undefined;
+  let retired = false;
   const accept = (raw: unknown) => {
     let reply: unknown = raw;
     if (typeof raw === "string") {
@@ -131,6 +142,61 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
     // oxlint-disable-next-line unicorn/prefer-add-event-listener
     bridge.onmessage = (event) => accept(event.data);
   }
+  if (options.messagePort && host.top === host) {
+    const receivePort = (event: MessageEvent) => {
+      const incomingPort = event.ports[0];
+      // Android postWebMessage has no source window or source origin. Ordinary
+      // page/iframe postMessage cannot impersonate that native transfer.
+      if (
+        retired ||
+        port ||
+        event.source !== null ||
+        event.origin !== "" ||
+        event.ports.length !== 1 ||
+        !incomingPort
+      )
+        return;
+      let value: unknown;
+      try {
+        value = typeof event.data === "string" ? JSON.parse(event.data) : undefined;
+      } catch {
+        return;
+      }
+      if (
+        !isRecord(value) ||
+        value.type !== "openclaw.native-control-auth" ||
+        typeof value.gatewayUrl !== "string" ||
+        gatewayCredentialScope(value.gatewayUrl) !== gatewayCredentialScope(gatewayUrl)
+      )
+        return;
+      port = incomingPort;
+      port.addEventListener("message", (reply) => accept(reply.data));
+      port.start();
+      host.removeEventListener("message", receivePort);
+      for (const [id, message] of waitingForPort) {
+        try {
+          // MessagePort has a fixed peer, not a Window target origin.
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin
+          port.postMessage(message);
+        } catch (error) {
+          accept({ id, error: formatUiError(error) });
+        }
+      }
+      waitingForPort.clear();
+    };
+    host.addEventListener("message", receivePort);
+    host.addEventListener(
+      "pagehide",
+      () => {
+        retired = true;
+        host.removeEventListener("message", receivePort);
+        port?.close();
+        for (const id of pending.keys()) accept({ id, error: "Native dashboard document closed" });
+        waitingForPort.clear();
+      },
+      { once: true },
+    );
+  }
 
   return async ({ gatewayUrl: target, nonce, signedAt, signal }) => {
     if (gatewayCredentialScope(target) !== gatewayCredentialScope(gatewayUrl)) {
@@ -138,10 +204,21 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
         "This dashboard belongs to a different Gateway. Select the Gateway in the app.",
       );
     }
-    if (host.top !== host || (!bridge && !webkit)) {
+    if (retired || host.top !== host || (!bridge && !webkit && !options.messagePort)) {
       throw new Error(
         "Native Gateway authorization is unavailable. Reopen this dashboard in the app.",
       );
+    }
+    // Match the supported native challenge representation before dispatch. A
+    // malformed challenge cannot recover when the native connection reconnects.
+    if (
+      !/[^\p{White_Space}\p{Control}\ufeff]/u.test(nonce) ||
+      new TextEncoder().encode(nonce).length > 512 ||
+      nonce.includes("|") ||
+      !Number.isSafeInteger(signedAt) ||
+      signedAt <= 0
+    ) {
+      throw new Error("The Gateway did not provide a valid native authentication challenge.");
     }
     signal.throwIfAborted();
     const request = { id: generateUUID(), nonce, signedAt };
@@ -150,6 +227,7 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
         if (!pending.delete(request.id)) {
           return;
         }
+        waitingForPort.delete(request.id);
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
         if (error !== undefined) {
@@ -165,7 +243,9 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
       const timer = setTimeout(
         () =>
           finish(
-            new Error("The app did not authorize this dashboard in time. Reconnect in the app."),
+            new NativeGatewayAuthUnavailableError(
+              "The app did not authorize this dashboard in time. Reconnect in the app.",
+            ),
           ),
         // Leave half the preauth budget for sending the signed connect and receiving hello.
         DEFAULT_PREAUTH_HANDSHAKE_TIMEOUT_MS / 2,
@@ -173,7 +253,7 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
       pending.set(request.id, (reply) => {
         try {
           if (typeof reply.error === "string") {
-            throw new Error(reply.error);
+            throw new NativeGatewayAuthUnavailableError(reply.error);
           }
           finish(undefined, readAuthorization(reply.result, request));
         } catch (error) {
@@ -190,14 +270,19 @@ export function createNativeGatewayConnectAuth(gatewayUrl: string): NativeGatewa
         } else if (webkit) {
           // oxlint-disable-next-line unicorn/require-post-message-target-origin
           result = webkit.postMessage(request);
+        } else if (port) {
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin
+          port.postMessage(JSON.stringify(request));
+        } else {
+          waitingForPort.set(request.id, JSON.stringify(request));
         }
         if (result) {
           void result.then(accept, (error: unknown) =>
-            finish(error instanceof Error ? error : new Error(formatUiError(error))),
+            finish(new NativeGatewayAuthUnavailableError(formatUiError(error))),
           );
         }
       } catch (error) {
-        finish(error instanceof Error ? error : new Error(formatUiError(error)));
+        finish(new NativeGatewayAuthUnavailableError(formatUiError(error)));
       }
     });
   };

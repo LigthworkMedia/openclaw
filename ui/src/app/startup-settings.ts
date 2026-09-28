@@ -112,8 +112,17 @@ export function resolveApplicationStartupSettings(
     changed = true;
   };
 
-  const nativeAuth =
+  const injectedNativeAuth =
     typeof window === "undefined" ? undefined : window["__OPENCLAW_NATIVE_CONTROL_AUTH__"];
+  // Older Android WebViews cannot inject at document start. This public marker
+  // selects native-only auth immediately; authority arrives over a main-frame port.
+  // Keep the marker in the URL so a reload cannot start a browser pairing flow.
+  const nativePortGateway = new URLSearchParams(location.hash.replace(/^#/, "")).get(
+    "nativeControlAuth",
+  );
+  const nativeAuth =
+    injectedNativeAuth ??
+    (nativePortGateway ? { gatewayUrl: nativePortGateway, nativeConnectAuth: true } : undefined);
   if (nativeAuth) {
     try {
       delete window["__OPENCLAW_NATIVE_CONTROL_AUTH__"];
@@ -150,7 +159,11 @@ export function resolveApplicationStartupSettings(
       };
     }
     if (nativeAuth.nativeConnectAuth === true && gatewayUrl) {
-      nativeClient = { nativeConnectAuth: createNativeGatewayConnectAuth(gatewayUrl) };
+      nativeClient = {
+        nativeConnectAuth: createNativeGatewayConnectAuth(gatewayUrl, {
+          messagePort: !injectedNativeAuth && Boolean(nativePortGateway),
+        }),
+      };
     }
     updateSettings({
       ...(gatewayUrl ? { gatewayUrl } : {}),

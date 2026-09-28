@@ -8,7 +8,9 @@ private func makeControlUIAuthSession(
     issuedDeviceToken: String? = nil,
     scopes: [String] = [],
     method: String? = nil,
-    rejectFirstSharedToken: Bool = false) -> GatewayTestWebSocketSession
+    rejectFirstSharedToken: Bool = false,
+    reconnectGrant: (token: String, scopes: [String])? = nil,
+    beforeReconnectChallenge: (@Sendable () async -> Void)? = nil) -> GatewayTestWebSocketSession
 {
     let attempts = LockIsolated(0)
     return GatewayTestWebSocketSession(taskFactory: {
@@ -25,6 +27,7 @@ private func makeControlUIAuthSession(
             },
             receiveHook: { task, receiveIndex in
                 if receiveIndex == 0 {
+                    if attempt > 0 { await beforeReconnectChallenge?() }
                     return .data(GatewayWebSocketTestSupport.connectChallengeData())
                 }
                 let id = task.snapshotConnectRequestID() ?? "connect"
@@ -37,8 +40,8 @@ private func makeControlUIAuthSession(
                 }
                 let data = GatewayWebSocketTestSupport.connectOkData(
                     id: id,
-                    deviceToken: issuedDeviceToken,
-                    scopes: scopes)
+                    deviceToken: attempt > 0 ? reconnectGrant?.token ?? issuedDeviceToken : issuedDeviceToken,
+                    scopes: attempt > 0 ? reconnectGrant?.scopes ?? scopes : scopes)
                 guard let method else { return .data(data) }
                 var response = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
                 var payload = try #require(response["payload"] as? [String: Any])
@@ -75,6 +78,137 @@ private func withControlUIConnection(
 
 @Suite(.serialized)
 struct GatewayConnectionControlUIAuthTests {
+    @Test(arguments: ["token", "password", "device-token"])
+    @MainActor
+    func `same dashboard provider refuses disconnected authority and follows the native reconnect`(
+        method: String) async throws
+    {
+        let stateDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let defaultsName = "DashboardReconnectTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        try await DeviceIdentityStore.withStateDirectory(stateDir) {
+            let identity = DeviceIdentityStore.loadOrCreate()
+            let gatewayID = "native-reconnect"
+            _ = DeviceAuthStore.storeToken(
+                deviceId: identity.deviceId,
+                role: "operator",
+                token: "initial-device-grant",
+                scopes: GatewayChannelActor.defaultOperatorConnectScopes,
+                gatewayID: gatewayID)
+            let endpoint = try GatewayConnection.EndpointSnapshot(
+                config: controlUIRoute(
+                    "ws://native-reconnect.invalid",
+                    token: method == "token" ? "accepted-token" : nil,
+                    password: method == "password" ? "accepted-password" : nil),
+                routeAuthority: 1,
+                deviceAuthGatewayID: gatewayID,
+                revision: 1)
+            let source = GatewayConnectionEndpointSource(endpoint: endpoint)
+            let reconnectGate = GatewayConnectionSuspensionGate()
+            let reconnectChallenges = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let session = makeControlUIAuthSession(
+                scopes: ["operator.read"],
+                method: method,
+                reconnectGrant: ("reconnected-device-grant", ["operator.read", "operator.write"]),
+                beforeReconnectChallenge: {
+                    reconnectChallenges.continuation.yield(())
+                    await reconnectGate.suspend()
+                })
+            let connection = GatewayConnection(
+                endpointProvider: { source.snapshot() },
+                currentEndpointRevision: { source.snapshot().revision ?? 0 },
+                supportsSharedEndpointRecovery: false,
+                activationBindingKeyProvider: { nil },
+                sessionBox: WebSocketSessionBox(session: session))
+            let manager = DashboardManager._testMake(
+                selection: MacGatewaySelectionPreferences(defaults: defaults),
+                connectionProvider: { _ in connection },
+                browserIdentityURLProvider: nil,
+                automaticGatewayProfileRefreshEnabled: false)
+            let result: Result<Void, Error>
+            do {
+                // Remote configuration discovers SSO through the existing native
+                // request owner, which also makes a fresh native route ready.
+                #expect(session.snapshotMakeCount() == 0)
+                let configuration = try await manager.dashboardConfiguration(
+                    endpoint: endpoint, mode: .remote, target: .profile("reconnect"), token: nil)
+                let provider = try #require(configuration.nativeAuthProvider)
+                let originalLease = try #require(await connection.captureServerLease())
+                let original = try await provider("original-challenge", 123)
+                #expect(original.isCurrent())
+                #expect(session.snapshotMakeCount() == 1)
+                let deliveries = await connection.subscribe()
+                let socket = try #require(session.latestTask())
+                socket.emitReceiveFailure()
+                try await AsyncTimeout.withTimeout(
+                    seconds: 5,
+                    onTimeout: { URLError(.timedOut) },
+                    operation: {
+                        for await _ in reconnectChallenges.stream {
+                            return
+                        }
+                        throw CancellationError()
+                    })
+                // The replacement physical socket is waiting for its challenge,
+                // so no old hello or prepared reply can authorize the web view.
+                #expect(!original.isCurrent())
+                #expect(await connection.captureServerLease() == nil)
+                await #expect(throws: CancellationError.self) {
+                    try await provider("disconnected-challenge", 124)
+                }
+                // The replacement hello issues the renewed grant through the
+                // channel's normal persistence path, not a test-side store write.
+                await reconnectGate.open()
+                let replacementLease = try await AsyncTimeout.withTimeout(
+                    seconds: 5,
+                    onTimeout: { URLError(.timedOut) },
+                    operation: {
+                        for await delivery in deliveries {
+                            if case .snapshot = delivery.push, delivery.isCurrent,
+                               delivery.serverLease != originalLease { return delivery.serverLease }
+                        }
+                        throw CancellationError()
+                    })
+                #expect(replacementLease.socketGeneration != originalLease.socketGeneration)
+                let reconnected = try await provider("replacement-challenge", 125)
+                let value = try #require(JSONSerialization.jsonObject(with: reconnected.json) as? [String: Any])
+                let device = try #require(value["device"] as? [String: Any])
+                let expectedAuth = switch method {
+                case "token": ["token": "accepted-token"]
+                case "password": ["password": "accepted-password"]
+                default: ["deviceToken": "reconnected-device-grant"]
+                }
+                #expect(value["auth"] as? [String: String] == expectedAuth)
+                #expect(value["scopes"] as? [String] == ["operator.read", "operator.write"])
+                #expect(device["id"] as? String == identity.deviceId)
+                #expect(device["nonce"] as? String == "replacement-challenge")
+                #expect(device["signedAt"] as? Int == 125)
+                #expect(reconnected.isCurrent())
+                #expect(!original.isCurrent())
+                #expect(session.snapshotMakeCount() == 2)
+                // Reconnect may refresh a physical lease, never the dashboard's
+                // fixed route authority, even when the address stays the same.
+                source.setEndpoint(.init(
+                    config: endpoint.config, routeAuthority: 2, deviceAuthGatewayID: gatewayID, revision: 2))
+                #expect(!reconnected.isCurrent())
+                await #expect(throws: CancellationError.self) {
+                    try await provider("retargeted-challenge", 126)
+                }
+                result = .success(())
+            } catch {
+                result = .failure(error)
+            }
+            reconnectChallenges.continuation.finish()
+            await reconnectGate.open()
+            manager.close()
+            await connection.shutdown()
+            try result.get()
+        }
+    }
+
     @Test(arguments: ["token", "password", "legacy-token", "legacy-password"])
     func `native dashboard preserves accepted shared auth and retires with the exact socket`(
         method: String) async throws
@@ -85,7 +219,8 @@ struct GatewayConnectionControlUIAuthTests {
         try await DeviceIdentityStore.withStateDirectory(stateDir) {
             let usesPassword = method.hasSuffix("password")
             let route = try controlUIRoute(
-                "ws://native-dashboard.invalid", token: usesPassword ? nil : "shared-token",
+                "ws://native-dashboard.invalid",
+                token: usesPassword ? nil : "shared-token",
                 password: usesPassword ? "shared-password" : nil)
             let endpoint = GatewayConnection.EndpointSnapshot(
                 config: route, routeAuthority: 7, deviceAuthGatewayID: "native-dashboard", revision: 1)
@@ -96,7 +231,8 @@ struct GatewayConnectionControlUIAuthTests {
                 supportsSharedEndpointRecovery: false,
                 activationBindingKeyProvider: { nil },
                 sessionBox: WebSocketSessionBox(session: makeControlUIAuthSession(
-                    issuedDeviceToken: "current-native-token", scopes: ["operator.read"],
+                    issuedDeviceToken: "current-native-token",
+                    scopes: ["operator.read"],
                     method: method.hasPrefix("legacy-") ? nil : method)))
             try await withControlUIConnection(connection) {
                 _ = try await connection.request(method: "health", params: nil, retryTransportFailures: false)
@@ -133,8 +269,11 @@ struct GatewayConnectionControlUIAuthTests {
             let identity = DeviceIdentityStore.loadOrCreate()
             let gatewayID = "native-stored-grant"
             _ = DeviceAuthStore.storeToken(
-                deviceId: identity.deviceId, role: "operator", token: "stored-native-token",
-                scopes: GatewayChannelActor.defaultOperatorConnectScopes, gatewayID: gatewayID)
+                deviceId: identity.deviceId,
+                role: "operator",
+                token: "stored-native-token",
+                scopes: GatewayChannelActor.defaultOperatorConnectScopes,
+                gatewayID: gatewayID)
             let retry = method == "rejected-shared"
             // Loopback is a trusted retry route; the injected session owns every
             // socket and never opens a real transport.
@@ -142,10 +281,12 @@ struct GatewayConnectionControlUIAuthTests {
             let endpoint = GatewayConnection.EndpointSnapshot(
                 config: route, routeAuthority: 1, deviceAuthGatewayID: gatewayID, revision: 1)
             let connection = GatewayConnection(
-                endpointProvider: { endpoint }, supportsSharedEndpointRecovery: false,
+                endpointProvider: { endpoint },
+                supportsSharedEndpointRecovery: false,
                 activationBindingKeyProvider: { nil },
                 sessionBox: WebSocketSessionBox(session: makeControlUIAuthSession(
-                    scopes: ["operator.read"], method: method == "device-token" ? method : nil,
+                    scopes: ["operator.read"],
+                    method: method == "device-token" ? method : nil,
                     rejectFirstSharedToken: retry)))
             try await withControlUIConnection(connection) {
                 if retry {
@@ -168,7 +309,9 @@ struct GatewayConnectionControlUIAuthTests {
                     let replacement = DeviceIdentityStore.loadOrCreate()
                     #expect(replacement.deviceId != identity.deviceId)
                     _ = DeviceAuthStore.storeToken(
-                        deviceId: replacement.deviceId, role: "operator", token: "different-identity-token",
+                        deviceId: replacement.deviceId,
+                        role: "operator",
+                        token: "different-identity-token",
                         gatewayID: gatewayID)
                     #expect(!signed.isCurrent())
                     await #expect(throws: CancellationError.self) {
@@ -214,8 +357,11 @@ struct GatewayConnectionControlUIAuthTests {
         try await DeviceIdentityStore.withStateDirectory(stateDir) {
             let identity = DeviceIdentityStore.loadOrCreate()
             _ = DeviceAuthStore.storeToken(
-                deviceId: identity.deviceId, role: "operator", token: "stored-native-token",
-                scopes: GatewayChannelActor.defaultOperatorConnectScopes, gatewayID: "retry")
+                deviceId: identity.deviceId,
+                role: "operator",
+                token: "stored-native-token",
+                scopes: GatewayChannelActor.defaultOperatorConnectScopes,
+                gatewayID: "retry")
             let route = try controlUIRoute(
                 "ws://127.0.0.1:19200", token: "rejected-token", password: "unselected-password")
             let endpoint = GatewayConnection.EndpointSnapshot(
@@ -223,7 +369,8 @@ struct GatewayConnectionControlUIAuthTests {
                 routeAuthority: 1,
                 deviceAuthGatewayID: "retry")
             let connection = GatewayConnection(
-                endpointProvider: { endpoint }, supportsSharedEndpointRecovery: false,
+                endpointProvider: { endpoint },
+                supportsSharedEndpointRecovery: false,
                 activationBindingKeyProvider: { nil },
                 sessionBox: WebSocketSessionBox(session: makeControlUIAuthSession(
                     scopes: ["operator.read"], method: method, rejectFirstSharedToken: true)))
@@ -249,11 +396,13 @@ struct GatewayConnectionControlUIAuthTests {
             let endpoint = try GatewayConnection.EndpointSnapshot(
                 config: controlUIRoute("ws://nonshared.invalid"), routeAuthority: 1, deviceAuthGatewayID: "nonshared")
             let connection = GatewayConnection(
-                endpointProvider: { endpoint }, supportsSharedEndpointRecovery: false,
+                endpointProvider: { endpoint },
+                supportsSharedEndpointRecovery: false,
                 activationBindingKeyProvider: { nil },
                 sessionBox: WebSocketSessionBox(session: makeControlUIAuthSession(
                     issuedDeviceToken: hasGrant ? "issued-native-grant" : nil,
-                    scopes: ["operator.read"], method: method)))
+                    scopes: ["operator.read"],
+                    method: method)))
             try await withControlUIConnection(connection) {
                 _ = try await connection.request(method: "health", params: nil, retryTransportFailures: false)
                 if hasGrant {

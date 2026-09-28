@@ -15,6 +15,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebMessage
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -28,6 +29,7 @@ import androidx.webkit.WebViewFeature
 import androidx.webkit.WebViewOutcomeReceiver
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -45,19 +47,22 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
+import org.robolectric.fakes.RoboWebMessagePort
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowWebView
 
 @RunWith(RobolectricTestRunner::class)
 @Config(
   sdk = [34],
   instrumentedPackages = ["androidx.webkit"],
-  shadows = [ControlUiAuthFeatureShadow::class, ControlUiAuthCompatShadow::class],
+  shadows = [ControlUiAuthFeatureShadow::class, ControlUiAuthCompatShadow::class, ControlUiAuthWebViewShadow::class],
 )
 class ControlUiWebViewAuthTest {
   @After
   fun resetPlatformBridge() {
     ControlUiAuthCompatShadow.registrations.clear()
     ControlUiAuthCompatShadow.scripts.clear()
-    ControlUiAuthFeatureShadow.supported = true
+    ControlUiAuthFeatureShadow.unsupported.clear()
   }
 
   @Test
@@ -229,7 +234,7 @@ class ControlUiWebViewAuthTest {
 
   @Test
   @Suppress("DEPRECATION") // Android only exposes this abstract platform callback as a test fixture.
-  fun rendererLossRetiresCapturedBridgeAndUnsupportedWebViewDoesNotLoadGateway() {
+  fun rendererLossRetiresCapturedBridge() {
     var signed = 0
     val mounted =
       mount { _, _ ->
@@ -251,18 +256,109 @@ class ControlUiWebViewAuthTest {
     } finally {
       mounted.close()
     }
-    ControlUiAuthFeatureShadow.supported = false
-    val unsupported = mount { _, _ -> error("No fallback signer") }
+  }
+
+  @Test
+  @Config(sdk = [31])
+  fun olderWebViewsLoadGatewayAndExchangeNativeChallengesThroughMainFramePort() {
+    for (unsupported in listOf(WebViewFeature.DOCUMENT_START_SCRIPT, WebViewFeature.WEB_MESSAGE_LISTENER)) {
+      ControlUiAuthFeatureShadow.unsupported.add(unsupported)
+      var signed = 0
+      val mounted =
+        mount { nonce, signedAt ->
+          assertEquals("challenge", nonce)
+          assertEquals(1700000000123, signedAt)
+          signed += 1
+          JsonObject(mapOf("nativeDevice" to JsonPrimitive("accepted-native-device")))
+        }
+      try {
+        val uri = Uri.parse(requireNotNull(mounted.view.url))
+        assertEquals("gateway.example", uri.host)
+        val marker = Uri.parse("https://marker.invalid/?${uri.encodedFragment}")
+        assertEquals("wss://gateway.example:8443/openclaw/", marker.getQueryParameter("nativeControlAuth"))
+        assertFalse(ControlUiAuthCompatShadow.registrations.containsKey(mounted.view))
+        assertNull(shadowOf(mounted.view).getJavascriptInterface("OpenClawNativeGatewayAuth"))
+        val platform = Shadow.extract<ControlUiAuthWebViewShadow>(mounted.view)
+        assertTrue(platform.transfers.isEmpty())
+        val client = mounted.view.webViewClient
+        client.onPageStarted(mounted.view, mounted.view.url, null)
+        client.onPageFinished(mounted.view, mounted.view.url)
+        client.onPageFinished(mounted.view, mounted.view.url)
+        assertEquals(1, platform.transfers.size)
+        val (message, targetOrigin) = platform.transfers.single()
+        assertEquals("https://gateway.example:8443", targetOrigin.toString())
+        assertEquals(
+          Json.parseToJsonElement("""{"type":"openclaw.native-control-auth","gatewayUrl":"wss://gateway.example:8443/openclaw/"}"""),
+          Json.parseToJsonElement(requireNotNull(message.data)),
+        )
+        val browserPort = message.ports!!.single() as RoboWebMessagePort
+        browserPort.postMessage(WebMessage(REQUEST))
+        assertEquals(1, signed)
+        assertEquals(
+          "accepted-native-device",
+          Json
+            .parseToJsonElement(browserPort.receivedMessages.single())
+            .jsonObject
+            .getValue("result")
+            .jsonObject
+            .getValue("nativeDevice")
+            .jsonPrimitive.content,
+        )
+        browserPort.postMessage(WebMessage("""{"id":"invalid","nonce":"challenge","signedAt":1700000000123,"role":"node"}"""))
+        assertTrue(Json.parseToJsonElement(browserPort.receivedMessages.last()).jsonObject.containsKey("error"))
+        assertEquals(1, signed)
+        // A canceled foreign navigation leaves this document usable.
+        assertTrue(client.shouldOverrideUrlLoading(mounted.view, navigationRequest("https://foreign.example/")))
+        browserPort.postMessage(WebMessage(REQUEST))
+        assertEquals(2, signed)
+        // Capture the native callback to exercise a message queued before retirement,
+        // rather than relying only on the port's closed bit to drop stale requests.
+        val nativePort = browserPort.connectedPort
+        val queuedCallback = nativePort.webMessageCallback
+        client.onPageStarted(mounted.view, "https://gateway.example:8443/openclaw/terminal", null)
+        assertTrue(nativePort.isClosed)
+        queuedCallback.onMessage(nativePort, WebMessage(REQUEST))
+        client.onPageFinished(mounted.view, mounted.view.url)
+        assertEquals(1, platform.transfers.size)
+        assertEquals(2, signed)
+      } finally {
+        mounted.close()
+        ControlUiAuthFeatureShadow.unsupported.clear()
+      }
+    }
+  }
+
+  @Test
+  @Config(sdk = [31])
+  fun legacyPortIsNotTransferredToForeignDocumentAndReleaseRetiresQueuedRequests() {
+    ControlUiAuthFeatureShadow.unsupported.add(WebViewFeature.DOCUMENT_START_SCRIPT)
+    var signed = 0
+    val mounted =
+      mount { _, _ ->
+        signed += 1
+        JsonObject(emptyMap())
+      }
+    val platform = Shadow.extract<ControlUiAuthWebViewShadow>(mounted.view)
     try {
-      assertFalse(ControlUiAuthCompatShadow.registrations.containsKey(unsupported.view))
-      assertFalse(
-        unsupported.view.url
-          .orEmpty()
-          .startsWith("https://gateway.example"),
-      )
-      assertTrue(shadowOf(unsupported.view).lastLoadData.data.contains("Update Android System WebView"))
+      val client = mounted.view.webViewClient
+      client.onPageStarted(mounted.view, mounted.view.url, null)
+      client.onPageFinished(mounted.view, "https://foreign.example/")
+      assertTrue(platform.transfers.isEmpty())
+      client.onPageFinished(mounted.view, mounted.view.url)
+      val browserPort =
+        platform.transfers
+          .single()
+          .first.ports!!
+          .single() as RoboWebMessagePort
+      val nativePort = browserPort.connectedPort
+      val queuedCallback = nativePort.webMessageCallback
+      mounted.close()
+      assertTrue(nativePort.isClosed)
+      queuedCallback.onMessage(nativePort, WebMessage(REQUEST))
+      assertEquals(0, signed)
     } finally {
-      unsupported.close()
+      // Activity destruction is owned above, even when assertions throw.
+      if (!shadowOf(mounted.view).wasDestroyCalled()) mounted.close()
     }
   }
 
@@ -365,11 +461,11 @@ internal data class ControlUiAuthRegistration(
 @Implements(value = WebViewFeature::class, isInAndroidSdk = false)
 class ControlUiAuthFeatureShadow {
   companion object {
-    var supported = true
+    val unsupported = mutableSetOf<String>()
 
     @JvmStatic
     @Implementation
-    fun isFeatureSupported(feature: String): Boolean = supported && feature in setOf(WebViewFeature.WEB_MESSAGE_LISTENER, WebViewFeature.DOCUMENT_START_SCRIPT)
+    fun isFeatureSupported(feature: String): Boolean = feature !in unsupported && feature in setOf(WebViewFeature.WEB_MESSAGE_LISTENER, WebViewFeature.DOCUMENT_START_SCRIPT)
   }
 }
 
@@ -412,5 +508,20 @@ class ControlUiAuthCompatShadow {
       scripts[view] = script
       return ScriptHandler { scripts.remove(view) }
     }
+  }
+}
+
+// Robolectric has real paired message-port fakes but does not implement the
+// WebView main-frame transfer. Capture only that platform boundary.
+@Implements(WebView::class)
+class ControlUiAuthWebViewShadow : ShadowWebView() {
+  val transfers = mutableListOf<Pair<WebMessage, Uri>>()
+
+  @Implementation
+  fun postWebMessage(
+    message: WebMessage,
+    targetOrigin: Uri,
+  ) {
+    transfers.add(message to targetOrigin)
   }
 }

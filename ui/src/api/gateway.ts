@@ -23,6 +23,7 @@ import type {
   ScopeUpgradeBinding,
 } from "@openclaw/gateway-client/scope-upgrade";
 import { roleScopesAllow } from "../../../src/shared/operator-scope-compat.js";
+import { NativeGatewayAuthUnavailableError } from "../app/native-gateway-auth.ts";
 import { formatUiError } from "../lib/format-error.ts";
 import { isLoopbackHostname } from "../lib/gateway-locality.ts";
 import {
@@ -229,11 +230,15 @@ export class GatewayBrowserClient {
           this.nativeAuthError =
             error instanceof GatewayRequestError
               ? error
-              : new GatewayRequestError({ code: "UNAVAILABLE", message: formatUiError(error) });
+              : new GatewayRequestError({
+                  code: "UNAVAILABLE",
+                  message: formatUiError(error),
+                  retryable: error instanceof NativeGatewayAuthUnavailableError,
+                });
           return {
             closeCode: CONNECT_FAILED_CLOSE_CODE,
             closeReason: "native authorization unavailable",
-            stop: true,
+            stop: this.nativeAuthError.retryable !== true,
           };
         }
         return { closeCode: CONNECT_FAILED_CLOSE_CODE, closeReason: "connect failed" };
@@ -600,7 +605,11 @@ export class GatewayBrowserClient {
 
   private resolveClose(context: GatewayProtocolCloseContext) {
     if (this.nativeAuthError) {
-      return { retry: false, notify: true, pendingError: this.nativeAuthError };
+      return {
+        retry: this.nativeAuthError.retryable === true,
+        notify: true,
+        pendingError: this.nativeAuthError,
+      };
     }
     const error = context.connectFailure?.error;
     const startupDelay = context.connectFailure?.reconnectDelayMs;
