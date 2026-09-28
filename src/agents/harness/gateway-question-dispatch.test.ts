@@ -689,12 +689,8 @@ describe("question dispatch ownership", () => {
         if (status === "cancelled") {
           fixture.manager.cancel(pending.id);
         } else {
-          const clock = vi.spyOn(Date, "now").mockReturnValue(pending.expiresAtMs + 1);
-          try {
-            fixture.manager.get(pending.id);
-          } finally {
-            clock.mockRestore();
-          }
+          fixture.clock.setTime(pending.expiresAtMs + 1);
+          fixture.manager.get(pending.id);
         }
         expect(await question.run).toMatchObject({
           status: owner === "harness" ? status : "no_answer",
