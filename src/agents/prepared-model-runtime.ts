@@ -590,7 +590,6 @@ export function refreshPreparedModelRuntimeSnapshots(
     // Publication listeners may synchronously read the committed owner. Clear the lifecycle
     // gate before announcing availability so they cannot observe a false missing generation.
     notifyPreparedModelRuntimePublication({ phase: "published" });
-    refreshCommittedProviderCatalogs(owners.values());
   };
   const publication = publicationQueue
     .enqueue(async () => {
