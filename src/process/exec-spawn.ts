@@ -392,10 +392,7 @@ export function resolveCommandEnv(params: {
     cmd === "npm" ||
     cmd === "npm.cmd" ||
     cmd === "npm.exe" ||
-    ((cmd === "node" ||
-      cmd === "node.exe" ||
-      (Boolean(process.versions.bun) && params.argv[0] === process.execPath)) &&
-      (params.argv[1] ?? "").includes("npm-cli.js"));
+    ((cmd === "node" || cmd === "node.exe") && (params.argv[1] ?? "").includes("npm-cli.js"));
 
   const resolvedEnv = mergeProcessEnv([baseEnv, params.env], platform);
   if (shouldSuppressNpmFund) {
