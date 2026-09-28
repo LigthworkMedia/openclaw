@@ -111,6 +111,7 @@ of failing the task if local persistence rejects an oversized file.
 | Together              | `Wan-AI/Wan2.2-T2V-A14B`        |  ✓   | `Wan-AI/Wan2.2-I2V-A14B` only                        | -                                               | `TOGETHER_API_KEY`                       |
 | Vydra                 | `veo3`                          |  ✓   | 1 image (`kling`)                                    | -                                               | `VYDRA_API_KEY`                          |
 | xAI                   | `grok-imagine-video`            |  ✓   | Classic: 1 first frame or 7 references; 1.5: 1 frame | Classic: 1 video                                | `XAI_API_KEY`                            |
+| Z.AI                  | `cogvideox-3`                   |  ✓   | 1 image (URL or local file)                          | -                                               | `ZAI_API_KEY`                            |
 
 Some providers accept additional or alternate API key env vars. See
 individual [provider pages](#related) for details.
@@ -139,6 +140,7 @@ the shared live sweep:
 | Together   |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 | Vydra      |     ✓      |       ✓        |       -        | `generate`; shared `imageToVideo` skipped because `veo3` is text-only and `kling` requires a remote image URL                           |
 | xAI        |     ✓      |       ✓        |       ✓        | Classic supports all modes; Video 1.5 is image-to-video only; remote MP4 input keeps `videoToVideo` out of the shared sweep             |
+| Z.AI       |     ✓      |       ✓        |       -        | `generate`, `imageToVideo`                                                                                                              |
 
 ## Tool parameters
 
@@ -434,6 +436,13 @@ OpenClaw does not append auto-detected providers.
     unchanged.
 
   </Accordion>
+  <Accordion title="Z.AI">
+    CogVideoX-3 supports text or one PNG/JPEG image, including local files up
+    to 5 MB sent as data URIs. Durations normalize to 5 or 10 seconds;
+    `audio: true` enables sound. Video uses the general API endpoint in the
+    configured global or China region, including when chat uses a Coding
+    Plan endpoint. See [Z.AI](/providers/zai) for sizes and provider options.
+  </Accordion>
 </AccordionGroup>
 
 ## Provider capability modes
@@ -558,4 +567,5 @@ openclaw config set agents.defaults.mediaModels.video.primary "qwen/wan2.6-t2v"
 - [Tools overview](/tools)
 - [Vydra](/providers/vydra)
 - [xAI](/providers/xai)
+- [Z.AI](/providers/zai)
 - [Media overview](/tools/media-overview) - how the media tools fit together

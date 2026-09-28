@@ -10343,7 +10343,7 @@ describe("package artifact reuse", () => {
     expect(workflow).toContain(
       "OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,kie,minimax OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000",
     );
-    expect(workflow).toContain("OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=openrouter,xai");
+    expect(workflow).toContain("OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=openrouter,xai,zai");
     expect(workflow).toContain(
       "inputs.live_suite_filter == 'native-live-src-gateway-profiles-anthropic'",
     );

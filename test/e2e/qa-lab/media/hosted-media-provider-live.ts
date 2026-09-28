@@ -59,6 +59,7 @@ export const MEDIA_SUITES: Record<MediaSuiteId, MediaSuiteConfig> = {
       "together",
       "vydra",
       "xai",
+      "zai",
     ],
     defaultProviders: [
       "alibaba",
@@ -73,6 +74,7 @@ export const MEDIA_SUITES: Record<MediaSuiteId, MediaSuiteConfig> = {
       "together",
       "vydra",
       "xai",
+      "zai",
     ],
   },
 };

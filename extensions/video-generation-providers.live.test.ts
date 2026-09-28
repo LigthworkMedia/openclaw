@@ -59,6 +59,7 @@ import { maybeLoadShellEnvForGenerationProviders } from "./test-support/generati
 import togetherPlugin from "./together/index.js";
 import vydraPlugin from "./vydra/index.js";
 import xaiPlugin from "./xai/index.js";
+import zaiPlugin from "./zai/index.js";
 
 const LIVE = isLiveTestEnabled();
 const REQUIRE_PROFILE_KEYS =
@@ -146,6 +147,7 @@ const CASES: LiveProviderCase[] = [
   },
   { plugin: vydraPlugin, pluginId: "vydra", pluginName: "Vydra Provider", providerId: "vydra" },
   { plugin: xaiPlugin, pluginId: "xai", pluginName: "xAI Plugin", providerId: "xai" },
+  { plugin: zaiPlugin, pluginId: "zai", pluginName: "Z.AI Provider", providerId: "zai" },
 ]
   .filter((entry) => (providerFilter ? providerFilter.has(entry.providerId) : true))
   .filter((entry) =>

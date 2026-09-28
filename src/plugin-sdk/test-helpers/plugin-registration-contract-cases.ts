@@ -235,5 +235,6 @@ export const pluginRegistrationContractCases = {
   zai: {
     pluginId: "zai",
     mediaUnderstandingProviderIds: ["zai"],
+    videoGenerationProviderIds: ["zai"],
   },
 } satisfies Record<string, PluginRegistrationContractParams>;

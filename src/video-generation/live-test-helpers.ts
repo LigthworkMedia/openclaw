@@ -27,6 +27,7 @@ export const DEFAULT_LIVE_VIDEO_MODELS: Record<string, string> = {
   together: "together/Wan-AI/Wan2.2-T2V-A14B",
   vydra: "vydra/veo3",
   xai: "xai/grok-imagine-video",
+  zai: "zai/cogvideox-3",
 };
 
 const REMOTE_URL_VIDEO_TO_VIDEO_PROVIDERS = new Set(["alibaba", "google", "qwen", "xai"]);
