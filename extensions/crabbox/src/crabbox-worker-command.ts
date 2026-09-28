@@ -148,12 +148,28 @@ export async function stopCrabboxLease(params: {
   provider: string;
   runCommand: CrabboxCommandRunner;
 }): Promise<void> {
-  const result = await runCrabboxCommand({
+  let result = await runCrabboxCommand({
     action: "stop",
     args: ["stop", "--provider", params.provider, "--id", params.id],
     binary: params.binary,
     runCommand: params.runCommand,
     timeoutMs: CRABBOX_STOP_TIMEOUT_MS,
   });
+  const output = `${result.stderr}\n${result.stdout}`;
+  if (
+    params.provider === "azure" &&
+    result.termination === "exit" &&
+    result.code === 4 &&
+    output.includes(params.id) &&
+    output.includes("Azure fixed lease cannot be adopted without its create intent")
+  ) {
+    result = await runCrabboxCommand({
+      action: "stop recovery",
+      args: ["stop", "--provider", params.provider, "--id", params.id, "--force"],
+      binary: params.binary,
+      runCommand: params.runCommand,
+      timeoutMs: CRABBOX_STOP_TIMEOUT_MS,
+    });
+  }
   crabboxCommandOutput("stop", result);
 }
