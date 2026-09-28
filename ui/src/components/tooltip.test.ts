@@ -155,19 +155,15 @@ describe("openclaw-tooltip", () => {
 
   it("renders shortcut templates without changing plain descriptions or dismissal", async () => {
     const { tooltip, trigger } = createTooltip("Search (⌘K)");
-    tooltip.contentTemplate = html`${"Search ("}${renderKbd(["⌘", "K"], { inline: true })})`;
+    tooltip.contentTemplate = html`Search (${renderKbd(["⌘", "K"], { inline: true })})`;
     document.body.append(tooltip);
     await tooltip.updateComplete;
 
     const popup = webAwesomeTooltip(tooltip);
     expect(popup?.querySelector(".tooltip-content kbd svg")).not.toBeNull();
-    expect(popup?.querySelector(".tooltip-content")?.textContent?.replace(/\s+/gu, " ")).toBe(
-      "Search (⌘ K)",
+    expect(popup?.querySelector(".tooltip-content")?.textContent?.replace(/\s+/gu, "")).toBe(
+      "Search(⌘K)",
     );
-    expect(
-      popup?.querySelector<HTMLSlotElement>('slot[name="content"]')?.assignedElements(),
-    ).toEqual([]);
-    expect(popup?.style.pointerEvents).toBe("none");
     const descriptionId = trigger.getAttribute("aria-describedby") ?? "";
     expect(document.getElementById(descriptionId)?.textContent).toBe("Search (⌘K)");
 

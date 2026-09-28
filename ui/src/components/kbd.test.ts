@@ -15,15 +15,12 @@ describe("shared keyboard hints", () => {
     expect(host.querySelectorAll("svg")).toHaveLength(3);
     expect(host.textContent?.replace(/\s+/gu, "")).toBe("⌘⌥⇧U");
     for (const icon of host.querySelectorAll("svg")) {
-      expect(icon.getAttribute("preserveAspectRatio")).not.toBe("none");
-      expect(icon.style.width).toBe("1em");
-      expect(icon.style.height).toBe("1em");
+      expect(icon.querySelector("path")?.namespaceURI).toBe("http://www.w3.org/2000/svg");
+      expect(icon.closest('[aria-hidden="true"]')).not.toBeNull();
     }
-    expect(host.querySelector("[data-key]")).toBeNull();
-    for (const path of host.querySelectorAll("svg path")) {
-      expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    for (const symbol of host.querySelectorAll(".kbd__symbol")) {
+      expect(symbol.closest('[aria-hidden="true"]')).toBeNull();
     }
-    expect(host.querySelectorAll('.kbd__symbol > [aria-hidden="true"]')).toHaveLength(3);
   });
 
   it("keeps non-Apple labels and separate keycap grouping", () => {

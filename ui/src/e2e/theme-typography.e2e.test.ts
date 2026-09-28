@@ -3,10 +3,6 @@ import path from "node:path";
 import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import {
-  formatKeyboardShortcutCombo,
-  KEYBOARD_SHORTCUT_COMBOS,
-} from "../lib/keyboard-shortcut-contract.ts";
-import {
   controlUiBundledGatewayUrl,
   defaultControlUiFeatureMethods,
   installMockGateway,
@@ -467,36 +463,25 @@ suite.define(() => {
       }));
       expect(report.body).toMatch(/^"?JetBrains Mono/u);
       expect(report.shortcut).toMatch(/^system-ui,/u);
-      const applePlatform = await page.evaluate(() =>
-        /Mac|iPhone|iPad|iPod/u.test(navigator.platform),
-      );
-      expect(report.text).toBe(
-        formatKeyboardShortcutCombo(KEYBOARD_SHORTCUT_COMBOS.appearanceSettings, applePlatform),
-      );
+      const applePlatform = platform === "MacIntel";
+      expect(report.text).toBe(applePlatform ? "⌘⇧," : "Ctrl+Shift+,");
 
       await page.keyboard.press("Escape");
       await page.locator(".chat-side-panel-toggle").click();
       const panelSelector = page.locator(".side-panel-empty--selector");
       const panelShortcuts = panelSelector.locator(".side-panel-type-option__shortcut");
-      const panelCombos = [
-        KEYBOARD_SHORTCUT_COMBOS.reviewPanel,
-        KEYBOARD_SHORTCUT_COMBOS.workspaceFiles,
-        KEYBOARD_SHORTCUT_COMBOS.sideChat,
-      ];
-      await expect
-        .poll(async () =>
-          (await panelShortcuts.allTextContents()).map((text) => text.replace(/\s+/gu, "")),
-        )
-        .toEqual(panelCombos.map((combo) => formatKeyboardShortcutCombo(combo, applePlatform)));
-      await expect
-        .poll(() =>
-          panelShortcuts.evaluateAll((elements) =>
-            elements.map((element) => {
-              return getComputedStyle(element).fontFamily;
-            }),
-          ),
-        )
-        .toEqual(panelCombos.map(() => expect.stringMatching(/^system-ui,/u)));
+      await panelSelector.waitFor();
+      const labels = applePlatform
+        ? ["⌘⌥⇧E", "⌘⇧B", "⌘⇧S"]
+        : ["Ctrl+Alt+Shift+E", "Ctrl+Shift+B", "Ctrl+Shift+S"];
+      expect(
+        await panelShortcuts.evaluateAll((keys) =>
+          keys.map((key) => ({
+            text: key.textContent?.replace(/\s+/gu, ""),
+            font: getComputedStyle(key).fontFamily,
+          })),
+        ),
+      ).toEqual(labels.map((text) => ({ text, font: expect.stringMatching(/^system-ui,/u) })));
 
       const inkOffsets = await panelShortcuts.evaluateAll((keys) =>
         keys.map((key) => {
@@ -541,36 +526,22 @@ suite.define(() => {
       await page.keyboard.press(`${applePlatform ? "Meta" : "Control"}+Shift+S`);
       await page.locator('[data-panel-slot="companion"]:not([hidden])').waitFor();
 
-      const modelShortcutFont = await page.evaluate(() => {
-        const action = document.createElement("span");
-        action.className = "chat-controls__model-option-action";
-        const keycap = document.createElement("kbd");
-        action.append(keycap);
-        document.body.append(action);
-        const fontFamily = getComputedStyle(keycap).fontFamily;
-        action.remove();
-        return fontFamily;
+      const genericFonts = await page.evaluate(() => {
+        const fixture = document.createElement("div");
+        fixture.innerHTML = `<span class="chat-controls__model-option-action"><kbd>C</kbd></span>
+          <span class="session-menu__shortcut">C</span>`;
+        document.body.append(fixture);
+        const fonts = Array.from(
+          fixture.querySelectorAll("kbd, .session-menu__shortcut"),
+          (key) => getComputedStyle(key).fontFamily,
+        );
+        fixture.remove();
+        return {
+          fonts,
+          mono: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
+        };
       });
-      expect(modelShortcutFont).toBe(
-        await page.evaluate(() =>
-          getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
-        ),
-      );
-
-      const genericMenuShortcutFont = await page.evaluate(() => {
-        const genericShortcut = document.createElement("span");
-        genericShortcut.className = "session-menu__shortcut";
-        genericShortcut.textContent = "C";
-        document.body.append(genericShortcut);
-        const fontFamily = getComputedStyle(genericShortcut).fontFamily;
-        genericShortcut.remove();
-        return fontFamily;
-      });
-      expect(genericMenuShortcutFont).toBe(
-        await page.evaluate(() =>
-          getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
-        ),
-      );
+      expect(genericFonts.fonts).toEqual([genericFonts.mono, genericFonts.mono]);
     },
   );
 
