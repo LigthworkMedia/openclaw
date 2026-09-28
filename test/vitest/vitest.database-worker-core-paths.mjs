@@ -203,7 +203,6 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/worktrees/service.diagnostics.test.ts",
   "src/agents/worktrees/service.gc.test.ts",
   "src/agents/worktrees/service.hooks.test.ts",
-  "src/agents/worktrees/service.orphans.test.ts",
   "src/agents/worktrees/service.profiles.test.ts",
   "src/agents/worktrees/service.test.ts",
   "src/agents/cli-runner/history-boundary.test.ts",
