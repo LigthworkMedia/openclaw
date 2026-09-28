@@ -110,7 +110,7 @@ export type ReplyToolAuthorityOverlay = Readonly<{
   toolBindings?: Readonly<Record<string, unknown>>;
 }>;
 
-export type ReplyTurnParticipantInput = Pick<
+type ReplyTurnParticipantInput = Pick<
   ReplyToolAuthorityOverlay,
   "operatorAuthority" | "senderId" | "senderName" | "gatewayUiCommandTarget"
 >;
