@@ -10346,10 +10346,13 @@ describe("package artifact reuse", () => {
         "validate_live_media_provider_suites",
         `native-live-extensions-media-video-${suffix}`,
       );
-      const providers = shard.command
-        ?.match(/OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=(\S+)/u)?.[1]
-        .split(",");
-      expect(providers).toHaveLength(4);
+      const providers = shard.command?.match(
+        /OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=(\S+)/u,
+      )?.[1];
+      if (!providers) {
+        throw new Error(`Missing video providers for shard ${suffix}`);
+      }
+      expect(providers.split(",")).toHaveLength(4);
       expect(shard.command).toContain("OPENCLAW_LIVE_VIDEO_GENERATION_TIMEOUT_MS=600000");
       // Four serial ten-minute operations plus test overhead leave eight minutes for setup.
       expect(shard.timeout_minutes).toBeGreaterThanOrEqual(4 * 10.5 + 8);
