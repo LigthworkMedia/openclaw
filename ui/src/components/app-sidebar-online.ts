@@ -40,24 +40,6 @@ export function renderAppSidebarOnline(host: AppSidebarRenderHost) {
     counts && user.identity?.type === "profile"
       ? (counts.get(user.identity.id) ?? { open: 0, running: 0 })
       : null;
-  const users = onlineUsers.filter(
-    (user) => !host.onlineRunningOnly || !counts || (countsFor(user)?.running ?? 0) > 0,
-  );
-  const sort = host.onlineSessionSort;
-  if (sort !== "presence") {
-    users.sort((a, b) => (countsFor(b)?.[sort] ?? -1) - (countsFor(a)?.[sort] ?? -1));
-  }
-  const totals = users.reduce(
-    (total, user) => {
-      const value = countsFor(user);
-      return {
-        open: total.open + (value?.open ?? 0),
-        running: total.running + (value?.running ?? 0),
-        complete: total.complete && value !== null,
-      };
-    },
-    { open: 0, running: 0, complete: counts !== null },
-  );
   const routing = personActivityRouting(
     { basePath: host.basePath, navigate: (route, options) => host.onNavigate?.(route, options) },
     () => host.dismissTransientMenus(),
@@ -105,36 +87,8 @@ export function renderAppSidebarOnline(host: AppSidebarRenderHost) {
       ${
         collapsed
           ? nothing
-          : html`<div class="sidebar-online__columns">
-                <button
-                  type="button"
-                  class="sidebar-online__filter"
-                  aria-pressed=${String(host.onlineRunningOnly)}
-                  aria-label=${t("presence.sessions.runningOnly")}
-                  ?disabled=${counts === null}
-                  @click=${() => {
-                    host.onlineRunningOnly = !host.onlineRunningOnly;
-                  }}
-                >
-                  ${t(host.onlineRunningOnly ? "presence.sessions.running" : "presence.sessions.all")}
-                </button>
-                ${(["open", "running"] as const).map(
-                  (key) => html`<button
-                    type="button"
-                    class="sidebar-online__column"
-                    aria-label=${t(key === "open" ? "presence.sessions.sortOpen" : "presence.sessions.sortRunning")}
-                    aria-pressed=${String(sort === key)}
-                    title=${t(key === "open" ? "presence.sessions.openHint" : "presence.sessions.runningHint")}
-                    @click=${() => {
-                      host.onlineSessionSort = sort === key ? "presence" : key;
-                    }}
-                  >
-                    ${t(key === "open" ? "presence.sessions.open" : "presence.sessions.running")}${sort === key ? html`<span aria-hidden="true"> ↓</span>` : nothing}
-                  </button>`,
-                )}
-              </div>
-              <div class="sidebar-online__list">
-                ${repeat(users, presenceUserKey, (user) => {
+          : html`<div class="sidebar-online__list">
+                ${repeat(onlineUsers, presenceUserKey, (user) => {
                   const activityState = presenceViewerActivity(user);
                   const workload = countsFor(user);
                   const workloadLabel = workload
@@ -172,27 +126,47 @@ export function renderAppSidebarOnline(host: AppSidebarRenderHost) {
                       name: presenceViewerLabel(user),
                     })}
                   >
-                    <openclaw-viewer-avatar
-                      .user=${user}
-                      .markAsViewer=${false}
-                      variant="footer"
-                      aria-hidden="true"
-                    ></openclaw-viewer-avatar>
+                    <span class="sidebar-online__avatar" aria-hidden="true">
+                      <openclaw-viewer-avatar
+                        .user=${user}
+                        .markAsViewer=${false}
+                        variant="footer"
+                      ></openclaw-viewer-avatar>
+                    </span>
                     <span class="sidebar-online__person-copy">
                       <span class="sidebar-online__person-name">${presenceViewerLabel(user)}</span>
-                      <span class="sidebar-online__person-status" aria-hidden="true">${t(activityState === "active" ? "presence.active" : activityState === "idle" ? "presence.idle" : "presence.rosterTitle")}</span>
+                      ${
+                        workload?.open === 0
+                          ? nothing
+                          : html`<span
+                              class="sidebar-online__open"
+                              data-session-count="open"
+                              title=${t(workload ? "presence.sessions.openHint" : "presence.sessions.unavailable")}
+                              aria-hidden="true"
+                              >${t("presence.sessions.openCount", { count: String(workload?.open ?? "—") })}</span
+                            >`
+                      }
                     </span>
-                    <span class="sidebar-online__count" data-session-count="open" aria-hidden="true">${workload?.open ?? "—"}</span>
-                    <span class="sidebar-online__count ${workload?.running ? "sidebar-online__count--running" : "sidebar-online__count--zero"}" data-session-count="running" aria-hidden="true">${workload?.running ?? "—"}</span>
+                    ${
+                      workload && workload.running > 0
+                        ? html`<span
+                            class="sidebar-online__running"
+                            data-session-count="running"
+                            title=${t("presence.sessions.runningHint")}
+                            aria-hidden="true"
+                            >${t("presence.sessions.runningCount")
+                              .split(/(\{count\})/u)
+                              .map((part) =>
+                                part === "{count}"
+                                  ? html`<strong>${workload.running}</strong>`
+                                  : part,
+                              )}</span
+                          >`
+                        : nothing
+                    }
                   </${tag}>
                 </div>`;
                 })}
-                ${users.length === 0 ? html`<p class="sidebar-online__empty">${t("presence.sessions.noneRunning")}</p>` : nothing}
-              </div>
-              <div class="sidebar-online__totals" title=${t("presence.sessions.scope")}>
-                <span>${t("presence.sessions.total")}</span>
-                <span data-session-total="open">${totals.complete ? totals.open : "—"}</span>
-                <span data-session-total="running">${totals.complete ? totals.running : "—"}</span>
               </div>
               ${
                 host.sessionData.ownerCounts.error
