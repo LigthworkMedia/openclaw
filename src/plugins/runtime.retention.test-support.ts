@@ -25,7 +25,7 @@ async function collect() {
   assert.ok(gc, "The retention child requires --expose-gc");
   const control = new WeakRef({ unowned: true });
   for (let pass = 0; pass < 8; pass += 1) {
-    // Collect outside the promise drain so Bun cannot retain settled async frames.
+    // JavaScriptCore's promise-microtask stack can retain completed async values.
     await new Promise<void>((resolve) => {
       scheduleImmediate(() => {
         gc();
