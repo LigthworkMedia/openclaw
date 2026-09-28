@@ -1,7 +1,27 @@
 import path from "node:path";
 import { resolveTestBunSourceArgs } from "../../src/test-utils/bun-process.ts";
+import { DEFAULT_VITEST_TEST_TIMEOUT_MS } from "../../test/vitest/vitest.timeouts.ts";
 import { resolveRepoRoot } from "./repo-root.mjs";
 import { resolveVitestNodeArgs } from "./vitest-process-env.mts";
+
+export function resolveNativeBunTestCommand(
+  files: string[],
+  repoRoot = resolveRepoRoot(import.meta.url),
+) {
+  return {
+    command: "bun",
+    args: [
+      "test",
+      "--no-env-file",
+      ...resolveTestBunSourceArgs(repoRoot),
+      "--preload",
+      path.join(repoRoot, "test/setup.env.ts"),
+      "--timeout",
+      String(DEFAULT_VITEST_TEST_TIMEOUT_MS),
+      ...files,
+    ],
+  };
+}
 
 /** Select only the Vitest process; orchestration and preparation retain Node. */
 export function resolveVitestTestCommand(args: string[], env: NodeJS.ProcessEnv = process.env) {

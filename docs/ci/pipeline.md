@@ -130,15 +130,36 @@ Linux test shards select Bun through `scripts/lib/ci-test-runtime.mts`. The
 ordinary and isolated unit-fast lanes partition their existing file inventories: files with known Bun
 failures or additional skips stay on Node, and the compatible remainder runs on
 Bun. Those Node files still execute; they are not excluded from CI.
+
+Audited synchronous ordinary unit-fast tests with no hooks use Bun's native test
+runner. The same runtime owner intersects their qualification data with the
+canonical inventory and each existing stripe's include patterns. The remaining
+compatible files keep Vitest on Bun. Native admission checks test, setup, and
+fixture-helper bytes; changed or unreadable inputs return the affected tests to
+Vitest without dropping coverage. Production sources remain free to change and
+are still exercised. Extra Vitest arguments, including cache-warming collection,
+retain the existing Vitest path.
+
+Native Bun receives explicit file paths, the existing hermetic environment setup,
+the repository tsconfig, and the shared test deadline. It disables automatic env
+file loading and runs one test process inside the existing plan and worker budget.
+The shared process owner retains output watchdogs, interruption handling, and
+joined descendant cleanup. Release validation runs the complete Node selection
+before the compatible Bun/Vitest and native Bun portions in that same slot;
+every result remains required. Native execution adds no CI jobs or worker fanout.
+
 TypeScript compiler analysis suites also stay on Node because the synchronous
 native compiler API requires Node child-process pipe handles. This includes
 compiler assertions in mixed runtime suites; their cases remain enabled.
-The Node Code Mode executor suite also stays on Node: its warm-worker cleanup
-requires diagnostics-channel delivery to preserve sibling subscribers when a
-callback unsubscribes during publication. Bun can skip the next subscriber.
+The Code Mode executor and Markdown chunking suites run with Vitest on Bun using
+the fork's diagnostics-channel and `Intl.Segmenter` fixes.
+Plugin runtime retention tests remain on Node after earlier fork builds failed
+retirement GC assertions in a complete stripe and focused replay. All nine
+cases retain their original assertions and deadlines; this suite has not been
+qualified for Bun.
 The complete fake-timer lane also supports Bun. Control UI retains the GC-sensitive
-`usage-page-details.test.ts` on Node and runs the remaining files on Bun, including
-chat presentation retirement checks.
+`chat-thread.test.ts` and `usage-page-details.test.ts` on Node and runs its remaining
+files with Vitest on Bun.
 The missing-Docker test also runs on Bun, using an empty executable directory
 instead of an empty `PATH`, which Bun resolves through its default search path.
 Other families retain Node until they pass on the pinned fork within their
@@ -164,7 +185,8 @@ the same module identity on both runtimes.
 
 The complete memory plugin config (`memory-lancedb` and `memory-wiki`) also
 supports Bun, with its existing isolated workers and database-worker exclusions.
-A paired Linux Testbox comparison with two workers passed the same 53 files,
+A paired Linux Testbox comparison on the preceding Bun `ddfce5d01` / WebKit
+`4429d113` build with two workers passed the same 53 files,
 474 tests, and one platform skip on each runtime. Bun reduced complete test-command
 wall time from 58.72s to 52.79s cold and from 43.51s to 38.68s with warm caches
 and reversed runtime order: 10–11% faster, with warm aggregate RSS near 3.94 GiB
@@ -191,8 +213,8 @@ files keep their original shard ownership. Compatible PR selections run Bun
 first and record Vitest's original shard inventory. After successful, joined
 completion, a shard with no Node-only files omits that Node process. Missing or
 invalid inventory evidence retains the Node run. Dual validation runs
-the complete UI selection on Node, then excludes only the usage detail file from Bun;
-Its assertions remain required on Node, with no added skips.
+the complete UI selection on Node, then excludes the two GC-sensitive files from Bun.
+Their assertions remain required on Node, with no added skips.
 Partitions without browser files retain browser discovery for native sharding
 but omit Chromium version probing and Playwright's speculative browser startup.
 
@@ -222,18 +244,20 @@ functions remain valid after the original cache buffer is garbage-collected.
 It also keeps allocator ownership during zero-time event-loop polls, while
 retaining the idle handoff for polls that can block.
 
-The pinned build pairs Bun `ddfce5d01f6a436203a8f41fc8bff074f9b09614` with WebKit
-`4429d11361a5f1680a9e57884ebc1941c2cc7e48`, containing the
+The pinned build pairs Bun `9a6bbd457b1818926609479218f92e11eac1e2d5` with WebKit
+`440fe0f8519ea493007a5161813e45b2aeaca2c5`, containing the
 `caa5d805b646edc59ca0d12b49a7a574f942dedb` FTL backport.
 The backport preserves string bounds checks through FTL dead-code elimination,
 fixing the CSS tokenizer's end-of-input loop.
 Its prerelease tag includes both source revisions because `Bun.revision` alone
 does not distinguish builds linked against different WebKit revisions.
 
-Node continues to own orchestration, builds, compiler preparation, and cleanup;
-Vitest and its workers use the selected runtime. Bun and Node have separate
-transform-cache directories and timing identities. Either runtime failing fails
-the job. This adds no matrix rows or runner registrations.
+Node continues to own orchestration, builds, compiler preparation, and cleanup.
+Vitest and its workers use the selected runtime; qualified native selections use
+`bun test` and skip Vitest compilation and transform caching. Bun/Vitest, native
+Bun, and Node have separate timing identities, and the two Vitest runtimes keep
+separate transform-cache directories. Any test engine failing fails the job.
+This adds no matrix rows or runner registrations.
 
 `NODE_OPTIONS`, where configured, limits Node heaps; the UI lane retains Node's
 default heap limit. Bun does not use that V8 limit. Compare observed memory use alongside elapsed time before admitting more

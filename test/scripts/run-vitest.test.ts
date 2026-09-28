@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { createInterface } from "node:readline";
+import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ import {
   resolveVitestNodeArgs,
   resolveVitestNoOutputTimeoutMs,
 } from "../../scripts/lib/vitest-process-env.mts";
-import { resolveVitestTestCommand } from "../../scripts/lib/vitest-test-runtime.mts";
+import * as testRuntime from "../../scripts/lib/vitest-test-runtime.mts";
 import {
   createVitestUnhandledErrorDetector,
   writeVitestUnhandledErrorSummary,
@@ -37,6 +38,7 @@ import {
   resolveMissingExplicitTestFiles,
   resolveTestProjectsDelegationArgs,
   resolveVitestSpawnParams,
+  runVitest,
   spawnWatchedVitestProcess,
   shouldSuppressVitestStderrLine,
 } from "../../scripts/run-vitest.mts";
@@ -126,7 +128,7 @@ describe("scripts/run-vitest", () => {
       ];
       const flags = ["--no-maglev", "--no-concurrent-sparkplug"];
       expect(
-        resolveVitestTestCommand([...flags, ...operands], {
+        testRuntime.resolveVitestTestCommand([...flags, ...operands], {
           OPENCLAW_VITEST_RUNTIME: runtime,
         }),
       ).toEqual({
@@ -155,10 +157,194 @@ describe("scripts/run-vitest", () => {
 
   it("keeps native preparation tools on Node when tests select Bun", () => {
     const args = ["--import", "tsx", "scripts/ensure-playwright-chromium.mts"];
-    expect(resolveVitestTestCommand(args, { OPENCLAW_VITEST_RUNTIME: "bun" })).toEqual({
+    expect(testRuntime.resolveVitestTestCommand(args, { OPENCLAW_VITEST_RUNTIME: "bun" })).toEqual({
       command: process.execPath,
       args,
     });
+  });
+
+  it.each(
+    [
+      [],
+      ["test/scripts/run-vitest.test.ts"],
+      ["./test/scripts"],
+      ["./test/scripts/*.test.ts"],
+      ["./test/scripts/run-vitest.test.ts", "--timeout=1"],
+      ["./test/scripts/run-vitest.test.ts:1"],
+      ["./../outside.test.ts"],
+      ["./test/scripts/missing-native-bun-file.test.ts"],
+    ].map((files) => ({ files })),
+  )("rejects unbounded native Bun operands $files before launching", async ({ files }) => {
+    const command = vi.spyOn(testRuntime, "resolveNativeBunTestCommand");
+    try {
+      await expect(runVitest(vi.fn(), ["--native-bun", ...files], {})).rejects.toThrow(
+        /Native Bun test/u,
+      );
+      expect(command).not.toHaveBeenCalled();
+    } finally {
+      command.mockRestore();
+    }
+  });
+
+  it("refuses native Bun admission after its expected parent disconnected", async () => {
+    const connected = Object.getOwnPropertyDescriptor(process, "connected");
+    const command = vi.spyOn(testRuntime, "resolveNativeBunTestCommand");
+    Object.defineProperty(process, "connected", { configurable: true, value: false });
+    try {
+      await expect(
+        runVitest(vi.fn(), ["--native-bun", "./test/scripts/run-vitest.test.ts"], {
+          OPENCLAW_NATIVE_BUN_PARENT_IPC: "1",
+        }),
+      ).rejects.toThrow("Native Bun test parent IPC disconnected before admission");
+      expect(command).not.toHaveBeenCalled();
+    } finally {
+      if (connected) {
+        Object.defineProperty(process, "connected", connected);
+      } else {
+        Reflect.deleteProperty(process, "connected");
+      }
+      command.mockRestore();
+    }
+  });
+
+  posixIt(
+    "runs the native Bun entrypoint with bounded arguments and preserves failure",
+    async () => {
+      const files = ["./test/scripts/run-vitest.test.ts"];
+      const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+      const expectedCommand = testRuntime.resolveNativeBunTestCommand(files);
+      expect(expectedCommand).toEqual({
+        command: "bun",
+        args: [
+          "test",
+          "--no-env-file",
+          "--tsconfig-override",
+          nodePath.join(repoRoot, "tsconfig.json"),
+          "--preload",
+          nodePath.join(repoRoot, "test/setup.env.ts"),
+          "--timeout",
+          "120000",
+          ...files,
+        ],
+      });
+      const command = vi.spyOn(testRuntime, "resolveNativeBunTestCommand").mockReturnValue({
+        command: process.execPath,
+        args: ["-e", "process.exitCode = 7"],
+      });
+      const exitCode = process.exitCode;
+      try {
+        await runVitest(vi.fn(), ["--native-bun", ...files], {});
+        expect(command).toHaveBeenCalledWith(files);
+        expect(process.exitCode).toBe(7);
+      } finally {
+        process.exitCode = exitCode;
+        command.mockRestore();
+      }
+    },
+  );
+
+  posixIt("joins native Bun descendants when its CI parent disconnects", async () => {
+    const fixture = [
+      'const { spawn } = require("node:child_process");',
+      'const descendant = spawn(process.execPath, ["-e",',
+      '  "setInterval(() => {}, 1000); process.send(process.pid);",',
+      '], { stdio: ["ignore", "ignore", "ignore", "ipc"] });',
+      'descendant.once("message", (pid) => {',
+      "  descendant.disconnect();",
+      '  process.stdout.write(JSON.stringify({ child: process.pid, descendant: pid }) + "\\n");',
+      "});",
+      "descendant.unref();",
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+    const runtimeUrl = new URL("../../scripts/lib/vitest-test-runtime.mts", import.meta.url).href;
+    const replacement = `data:text/javascript,${encodeURIComponent(
+      `export function resolveNativeBunTestCommand() {
+        return { command: process.execPath, args: ["-e", ${JSON.stringify(fixture)}] };
+      }
+      export function resolveVitestTestCommand() { throw new Error("unexpected Vitest launch"); }`,
+    )}`;
+    const preload = `data:text/javascript,${encodeURIComponent(
+      `import { registerHooks } from "node:module";
+      registerHooks({ resolve(specifier, context, nextResolve) {
+        const resolved = nextResolve(specifier, context);
+        return resolved.url === ${JSON.stringify(runtimeUrl)}
+          ? { url: ${JSON.stringify(replacement)}, shortCircuit: true }
+          : resolved;
+      } });`,
+    )}`;
+    const child = spawn(
+      process.versions.bun ? "node" : process.execPath,
+      [
+        "--import",
+        preload,
+        nodePath.resolve("scripts/run-vitest.mts"),
+        "--native-bun",
+        "./test/scripts/run-vitest.test.ts",
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        env: { ...process.env, OPENCLAW_NATIVE_BUN_PARENT_IPC: "1" },
+      },
+    );
+    let stderr = "";
+    child.stderr!.setEncoding("utf8");
+    child.stderr!.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-16_384);
+    });
+    // Explicit IPC disconnect can omit Node's aggregate close notification.
+    // Observe termination and drain both pipes independently instead.
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        child.once("exit", (code, signal) => resolve({ code, signal }));
+        child.once("error", reject);
+      },
+    );
+    const joined = Promise.all([exited, finished(child.stdout!), finished(child.stderr!)]).then(
+      ([result]) => result,
+    );
+    const completed = Promise.race([
+      joined,
+      delay(LOAD_SENSITIVE_PROCESS_TIMEOUT_MS, undefined, { ref: false }).then(() => {
+        throw new Error(
+          `timed out waiting for native wrapper exit/output: signal=${child.signalCode}, stdoutEnded=${child.stdout?.readableEnded}, stderrEnded=${child.stderr?.readableEnded}\n${stderr}`,
+        );
+      }),
+    ]);
+    const lines = createInterface({ input: child.stdout! });
+    let nativePid = 0;
+    let descendantPid = 0;
+    const ready = new Promise<void>((resolve, reject) => {
+      lines.once("line", (line) => {
+        try {
+          const pids = JSON.parse(line);
+          nativePid = pids.child;
+          descendantPid = pids.descendant;
+          expect(isProcessAlive(nativePid)).toBe(true);
+          expect(isProcessAlive(descendantPid)).toBe(true);
+          child.disconnect();
+          resolve();
+        } catch (error) {
+          reject(new Error("Failed to verify native Bun child readiness", { cause: error }));
+        }
+      });
+      lines.once("close", () => reject(new Error("native child closed before readiness")));
+    });
+    try {
+      const [, result] = await Promise.all([ready, completed]);
+      expect(result).toEqual({ code: null, signal: "SIGTERM" });
+      expect(child.stdout!.readableEnded).toBe(true);
+      expect(child.stderr!.readableEnded).toBe(true);
+      expect(isProcessGroupStopped(child.pid!)).toBe(true);
+      expect(isProcessGroupStopped(nativePid)).toBe(true);
+    } finally {
+      lines.close();
+      forceKillVitestProcessGroup(child);
+      if (nativePid) {
+        forceKillVitestProcessGroup({ pid: nativePid });
+      }
+      await completed;
+    }
   });
 
   it.each(["mjs", "mts"])(
@@ -1178,38 +1364,49 @@ registerHooks({resolve(specifier, context, nextResolve) {
   });
 
   posixIt.each([
-    { timeout: false, exitCode: 0, expectedCode: 0 },
-    { timeout: true, exitCode: 0, expectedCode: 1 },
-    { timeout: true, exitCode: 7, expectedCode: 7 },
-  ])("settles descendants (timeout=$timeout, child=$exitCode)", async (row) => {
+    { timeout: false, exitCode: 0, expectedCode: 0, nativeBun: false },
+    { timeout: true, exitCode: 0, expectedCode: 1, nativeBun: false },
+    { timeout: true, exitCode: 7, expectedCode: 7, nativeBun: false },
+    { timeout: true, exitCode: 0, expectedCode: 1, nativeBun: true },
+  ])("settles descendants (timeout=$timeout, child=$exitCode, native=$nativeBun)", async (row) => {
     const watchedEnv = {
       OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS: "5000",
+      ...(row.nativeBun ? { OPENCLAW_LIVE_TEST: "1", OPENCLAW_LIVE_USE_REAL_HOME: "1" } : {}),
     };
     let noOutputTimedOut = false;
     // Only watchdog timers are fake; child I/O, diagnostics, and group joins stay real.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { clock } = setTimeout as typeof setTimeout & { clock: { tick(ms: number): void } };
     let watched: ReturnType<typeof spawnWatchedVitestProcess>;
+    const fixtureArgs = [
+      "-e",
+      [
+        'const { spawn } = require("node:child_process");',
+        `process.once("SIGTERM", () => process.exit(${row.exitCode}));`,
+        'const descendant = spawn(process.execPath, ["-e",',
+        '  "setInterval(() => {}, 1000); process.send(process.pid);",',
+        '], { stdio: ["ignore", "ignore", "ignore", "ipc"] });',
+        'descendant.once("message", (pid) => {',
+        "  descendant.disconnect();",
+        row.nativeBun
+          ? '  process.stdout.write(JSON.stringify({ pid, home: process.env.HOME, tmp: process.env.TMPDIR, live: process.env.OPENCLAW_LIVE_TEST, realHome: process.env.OPENCLAW_LIVE_USE_REAL_HOME }) + "\\n");'
+          : "  process.stdout.write(`${pid}\\n`);",
+        "});",
+        "descendant.unref();",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    ];
+    const nativeCommand = row.nativeBun
+      ? vi.spyOn(testRuntime, "resolveNativeBunTestCommand").mockReturnValue({
+          command: process.execPath,
+          args: fixtureArgs,
+        })
+      : undefined;
     try {
       watched = spawnWatchedVitestProcess({
-        pnpmArgs: [
-          "exec",
-          "node",
-          "-e",
-          [
-            'const { spawn } = require("node:child_process");',
-            `process.once("SIGTERM", () => process.exit(${row.exitCode}));`,
-            'const descendant = spawn(process.execPath, ["-e",',
-            '  "setInterval(() => {}, 1000); process.send(process.pid);",',
-            '], { stdio: ["ignore", "ignore", "ignore", "ipc"] });',
-            'descendant.once("message", (pid) => {',
-            "  descendant.disconnect();",
-            "  process.stdout.write(`${pid}\\n`);",
-            "});",
-            "descendant.unref();",
-            "setInterval(() => {}, 1000);",
-          ].join("\n"),
-        ],
+        ...(row.nativeBun
+          ? { nativeBunFiles: ["./test/scripts/run-vitest.test.ts"] }
+          : { pnpmArgs: ["exec", "node", ...fixtureArgs] }),
         spawnParams: {
           detached: true,
           env: watchedEnv,
@@ -1222,16 +1419,28 @@ registerHooks({resolve(specifier, context, nextResolve) {
       });
     } finally {
       vi.useRealTimers();
+      nativeCommand?.mockRestore();
     }
     const rawExit = waitForClose(watched.child, LOAD_SENSITIVE_PROCESS_TIMEOUT_MS);
     let descendantPid = 0;
+    let nativeTempRoot: string | undefined;
     const lines = createInterface({ input: watched.child.stdout! });
     const ready = new Promise<void>((resolve, reject) => {
       lines.once("line", (line) => {
         try {
           // The descendant acknowledges its running loop on the watched pipe. Check
           // and signal in this notification, before a delayed poll can outlive it.
-          descendantPid = Number(line);
+          if (row.nativeBun) {
+            const state = JSON.parse(line);
+            descendantPid = state.pid;
+            nativeTempRoot = state.tmp;
+            expect(state.home).toBe(nodePath.join(state.tmp, "home"));
+            expect(fs.existsSync(state.home)).toBe(true);
+            expect(state.live).toBeUndefined();
+            expect(state.realHome).toBeUndefined();
+          } else {
+            descendantPid = Number(line);
+          }
           expect(Number.isInteger(descendantPid) && descendantPid > 0).toBe(true);
           expect(isProcessAlive(descendantPid)).toBe(true);
           if (row.timeout) {
@@ -1250,24 +1459,7 @@ registerHooks({resolve(specifier, context, nextResolve) {
     try {
       const snapshot = await Promise.race([
         Promise.all([ready, rawExit, watched.completion]).then(([, raw, result]) => {
-          const psArgs =
-            process.platform === "linux" ? ["-eL", "-o", "pgid=,state="] : ["-axo", "pgid=,state="];
-          const stateResult = spawnSync("ps", psArgs, {
-            encoding: "utf8",
-          });
-          const rows = stateResult.stdout
-            .split(/\r?\n/)
-            .filter(Boolean)
-            .map((line) => /^\s*(\d+)\s+(\S+)\s*$/.exec(line));
-          const groupStopped =
-            !stateResult.error &&
-            stateResult.signal === null &&
-            stateResult.stderr.trim() === "" &&
-            stateResult.status === 0 &&
-            rows.every(Boolean) &&
-            rows
-              .filter((processRow) => Number(processRow?.[1]) === watched.child.pid)
-              .every((processRow) => /^[ZX]/.test(processRow?.[2] ?? ""));
+          const groupStopped = isProcessGroupStopped(watched.child.pid!);
           return { groupStopped, noOutputTimedOut, raw, result };
         }),
         delay(LOAD_SENSITIVE_PROCESS_TIMEOUT_MS, undefined, { ref: false }).then(() => {
@@ -1281,6 +1473,9 @@ registerHooks({resolve(specifier, context, nextResolve) {
         raw: { code: row.exitCode, signal: null },
         result: { code: row.expectedCode, signal: null, groupJoined: true },
       });
+      if (nativeTempRoot) {
+        expect(fs.existsSync(nativeTempRoot)).toBe(false);
+      }
     } finally {
       lines.close();
       watched.teardown();
@@ -1598,4 +1793,22 @@ function isProcessAlive(pid: number) {
   } catch {
     return false;
   }
+}
+
+function isProcessGroupStopped(pid: number) {
+  const psArgs =
+    process.platform === "linux" ? ["-eL", "-o", "pgid=,state="] : ["-axo", "pgid=,state="];
+  const stateResult = spawnSync("ps", psArgs, { encoding: "utf8" });
+  const rows = stateResult.stdout
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => /^\s*(\d+)\s+(\S+)\s*$/u.exec(line));
+  return (
+    !stateResult.error &&
+    stateResult.signal === null &&
+    stateResult.stderr.trim() === "" &&
+    stateResult.status === 0 &&
+    rows.every(Boolean) &&
+    rows.filter((row) => Number(row?.[1]) === pid).every((row) => /^[ZX]/u.test(row?.[2] ?? ""))
+  );
 }
