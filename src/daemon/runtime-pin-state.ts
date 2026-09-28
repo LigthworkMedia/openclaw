@@ -17,6 +17,8 @@ import { resolveSystemdServiceName } from "./systemd-service-files.js";
 const pinSchema = z.object({ runtime: z.enum(["node", "bun"]), path: z.string().min(1) });
 const recordSchema = z.object({ version: z.literal(1), pin: pinSchema, definition: z.string() });
 
+export class DaemonRuntimePinDefinitionChangedError extends Error {}
+
 type PinScope = { kind: "gateway" | "node"; env: NodeJS.ProcessEnv };
 function resolveScope({ kind, env }: PinScope) {
   const nativeEnv = kind === "node" ? { ...env, ...resolveNodeServiceIdentityEnvironment() } : env;
@@ -59,7 +61,7 @@ export function readDaemonRuntimePin(
   }
   const record = recordSchema.parse(value);
   if (record.definition !== definition(command)) {
-    throw new Error(
+    throw new DaemonRuntimePinDefinitionChangedError(
       "Managed service changed since its runtime pin was saved. Reinstall with an explicit --runtime or --runtime-path to select runtime intent.",
     );
   }

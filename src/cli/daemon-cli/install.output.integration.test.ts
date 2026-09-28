@@ -66,6 +66,7 @@ vi.mock("../../daemon/runtime-paths.js", async (importOriginal) => ({
 
 const daemonExec = await import("../../daemon/exec-file.js");
 const runtimePinState = await import("../../daemon/runtime-pin-state.js");
+const configMachineState = await import("../../state/config-machine-state.js");
 const { runDaemonInstall } = await import("./install.js");
 const { clearConfigCache, clearRuntimeConfigSnapshot, readConfigFileSnapshot } =
   await import("../../config/config.js");
@@ -157,25 +158,32 @@ describe("runDaemonInstall integration", () => {
     clearConfigCache();
   });
 
-  it.each(["inspection", "validation"] as const)(
+  it.each(["transient-read", "definition-changed", "validation"] as const)(
     "classifies a saved runtime pin failure during %s without installing",
     async (failure) => {
       const runtimePath = path.join(tempHome, "missing", "node");
       serviceMock.readCommand.mockResolvedValue({
         programArguments: [runtimePath, "/opt/openclaw/openclaw.mjs", "gateway"],
       });
-      const readRuntimePin = runtimePinState.readDaemonRuntimePinForInstall;
-      const readPin = vi.spyOn(runtimePinState, "readDaemonRuntimePinForInstall");
-      if (failure === "inspection") {
-        readPin.mockImplementation(() => {
-          throw new Error("Saved runtime pin cannot be read");
+      if (failure === "transient-read") {
+        vi.spyOn(configMachineState, "readConfigMachineState").mockImplementation(() => {
+          throw Object.assign(new Error("EIO: pin state read failed"), { code: "EIO" });
+        });
+      } else if (failure === "definition-changed") {
+        vi.spyOn(configMachineState, "readConfigMachineState").mockReturnValue({
+          version: 1,
+          pin: { runtime: "node", path: runtimePath },
+          definition: "previous-service-definition",
         });
       } else {
-        readPin.mockImplementation((...args) => ({
-          ...readRuntimePin(...args),
-          stored: true,
-          pin: { runtime: "node", path: runtimePath },
-        }));
+        const readRuntimePin = runtimePinState.readDaemonRuntimePinForInstall;
+        vi.spyOn(runtimePinState, "readDaemonRuntimePinForInstall").mockImplementation(
+          (...args) => ({
+            ...readRuntimePin(...args),
+            stored: true,
+            pin: { runtime: "node", path: runtimePath },
+          }),
+        );
       }
 
       await expect(runDaemonInstall({ json: true, force: true })).rejects.toThrow("__exit__:1");
@@ -187,10 +195,12 @@ describe("runDaemonInstall integration", () => {
             action: "install",
             ok: false,
             error:
-              failure === "inspection"
-                ? "Runtime pin inspection failed: Error: Saved runtime pin cannot be read"
-                : `Invalid runtime pin: Error: Pinned runtime is not executable: ${runtimePath}`,
-            result: "runtime-pin-invalid",
+              failure === "transient-read"
+                ? "Runtime pin inspection failed: Error: EIO: pin state read failed"
+                : failure === "definition-changed"
+                  ? "Runtime pin inspection failed: Error: Managed service changed since its runtime pin was saved. Reinstall with an explicit --runtime or --runtime-path to select runtime intent."
+                  : `Invalid runtime pin: Error: Pinned runtime is not executable: ${runtimePath}`,
+            ...(failure === "transient-read" ? {} : { result: "runtime-pin-invalid" }),
           },
           null,
           2,

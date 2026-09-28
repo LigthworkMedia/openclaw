@@ -24,7 +24,10 @@ import {
   resolvePreferredNodePath,
   resolvePinnedDaemonRuntimePath,
 } from "../../daemon/runtime-paths.js";
-import { readDaemonRuntimePinForInstall } from "../../daemon/runtime-pin-state.js";
+import {
+  DaemonRuntimePinDefinitionChangedError,
+  readDaemonRuntimePinForInstall,
+} from "../../daemon/runtime-pin-state.js";
 import { readEmbeddedGatewayToken } from "../../daemon/service-audit.js";
 import { mergeGatewayServiceEnv } from "../../daemon/service-env-merge.js";
 import { sanitizeServiceInspectionError } from "../../daemon/service-inspection-error.js";
@@ -211,7 +214,11 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
       opts.runtime !== undefined || opts.runtimePath !== undefined,
     );
   } catch (error) {
-    fail(`Runtime pin inspection failed: ${String(error)}`, undefined, "runtime-pin-invalid");
+    fail(
+      `Runtime pin inspection failed: ${String(error)}`,
+      undefined,
+      error instanceof DaemonRuntimePinDefinitionChangedError ? "runtime-pin-invalid" : undefined,
+    );
     return;
   }
   let pinnedRuntimePath = opts.runtimePath ?? (opts.runtime ? undefined : pinSnapshot.pin?.path);
