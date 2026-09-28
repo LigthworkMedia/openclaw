@@ -435,7 +435,8 @@ vi.mock("../../plugins/hook-runner-global.js", () => ({
   getGlobalPluginRegistry: () => hookMocks.registry,
   resetGlobalHookRunner: vi.fn(),
 }));
-vi.mock("../../acp/runtime/session-meta.js", () => ({
+vi.mock("../../acp/runtime/session-meta.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../acp/runtime/session-meta.js")>()),
   listAcpSessionEntries: acpMocks.listAcpSessionEntries,
   readAcpSessionEntry: acpMocks.readAcpSessionEntry,
   readAcpSessionEntryAsync: async (params: {
