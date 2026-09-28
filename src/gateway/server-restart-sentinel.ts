@@ -18,6 +18,7 @@ import {
   type DeliveryQueueStateContext,
 } from "../infra/delivery-queue-state-context.js";
 import { formatErrorMessage, toErrorObject } from "../infra/errors.js";
+import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
 import { requestHeartbeat } from "../infra/heartbeat-wake.js";
 import {
   clearRestartSentinelIfRevision,
@@ -88,7 +89,7 @@ import {
 
 const log = createSubsystemLogger("gateway/restart-sentinel");
 const RESTART_CONTINUATION_BUSY_RETRY_DELAY_MS = process.env.VITEST ? 1 : 6_000;
-const CONTROL_PLANE_UPDATE_PENDING_RETRY_DELAY_MS = process.env.VITEST ? 1 : 2_000;
+const CONTROL_PLANE_UPDATE_PENDING_RETRY_DELAY_MS = 2_000;
 const CONTROL_PLANE_UPDATE_PENDING_MAX_ATTEMPTS = 900;
 let latestUpdateRestartSentinel: RestartSentinelPayload | null = null;
 
@@ -375,18 +376,21 @@ export async function recoverPendingRestartContinuationDeliveries(params: {
 }
 
 async function loadRestartSentinelStartupTask(params: {
+  scheduler: GatewayScheduler;
+  signal: AbortSignal;
   deps: CliDeps;
   attempt?: number;
   context: DeliveryQueueStateContext;
   shouldRun?: () => boolean;
   pendingUpdate?: PendingUpdateSentinelIdentity;
-  trackImport?: (work: Promise<unknown>) => void;
+  trackWork?: (work: Promise<unknown>) => void;
 }): Promise<StartupTask | null> {
   const noticeContext = params.context;
   const queueContext = noticeContext.workerContext;
   const env = queueContext.environment;
   const snapshot = await readRestartSentinelStartupSnapshot({
     ...params,
+    trackImport: params.trackWork,
     warn: (message) => log.warn(message),
   });
   if (!snapshot) {
@@ -424,7 +428,7 @@ async function loadRestartSentinelStartupTask(params: {
   );
 
   const run = async () => {
-    if (params.shouldRun?.() === false) {
+    if (params.signal.aborted || params.shouldRun?.() === false) {
       return { status: "skipped" as const, reason: "gateway-stopped" };
     }
     let routedSessionKey = sessionKey;
@@ -432,21 +436,37 @@ async function loadRestartSentinelStartupTask(params: {
     if (isPendingControlPlaneUpdateRestartSentinel(payload) && !pendingSnapshotSuperseded) {
       const attempt = params.attempt ?? 0;
       if (attempt < CONTROL_PLANE_UPDATE_PENDING_MAX_ATTEMPTS) {
-        const timer = setTimeout(() => {
-          if (params.shouldRun?.() === false) {
-            return;
-          }
-          void runWithGatewayIndependentRootWorkAdmission(async () => {
-            await scheduleRestartSentinelWakeAttempt({
-              ...params,
-              attempt: attempt + 1,
-              ...(pendingUpdate ? { pendingUpdate } : {}),
+        const cancel = () => retry.cancel();
+        const retry = params.scheduler.schedule({
+          id: "restart-sentinel:pending-update",
+          delayMs: CONTROL_PLANE_UPDATE_PENDING_RETRY_DELAY_MS,
+          run: () => {
+            params.signal.removeEventListener("abort", cancel);
+            if (params.signal.aborted || params.shouldRun?.() === false) {
+              return;
+            }
+            const work = runWithGatewayIndependentRootWorkAdmission(
+              async () => {
+                await scheduleRestartSentinelWakeAttempt({
+                  ...params,
+                  attempt: attempt + 1,
+                  ...(pendingUpdate ? { pendingUpdate } : {}),
+                });
+              },
+              "restart-sentinel:wake",
+              params.signal,
+            ).catch((err: unknown) => {
+              if (!params.signal.aborted) {
+                log.warn(
+                  `restart sentinel pending update retry failed: ${formatErrorMessage(err)}`,
+                );
+              }
             });
-          }, "restart-sentinel:wake").catch((err: unknown) => {
-            log.warn(`restart sentinel pending update retry failed: ${formatErrorMessage(err)}`);
-          });
-        }, CONTROL_PLANE_UPDATE_PENDING_RETRY_DELAY_MS);
-        timer.unref?.();
+            params.trackWork?.(work);
+            return work;
+          },
+        });
+        params.signal.addEventListener("abort", cancel, { once: true });
         return { status: "skipped" as const, reason: "update-restart-pending" };
       }
       log.warn(`${summary}: update restart sentinel remained pending after retry window`, {
@@ -692,14 +712,16 @@ async function loadRestartSentinelStartupTask(params: {
 }
 
 async function scheduleRestartSentinelWakeAttempt(params: {
+  scheduler: GatewayScheduler;
+  signal: AbortSignal;
   deps: CliDeps;
   attempt: number;
   context: DeliveryQueueStateContext;
   shouldRun?: () => boolean;
   pendingUpdate?: PendingUpdateSentinelIdentity;
-  trackImport?: (work: Promise<unknown>) => void;
+  trackWork?: (work: Promise<unknown>) => void;
 }) {
-  if (params.shouldRun?.() === false) {
+  if (params.signal.aborted || params.shouldRun?.() === false) {
     return;
   }
   const task = await loadRestartSentinelStartupTask(params);
@@ -710,10 +732,12 @@ async function scheduleRestartSentinelWakeAttempt(params: {
 }
 
 export async function scheduleRestartSentinelWake(params: {
+  scheduler: GatewayScheduler;
+  signal: AbortSignal;
   deps: CliDeps;
   context?: DeliveryQueueStateContext;
   shouldRun?: () => boolean;
-  trackImport?: (work: Promise<unknown>) => void;
+  trackWork?: (work: Promise<unknown>) => void;
 }) {
   await scheduleRestartSentinelWakeAttempt({
     ...params,

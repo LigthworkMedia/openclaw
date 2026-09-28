@@ -126,6 +126,7 @@ const gatewayLocks: Array<{ release: () => Promise<void> }> = [];
 const { scheduleRestartSentinelWake, refreshLatestUpdateRestartSentinel } =
   await import("./server-restart-sentinel.js");
 let envSnapshot: ReturnType<typeof captureEnv>;
+let scheduler: ReturnType<typeof createTestGatewayScheduler>;
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
   afterEach(async () => {
     await Promise.all(sidecars.splice(0).map(async (sidecar) => await sidecar.stop()));
@@ -146,6 +147,8 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
 });
 
 beforeEach(() => {
+  scheduler = createTestGatewayScheduler();
+  sidecars.push(scheduler);
   envSnapshot = captureEnv([
     "OPENCLAW_STATE_DIR",
     "OPENCLAW_SUPERVISOR_MODE",
@@ -425,7 +428,7 @@ it.each([false, true])(
       return undefined;
     });
 
-    await scheduleRestartSentinelWake({ deps: {} });
+    await scheduleRestartSentinelWake({ scheduler, signal: scheduler.signal, deps: {} });
 
     expect(mocks.hookRunner.runMessageSending).toHaveBeenCalledOnce();
     expect(await readRestartSentinel(unrelatedEnv)).toEqual(unrelated);
@@ -519,7 +522,13 @@ it.each([
       });
     }
 
-    await scheduleRestartSentinelWake({ deps: {}, context, shouldRun: () => shouldRun });
+    await scheduleRestartSentinelWake({
+      scheduler,
+      signal: scheduler.signal,
+      deps: {},
+      context,
+      shouldRun: () => shouldRun,
+    });
 
     if (replacement === "stopped") {
       expect(mocks.sendDurableMessageBatchCore).not.toHaveBeenCalled();
@@ -548,7 +557,7 @@ it.each([
           }),
         }),
       );
-      await scheduleRestartSentinelWake({ deps: {}, context });
+      await scheduleRestartSentinelWake({ scheduler, signal: scheduler.signal, deps: {}, context });
       expect(mocks.dispatchAssembledChannelTurn).toHaveBeenCalledOnce();
     }
   },
@@ -650,7 +659,6 @@ it.each([
     const clock = createGatewaySchedulerClock();
     const scheduler = createTestGatewayScheduler(clock.clock);
     sidecars.push(scheduler);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     setTestEnvValue("VITEST", "");
     setTestEnvValue("NODE_ENV", "production");
     const warn = vi.fn();
@@ -713,7 +721,7 @@ it.each([
         await Promise.all(sidecars.splice(0).map(async (sidecar) => await sidecar.stop()));
       }
       await fs.writeFile(sourcePath, JSON.stringify({ version: 1, payload: final }));
-      await vi.advanceTimersByTimeAsync(1);
+      await clock.advanceBy(2_000);
       await Promise.all(wakeTasks);
     }
     if (startsWithFinal || phase === "late-final") {
@@ -726,7 +734,13 @@ it.each([
       expect(await readRestartSentinel(env)).toBeNull();
       await expect(fs.stat(sourcePath)).rejects.toMatchObject({ code: "ENOENT" });
       await fs.writeFile(sourcePath, JSON.stringify({ version: 1, payload: final }));
-      await scheduleRestartSentinelWake({ deps: {}, context, shouldRun: () => true });
+      await scheduleRestartSentinelWake({
+        scheduler,
+        signal: scheduler.signal,
+        deps: {},
+        context,
+        shouldRun: () => true,
+      });
       expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledOnce();
       expect(mocks.dispatchAssembledChannelTurn).toHaveBeenCalledOnce();
     } else {
@@ -813,8 +827,6 @@ it.each([
     const clock = createGatewaySchedulerClock();
     const scheduler = createTestGatewayScheduler(clock.clock);
     sidecars.push(scheduler);
-    // Pending-update retries retain native timers; startup uses the injected scheduler clock.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     setTestEnvValue("VITEST", "");
     setTestEnvValue("NODE_ENV", "production");
     setTestEnvValue("OPENCLAW_SKIP_CHANNELS", "");
@@ -844,11 +856,11 @@ it.each([
     expect(getUpdateRun(run.runId, { env: originalEnv })?.verification.booted).toBe(true);
     expect(await readRestartSentinel(originalEnv)).not.toBeNull();
     expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledTimes(initialNoticeCount);
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(scheduler.nextWakeAtMs).toBe(2_750);
     finishUpdateRun(run.runId, { status: "succeeded" }, { env: originalEnv });
     if (phase === "stopped") {
       await Promise.all(sidecars.splice(0).map(async (sidecar) => await sidecar.stop()));
-      await vi.advanceTimersByTimeAsync(1);
+      await clock.advanceBy(2_000);
       expect(mocks.sendDurableMessageBatchCore).not.toHaveBeenCalled();
       expect(await readRestartSentinel(originalEnv)).not.toBeNull();
       expect(await readRestartSentinel(unrelatedEnv)).toEqual(unrelated);
@@ -865,7 +877,7 @@ it.each([
             },
         originalEnv,
       );
-      await vi.advanceTimersByTimeAsync(1);
+      await clock.advanceBy(2_000);
       await admittedWork.mock.results.at(-1)?.value;
       expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledTimes(initialNoticeCount);
       expect(await readRestartSentinel(originalEnv)).toEqual(replacement);
@@ -873,7 +885,7 @@ it.each([
       return;
     }
     if (phase === "terminal-before-marker") {
-      await vi.advanceTimersByTimeAsync(1);
+      await clock.advanceBy(2_000);
       await admittedWork.mock.results.at(-1)?.value;
       expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledTimes(initialNoticeCount);
       expect(await readRestartSentinel(originalEnv)).not.toBeNull();
@@ -882,7 +894,7 @@ it.each([
       { ...payload, status: "ok", stats: { runId: run.runId } },
       originalEnv,
     );
-    await vi.advanceTimersByTimeAsync(1);
+    await clock.advanceBy(2_000);
     await admittedWork.mock.results.at(-1)?.value;
     expect(mocks.sendDurableMessageBatchCore).toHaveBeenCalledTimes(initialNoticeCount + 1);
     expect(getUpdateRun(run.runId, { env: originalEnv })?.verification.noticeDelivered).toBe(true);
