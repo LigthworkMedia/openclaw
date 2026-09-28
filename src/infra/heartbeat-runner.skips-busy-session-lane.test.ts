@@ -768,6 +768,7 @@ describe("heartbeat runner skips when target session lane is busy", () => {
         }
         runState.admission = { status: "owned" };
         replyOptions.replyOperation.complete();
+        // Clearing the slot starts asynchronous database-claim release.
         await waitForReplyRunSuccessorAdmission(sessionKey, null);
         operation = createReplyOperation({
           sessionKey,
