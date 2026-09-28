@@ -39,7 +39,11 @@ export function slackHuddleStatusPreludeSource(params: MeetingStatusPreludeParam
   const channelOnlySession = Boolean(expectedIdentity && !/^slack-huddle:[TE][A-Z0-9]+:/.test(expectedIdentity));
   const headerMember = identityVerified && Boolean(firstRaw(selectors.channelHeaderInHuddle));
   let workspaceBound = !channelOnlySession || Boolean(window.__openclawSlackHuddleWorkspaces?.[expectedIdentity]);
-  if (!workspaceBound && headerMember && canMutateSession && inCallControl && !preview && !confirmation && !multiDevice) {
+  // Only a session that owns this page lifetime's marker may bind; after a reload an established
+  // session has no marker and fails closed rather than adopting whatever workspace is showing.
+  const ownsPageMarker = Boolean(sameRecordedIdentity && priorMeeting.sessionId === sessionId);
+  if (!workspaceBound && headerMember && canMutateSession && ownsPageMarker && inCallControl && !preview &&
+      !confirmation && !multiDevice) {
     let pageTeam;
     try {
       pageTeam = new URL(location.href).pathname.match(/^\\/(?:client|huddle)\\/([TE][A-Z0-9]{8,})\\//)?.[1];
