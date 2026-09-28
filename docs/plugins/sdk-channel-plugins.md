@@ -32,10 +32,13 @@ shared `message` tool. Your plugin owns:
   targets
 - **Formatting contract** - optional `agentPrompt.inboundFormattingHints`,
   resolved per delivering account. Despite its name, core gives it to every
-  OpenClaw agent turn whose delivery target is the channel: replies,
-  heartbeats, cron announces, and subagent announces. A `message` tool send to
-  another channel does not get that channel's rules, and external ACP agents do
-  not receive it. Keep all formatting rules in this one hook.
+  OpenClaw agent turn whose visible text reaches the channel: replies,
+  heartbeats, cron announces, subagent announces, and cron runs without a
+  reply route that can send with the `message` tool (for example
+  `delivery.mode: "none"`). Such a run uses the message tool's default
+  channel: its current channel, or the only configured channel. A `message`
+  tool send to another channel does not get that channel's rules, and external
+  ACP agents do not receive it. Keep all formatting rules in this one hook.
 
 Core owns the shared message tool, prompt wiring, the outer session-key shape,
 generic `:thread:` bookkeeping, and dispatch. For configured agent group
@@ -72,11 +75,14 @@ message permalink while preparing an inbound reply.
 
 The host retains the first valid HTTP(S) link on the logical session, preserves
 it across resets, and carries it to explicitly spawned or forked child sessions.
-Later delivery-route changes do not replace it. This metadata does not render
-any UI by itself. A channel's browser plugin registers a `session-header`
-accessory to display its link. Discord and Slack use the shared
-`createSessionHeaderLink` helper from `openclaw/plugin-sdk/control-ui` for the
-standard appearance and direct navigation, with no preview or dropdown.
+Later delivery-route changes do not replace it. Upgrades do not backfill
+existing entries: an existing session receives a link only when a later inbound
+event supplies one. There is no historical-message scan or store migration.
+This metadata does not render any UI by itself. A channel's browser plugin
+registers a `session-header` accessory to display its link. Discord and Slack
+use the shared `createSessionHeaderLink` helper from
+`openclaw/plugin-sdk/control-ui` for the standard appearance and direct
+navigation, with no preview or dropdown.
 The helper receives the current session snapshot through the accessory's props;
 it requires no extra Gateway request. See [Feature plugins](/plugins/feature-plugins#contribute-and-replace-views)
 for registration. Other plugin accessories, including their custom HTML, CSS,

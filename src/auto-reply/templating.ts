@@ -548,9 +548,6 @@ function formatTemplateValue(value: unknown): string {
       })
       .join(",");
   }
-  if (typeof value === "object") {
-    return "";
-  }
   return "";
 }
 

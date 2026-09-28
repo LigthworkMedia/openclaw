@@ -7,12 +7,13 @@ export default defineControlUiPlugin({
       id: "conversation-origin",
       placement: "session-header",
       mount: createSessionHeaderLink(({ conversationLink }) => {
-        const hostname = conversationLink && URL.parse(conversationLink.url)?.hostname;
-        return hostname &&
-          (hostname === "slack.com" ||
-            hostname.endsWith(".slack.com") ||
-            hostname === "slack-gov.com" ||
-            hostname.endsWith(".slack-gov.com"))
+        const url = conversationLink && URL.parse(conversationLink.url);
+        // Slack's app_redirect destinations are HTTPS; persisted metadata must not weaken that contract.
+        return url?.protocol === "https:" &&
+          (url.hostname === "slack.com" ||
+            url.hostname.endsWith(".slack.com") ||
+            url.hostname === "slack-gov.com" ||
+            url.hostname.endsWith(".slack-gov.com"))
           ? conversationLink
           : undefined;
       }),

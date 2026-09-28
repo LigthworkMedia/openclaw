@@ -71,6 +71,13 @@ suite.define(() => {
           },
         },
         {
+          key: "agent:main:slack-insecure-link",
+          conversationLink: {
+            label: "Slack",
+            url: "http://slack.com/app_redirect?channel=C123&team=T123",
+          },
+        },
+        {
           key: "agent:main:discord-channel-link",
           conversationLink: {
             label: "Discord Conversation",
@@ -121,7 +128,10 @@ suite.define(() => {
       for (const session of sessions) {
         await navigateToControlUiSession(page, session.key);
         const link = page.locator(".chat-pane-cache__pane--visible .plugin-session-header-link");
-        if (!session.conversationLink) {
+        if (
+          !session.conversationLink ||
+          new URL(session.conversationLink.url).protocol !== "https:"
+        ) {
           await expectBrowser(link).toHaveCount(0);
           continue;
         }

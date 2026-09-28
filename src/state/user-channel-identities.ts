@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
+import { safeParseJson } from "@openclaw/normalization-core/json-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeSortedUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { Check } from "typebox/value";
@@ -34,6 +35,7 @@ import { publishUserProfilesChange } from "./user-profile-list.js";
 import {
   requireResolvedUserProfileMetadataById,
   selectResolvedUserProfileMetadataById,
+  selectUserProfileEmails,
   userProfilesDb,
 } from "./user-profiles-internal.js";
 import { ensureUserProfilesSchema, UserProfileOwnerError } from "./user-profiles-schema.js";
@@ -49,7 +51,7 @@ import type {
 } from "./user-profiles.types.js";
 
 // The dot keeps administrator-attested channel links outside Tailscale login namespaces.
-const CHANNEL_IDENTITY_PROVIDER = "channel.identity";
+export const CHANNEL_IDENTITY_PROVIDER = "channel.identity";
 const POLICY_KEY = "operator.channelPolicy";
 const referenceSchema = z.strictObject({ version: z.literal(1), id: z.uuid() });
 const configuredReferenceSchema = referenceSchema.extend({ version: z.literal(2) });
@@ -232,12 +234,7 @@ export function userChannelIdentitySubject(identity: UserChannelIdentity): strin
 }
 
 function readIdentity(subject: string): UserChannelIdentity | undefined {
-  let tuple: unknown;
-  try {
-    tuple = JSON.parse(subject);
-  } catch {
-    return undefined;
-  }
+  const tuple = safeParseJson(subject);
   if (!Array.isArray(tuple) || tuple.length !== 3) {
     return undefined;
   }
@@ -395,14 +392,7 @@ export function resolveUserChannelIdentityInDatabase(
       return undefined;
     }
     const kysely = userProfilesDb(db);
-    const emails = executeSqliteQuerySync(
-      db,
-      kysely
-        .selectFrom("user_profile_emails")
-        .select("email")
-        .where("profile_id", "=", profile.id)
-        .orderBy("email", "asc"),
-    ).rows.map(({ email }) => email);
+    const emails = selectUserProfileEmails(db, profile.id);
     const loginEmails = emails.filter((email) => {
       const login = classifyTailscaleLogin(email);
       // Legacy email-shaped GitHub aliases must not revive a renamed login's grant.
