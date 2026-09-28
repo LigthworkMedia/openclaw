@@ -8,7 +8,9 @@ import {
   isAgentEventLifecycleGenerationCurrent,
 } from "../../../infra/agent-events.js";
 import { isFastTestRuntimeEnv } from "../../../infra/env.js";
+import { hasSqliteWorkerOutcomeUnknown } from "../../../infra/sqlite-worker-contract.js";
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
+import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
 import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
 import {
   buildAgentRunTerminalOutcomeFromWaitResult,
@@ -24,6 +26,10 @@ import {
   SUBAGENT_ENDED_REASON_KILLED,
 } from "./subagent-lifecycle-events.js";
 import { shouldSuppressSubagentRecoverySessionEffects } from "./subagent-recovery-state.js";
+import {
+  assertSubagentRegistryWriteSourceCurrent,
+  type SubagentRegistryWriteOptions,
+} from "./subagent-registry-persistence.js";
 import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.js";
 import type { SubagentCompletionRequest, SubagentRunRecord } from "./subagent-registry.types.js";
 import { compareSubagentRunGeneration } from "./subagent-run-generation.js";
@@ -133,11 +139,12 @@ export type SubagentManagerOptions = {
   resumedRuns: Set<string>;
   persist(...runIds: string[]): void;
   persistOrThrow(...runIds: string[]): void;
-  persistAsyncOrThrow(
+  persistAsyncOrThrow: (
     context: OpenClawStateWorkerContext,
-    callbacks: { assertCurrent: () => void; onCommitted?: () => void },
+    callbacks: Omit<SubagentRegistryWriteOptions, "context"> & { assertCurrent: () => void },
     ...runIds: string[]
-  ): Promise<void>;
+  ) => Promise<void>;
+  acquireTerminalCompletionLock: (runId: string) => Promise<() => void>;
   callGateway: typeof callGateway;
   getRuntimeConfig: typeof getRuntimeConfig;
   ensureListener(): void;
@@ -152,11 +159,13 @@ export type SubagentManagerOptions = {
     childSessionKey: string;
     fallbackEndedAt: number;
     notBeforeMs?: number;
-  }): SubagentSessionCompletion | null;
+    assertCurrent?: () => void;
+  }): SubagentSessionCompletion | null | Promise<SubagentSessionCompletion | null>;
   resolveSubagentSessionStartedAt(args: {
     childSessionKey: string;
     notBeforeMs?: number;
-  }): number | undefined;
+    assertCurrent?: () => void;
+  }): number | undefined | Promise<number | undefined>;
   notifyContextEngineSubagentEnded(
     args: {
       childSessionKey: string;
@@ -173,7 +182,9 @@ export type SubagentManagerOptions = {
     completedAt: number;
     preserveTranscript?: boolean;
     provisionalKill?: boolean;
-  }): void;
+    stateContext?: OpenClawStateWorkerContext;
+    isCurrent?: () => boolean;
+  }): void | Promise<void>;
   completeSubagentRun(args: SubagentCompletionRequest): Promise<void>;
 };
 
@@ -236,8 +247,18 @@ export class SubagentWaitManager {
   ): Promise<void> => {
     // A current Gateway may observe historical execution; the wait itself owns this generation.
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
+    const stateContext = captureOpenClawStateWorkerContext();
     let waitedEntry: SubagentRunRecord | undefined;
     let completionForRetry: Parameters<typeof this.options.completeSubagentRun>[0] | undefined;
+    const assertCurrent = () => {
+      assertSubagentRegistryWriteSourceCurrent(stateContext);
+      if (
+        !isAgentEventLifecycleGenerationCurrent(lifecycleGeneration) ||
+        this.options.runs.get(runId) !== waitedEntry
+      ) {
+        throw new Error("Subagent completion wait lost its original owner");
+      }
+    };
     const scheduleWaitRetry = (entry: SubagentRunRecord, reason: string, error?: string) => {
       this.options.scheduleSweep({ delayMs: 1_000 });
       const scheduledEntry = entry;
@@ -357,10 +378,12 @@ export class SubagentWaitManager {
       const observedStartedAt =
         typeof wait.startedAt === "number" && Number.isFinite(wait.startedAt)
           ? wait.startedAt
-          : this.options.resolveSubagentSessionStartedAt({
+          : await this.options.resolveSubagentSessionStartedAt({
               childSessionKey: entry.childSessionKey,
               notBeforeMs: entry.execution.startedAt ?? entry.createdAt,
+              assertCurrent,
             });
+      assertCurrent();
       const completeAsRunTimeout = (endedAt?: number, startedAt?: number) =>
         complete({
           outcome: { status: "timeout" },
@@ -379,12 +402,14 @@ export class SubagentWaitManager {
         // subagent run timeouts, the stored run deadline is the completion
         // contract so parent sessions are woken instead of retrying forever.
         const hardRunTimeoutEndedAt = resolveHardRunTimeoutEndedAt(entry, now, observedStartedAt);
-        const completion = this.options.resolveSubagentSessionCompletion({
+        const completion = await this.options.resolveSubagentSessionCompletion({
           childSessionKey: entry.childSessionKey,
           fallbackEndedAt:
             typeof wait.endedAt === "number" ? wait.endedAt : (hardRunTimeoutEndedAt ?? now),
           notBeforeMs: observedStartedAt ?? entry.execution.startedAt ?? entry.createdAt,
+          assertCurrent,
         });
+        assertCurrent();
         if (completion) {
           const completionStartedAt = observedStartedAt ?? completion.startedAt;
           const completionAfterDeadline = resolveCompletionAfterHardRunDeadline({
@@ -466,6 +491,9 @@ export class SubagentWaitManager {
         terminalReply: wait.terminalReply,
       });
     } catch (error) {
+      if (hasSqliteWorkerOutcomeUnknown(error)) {
+        throw error;
+      }
       if (!isAgentEventLifecycleGenerationCurrent(lifecycleGeneration)) {
         return;
       }
@@ -473,6 +501,7 @@ export class SubagentWaitManager {
       if (!current || current !== waitedEntry) {
         return;
       }
+      assertCurrent();
       log.warn("failed to complete subagent run; retrying completion", {
         runId,
         childSessionKey: current.childSessionKey,

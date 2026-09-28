@@ -54,6 +54,7 @@ import {
 import { withSessionHistoryWorkerDatabase } from "./session-transcript-worker-runtime.js";
 import type {
   SessionExactEntriesWorkerResult,
+  SessionExactEntriesWorkerSelection,
   SessionHistoryWorkerDatabase,
 } from "./session-transcript-worker.types.js";
 import type { SessionEntry } from "./types.js";
@@ -404,14 +405,14 @@ type SessionStoreWorkerReadScope = {
   env?: NodeJS.ProcessEnv;
 };
 
-type SessionEntryWorkerRead = SessionStoreWorkerReadScope & {
-  sessionKeys: readonly string[];
-  lifecycleSessionKey?: string;
-  projection?: "full" | "backing" | "sharing" | "list";
-  includeMembers?: boolean;
-  includeParticipantRecords?: boolean;
-  includeAuthorization?: boolean;
-};
+type SessionEntryWorkerRead = SessionStoreWorkerReadScope &
+  SessionExactEntriesWorkerSelection & {
+    lifecycleSessionKey?: string;
+    projection?: "full" | "backing" | "sharing" | "list";
+    includeMembers?: boolean;
+    includeParticipantRecords?: boolean;
+    includeAuthorization?: boolean;
+  };
 
 export type PreparedSessionEntryWorkerRead = {
   result: SessionExactEntriesWorkerResult;
@@ -471,15 +472,17 @@ export function readSessionEntriesFromStoreInWorker(input: SessionEntryWorkerRea
   return withSessionEntriesFromStoreInWorker(input, async (read) => read.result, true);
 }
 
-async function withSessionEntriesFromStoreInWorker<T>(
+export async function withSessionEntriesFromStoreInWorker<T>(
   input: SessionEntryWorkerRead,
   consume: (read: PreparedSessionEntryWorkerRead) => Promise<T>,
   dataOnly = false,
 ): Promise<T> {
+  const selection: SessionExactEntriesWorkerSelection = input.selection
+    ? { selection: input.selection, projection: input.projection }
+    : { sessionKeys: [...new Set(input.sessionKeys)], projection: input.projection };
   const request = {
-    sessionKeys: [...new Set(input.sessionKeys)],
+    ...selection,
     lifecycleSessionKey: input.lifecycleSessionKey,
-    projection: input.projection,
     includeMembers: input.includeMembers,
     includeParticipantRecords: input.includeParticipantRecords,
     includeAuthorization: input.includeAuthorization,

@@ -322,19 +322,39 @@ type SessionEntryListWorkerResult = {
   entries: SessionEntrySummary[];
 };
 
-export type SessionExactEntriesWorkerInput = {
-  kind: "session-exact-entries";
-  database: { agentId: string; path: string };
+export type SessionExactEntriesWorkerSelection =
+  | {
+      sessionKeys: readonly string[];
+      selection?: never;
+      projection?:
+        | "full"
+        | "backing"
+        | "sharing"
+        | "replacement"
+        | "creation"
+        | "list"
+        | "lifecycle";
+    }
+  | {
+      sessionKeys?: never;
+      selection: { kind: "session-id"; sessionId: string };
+      projection: "sharing";
+    };
+
+type SessionExactEntriesWorkerRequest = SessionExactEntriesWorkerSelection & {
   env: NodeJS.ProcessEnv;
-  sessionKeys: readonly string[];
   lifecycleSessionKey?: string;
-  projection?: "full" | "backing" | "sharing" | "replacement" | "creation" | "list" | "lifecycle";
   includeMembers?: boolean;
   includeParticipantRecords?: boolean;
   includeAuthorization?: boolean;
   replacementSelection?: SessionEntryReplacementSelection;
   creationLabel?: string;
   continuation?: CanonicalSessionReaderContinuation;
+};
+
+export type SessionExactEntriesWorkerInput = SessionExactEntriesWorkerRequest & {
+  kind: "session-exact-entries";
+  database: { agentId: string; path: string };
 };
 
 export type SessionExactEntriesWorkerResult = {
@@ -473,9 +493,9 @@ export type SessionTranscriptWorkerInput =
 
 type SessionHistoryDatabaseWorkerInput = Extract<SessionHistoryWorkerInput, { database: unknown }>;
 
-export type SessionHistoryWorkerPreparedInput = {
-  [Input in SessionHistoryDatabaseWorkerInput as Input["kind"]]: Omit<Input, "database">;
-}[SessionHistoryDatabaseWorkerInput["kind"]];
+type PreparedHistoryInput<Input> = Input extends unknown ? Omit<Input, "database"> : never;
+export type SessionHistoryWorkerPreparedInput =
+  PreparedHistoryInput<SessionHistoryDatabaseWorkerInput>;
 
 export type SessionTranscriptWorkerValues = {
   "session-pending-archives": { kind: "session-pending-archives"; pending: boolean };
@@ -600,7 +620,7 @@ export type SessionHistoryWorkerDatabase = {
     signal?: AbortSignal,
   ) => Promise<SessionTranscriptCurrentTurnEntryRead>;
   readExactEntries: (
-    input: Omit<SessionExactEntriesWorkerInput, "kind" | "database">,
+    input: SessionExactEntriesWorkerRequest,
     signal?: AbortSignal,
   ) => Promise<SessionExactEntriesWorkerResult>;
   readRowFacts: (

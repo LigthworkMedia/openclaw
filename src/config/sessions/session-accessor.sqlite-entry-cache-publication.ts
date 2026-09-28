@@ -72,6 +72,7 @@ type PreparedSessionSharingRead = {
   pending: Set<object>;
   facts: CommittedSessionSharingFacts | undefined;
   generation?: {
+    initiallyAbsent?: true;
     current: Pick<SessionEntry, "sessionId" | "lifecycleRevision"> | null | undefined;
   };
 };
@@ -354,7 +355,7 @@ export function retainPreparedSessionGenerationFacts(params: {
   const retained = retainPreparedSessionSharingFacts({
     ...params,
     membership: new Set(),
-    generation: { current: params.entry ?? null },
+    generation: { current: params.entry ?? null, initiallyAbsent: params.entry ? undefined : true },
   });
   return { readCurrent: retained.readGeneration, release: retained.release };
 }
@@ -365,6 +366,13 @@ function publishRetainedSessionGeneration(
   known: boolean,
 ) {
   const generation = read.generation;
+  if (generation?.initiallyAbsent) {
+    // An appearance revokes an absence lease even if a later write deletes the row again.
+    if (generation.current === null) {
+      generation.current = known ? (entry ?? null) : undefined;
+    }
+    return;
+  }
   if (!generation?.current) {
     return;
   }

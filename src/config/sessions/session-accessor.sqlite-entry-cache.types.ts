@@ -29,6 +29,7 @@ export type SessionSharingEntry = Pick<
   | "createdActor"
   | "sandbox"
   | "spawnedBy"
+  | "spawnDepth"
 >;
 
 export function projectSessionSharingEntry(entry: SessionEntry): SessionSharingEntry {
@@ -42,6 +43,7 @@ export function projectSessionSharingEntry(entry: SessionEntry): SessionSharingE
     createdActor: entry.createdActor ? { ...entry.createdActor } : undefined,
     sandbox: entry.sandbox,
     spawnedBy: entry.spawnedBy,
+    spawnDepth: entry.spawnDepth,
   };
 }
 

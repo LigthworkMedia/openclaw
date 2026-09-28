@@ -14,6 +14,7 @@ import { registerQueuedRegistrationAdmissionCases } from "./subagent-registry-qu
 import { registerQueuedCancelledLaunchCases } from "./subagent-registry-queued-cancelled-launch.test-support.js";
 import { registerQueuedRegistrationClaimCases } from "./subagent-registry-queued-registration-claims.test-support.js";
 import { createQueuedRegistrationFixture } from "./subagent-registry-queued-registration.test-support.js";
+import { registerQueuedUnknownKillAuthorityTest } from "./subagent-registry-queued-uncertain-kill.test-support.js";
 import type { SubagentLaunchManager } from "./subagent-registry-run-launch.js";
 import * as registryState from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -92,6 +93,7 @@ afterEach(() => {
 });
 
 const fixture = () => createQueuedRegistrationFixture(mocks);
+registerQueuedUnknownKillAuthorityTest({ fixture, getContext: () => mocks.context! });
 
 it("awaits both registry acknowledgements through the spawn pipeline before publishing success", async () => {
   const f = fixture();
@@ -514,9 +516,7 @@ it.each(["abort", "drain", "replacement", "database retirement"] as const)(
     const completion = work.track(() => f.register());
     const rejection = expect(completion).rejects.toThrow();
     const claimed = f.runs.get(f.registration.runId)!;
-    expect(
-      f.manager.claimSubagentRunKill({ runId: claimed.runId, expected: claimed }),
-    ).toBeDefined();
+    expect(await f.claimSubagentRunKill({ runId: claimed.runId, expected: claimed })).toBeDefined();
     f.writes[0]!.gate.resolve();
     await vi.waitFor(() => expect(mocks.databaseListeners.size).toBe(1));
     try {
