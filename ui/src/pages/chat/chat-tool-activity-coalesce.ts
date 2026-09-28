@@ -47,6 +47,8 @@ type Invocation = {
 
 type CachedBundle = { inputs: unknown[]; message: ProjectedItem["message"] };
 const messagesBySource = new WeakMap<object, Map<string, CachedBundle>>();
+type CachedTurn = { inputs: unknown[]; items: ChatItem[] };
+let previousTurns = new WeakMap<object, CachedTurn>();
 
 function resultBlock(card: ToolCard): Record<string, unknown> {
   return {
@@ -492,15 +494,49 @@ function coalesceTurn(items: ChatItem[]): ChatItem[] {
 
 export function coalesceToolActivityMessages(items: ChatItem[]): ChatItem[] {
   const result: ChatItem[] = [];
+  const nextTurns = new WeakMap<object, CachedTurn>();
+  const appendTurn = (turn: ChatItem[]) => {
+    if (turn.length === 0) {
+      return;
+    }
+    const inputs: unknown[] = [];
+    let owner: object | undefined;
+    for (const item of turn) {
+      const message = item.kind === "message" ? asRecord(item.message) : null;
+      // Transient wrappers carry independently changing stream/attribution facts.
+      if (item.kind !== "message" || !message || message.__openclawToolStreamLive === true) {
+        result.push(...coalesceTurn(turn));
+        return;
+      }
+      owner ??= message;
+      inputs.push(item.kind, item.key, message, item.duplicateCount, item.startsTurn);
+      // Preserve the content-replacement contract of the tool-card owner too.
+      inputs.push(message.content);
+      if (Array.isArray(message.content)) {
+        inputs.push(...message.content);
+      }
+    }
+    const cached = previousTurns.get(owner!);
+    const entry =
+      cached?.inputs.length === inputs.length &&
+      inputs.every((input, index) => input === cached.inputs[index])
+        ? cached
+        : { inputs, items: coalesceTurn(turn).map((item) => ({ ...item })) };
+    nextTurns.set(owner!, entry);
+    // Grouping annotates wrappers. Neither misses nor hits expose cache storage.
+    result.push(...entry.items.map((item) => ({ ...item })));
+  };
   let turn: ChatItem[] = [];
   for (const item of items) {
     if (chatItemStartsUserTurn(item) || item.kind === "divider") {
-      result.push(...coalesceTurn(turn), item);
+      appendTurn(turn);
+      result.push(item);
       turn = [];
     } else {
       turn.push(item);
     }
   }
-  result.push(...coalesceTurn(turn));
+  appendTurn(turn);
+  previousTurns = nextTurns;
   return result;
 }
